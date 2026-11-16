@@ -1,0 +1,464 @@
+name: release
+
+# Native releases. A `v*` tag (or a manual run) builds every platform:
+#   iOS      -> TestFlight (App Store Connect API key; Xcode makes the distribution cert/profile)
+#   Android  -> Play internal testing (AAB signed with the FamChat upload key)
+#   macOS    -> Developer ID signed, notarized and stapled DMG
+#   Windows  -> Inno Setup installer, signed with Azure Artifact Signing (checked Valid)
+#   Linux    -> AppImage
+# The desktop files go to a draft prerelease on GitHub; publish it by hand. Everything is also a
+# workflow artifact.
+#
+# Version: the tag (v1.2.3 -> 1.2.3), else pubspec.yaml. Build number: minutes since the Unix
+# epoch, so it only grows, whichever workflow or branch built it (Play and App Store Connect
+# refuse a build number they already have).
+#
+# Store uploads skip with a warning while the store listing doesn't exist yet: App Store Connect
+# needs the app record (created by hand), Play needs its first bundle uploaded by hand in Play
+# Console and the service account invited to the app. The signed files are artifacts either way.
+#
+# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY (.p8 text),
+# APPLE_TEAM_ID; CSC_LINK (Developer ID Application .p12, base64), CSC_KEY_PASSWORD;
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# (1Password: "FamChat Android upload keystore"), PLAY_SERVICE_ACCOUNT_JSON; AZURE_TENANT_ID,
+# AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (~/.claude/templates/windows-signing).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Comma-separated subset of ios,android,macos,windows,linux, or all"
+        default: all
+      store_upload:
+        description: Upload to TestFlight / Play internal testing
+        type: boolean
+        default: true
+      github_release:
+        description: Create a draft prerelease with the desktop files
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: dev.famchat.app
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.v.outputs.name }}
+      number: ${{ steps.v.outputs.number }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          pub="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' app/pubspec.yaml)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            name="${GITHUB_REF_NAME#v}"
+            [ "$name" = "$pub" ] || echo "::warning::Tag $GITHUB_REF_NAME doesn't match pubspec.yaml ($pub); using the tag."
+          else
+            name="$pub"
+          fi
+          [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version '$name' isn't x.y.z"; exit 1; }
+          number=$(( $(date +%s) / 60 ))
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "FamChat $name ($number)" >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    needs: version
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'ios')
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run: { working-directory: app }
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      NUMBER: ${{ needs.version.outputs.number }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+
+      - name: Write the App Store Connect key
+        env:
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          [ -n "$ASC_KEY" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$TEAM_ID" ] \
+            || { echo "::error::App Store Connect secrets aren't set."; exit 1; }
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
+          (umask 077; printf '%s' "$ASC_KEY" > "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8")
+
+      - name: Is there an App Store Connect app to upload to?
+        id: store
+        run: |
+          result="$(python3 ../scripts/store-check.py appstore "$BUNDLE_ID")"
+          echo "$result"
+          upload=false
+          if [ "$result" = exists ]; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "${{ inputs.store_upload }}" = true ]; then upload=true; fi
+          else
+            echo "::warning::No upload to TestFlight: $result. Create the app in App Store Connect (bundle id $BUNDLE_ID); the signed IPA is a workflow artifact."
+          fi
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+
+      - name: Build (Flutter, unsigned)
+        run: flutter build ios --release --no-codesign --build-name "$NAME" --build-number "$NUMBER"
+
+      # Archive unsigned and sign only at export (cloud-managed distribution signing), as in
+      # duel-binder: signing the archive made a new development certificate on every fresh runner.
+      - name: Archive
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGNING_ALLOWED=NO -quiet archive
+
+      - name: Sign and export
+        env:
+          DESTINATION: ${{ steps.store.outputs.upload == 'true' && 'upload' || 'export' }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>$DESTINATION</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          if [ "$DESTINATION" = upload ]; then
+            echo "Uploaded FamChat $NAME ($NUMBER) to App Store Connect; it shows in TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            mkdir -p ../dist && cp "$RUNNER_TEMP"/export/*.ipa "../dist/FamChat-$NAME-$NUMBER.ipa"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: steps.store.outputs.upload != 'true'
+        with: { name: ios-ipa, path: dist/, if-no-files-found: error }
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
+  android:
+    needs: version
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'android')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run: { working-directory: app }
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      NUMBER: ${{ needs.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+
+      - name: Build the signed app bundle
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          [ -n "$KEYSTORE" ] || { echo "::error::ANDROID_KEYSTORE_BASE64 isn't set."; exit 1; }
+          export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/upload.jks"
+          printf '%s' "$KEYSTORE" | base64 -d > "$ANDROID_KEYSTORE_FILE"
+          flutter build appbundle --release --build-name "$NAME" --build-number "$NUMBER"
+          rm -f "$ANDROID_KEYSTORE_FILE"
+          aab=build/app/outputs/bundle/release/app-release.aab
+          # Fail if Gradle fell back to the debug key.
+          keytool -printcert -jarfile "$aab" | tee "$RUNNER_TEMP/cert.txt" | grep -E 'Owner|SHA256'
+          if grep -q 'CN=Android Debug' "$RUNNER_TEMP/cert.txt"; then
+            echo "::error::The bundle is signed with the debug key."; exit 1
+          fi
+          mkdir -p ../dist && cp "$aab" "../dist/FamChat-$NAME-$NUMBER.aab"
+
+      - uses: actions/upload-artifact@v7
+        with: { name: android-aab, path: dist/, if-no-files-found: error }
+
+      - name: Is there a Play app to upload to?
+        id: store
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          result="$(python3 ../scripts/store-check.py play "$BUNDLE_ID")"
+          echo "$result"
+          upload=false
+          if [ "$result" = exists ]; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "${{ inputs.store_upload }}" = true ]; then upload=true; fi
+          else
+            echo "::warning::No upload to Play: $result. Upload the first bundle (the android-aab artifact) by hand in Play Console > Internal testing, and give the service account release access to the app."
+          fi
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+
+      - name: Send the bundle to Play internal testing
+        id: play
+        if: steps.store.outputs.upload == 'true'
+        continue-on-error: true
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.BUNDLE_ID }}
+          releaseFiles: dist/FamChat-${{ env.NAME }}-${{ env.NUMBER }}.aab
+          releaseName: ${{ env.NAME }} (${{ env.NUMBER }})
+          tracks: internal
+          status: completed
+
+      # Play only accepts draft releases until the app has been through its first review.
+      - name: Send the bundle to Play internal testing (as a draft)
+        if: steps.store.outputs.upload == 'true' && steps.play.outcome == 'failure'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.BUNDLE_ID }}
+          releaseFiles: dist/FamChat-${{ env.NAME }}-${{ env.NUMBER }}.aab
+          releaseName: ${{ env.NAME }} (${{ env.NUMBER }})
+          tracks: internal
+          status: draft
+
+  macos:
+    needs: version
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'macos')
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run: { working-directory: app }
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      NUMBER: ${{ needs.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+
+      - name: Build
+        run: flutter build macos --release --build-name "$NAME" --build-number "$NUMBER"
+
+      - name: Import the Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.CSC_LINK }}
+          p12-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          keychain: signing_temp
+
+      # Flutter's macOS template doesn't turn on the hardened runtime, which notarization needs,
+      # so sign here: nested code first, then the app with the release entitlements.
+      - name: Sign with Developer ID (hardened runtime)
+        run: |
+          identity="$(security find-identity -v -p codesigning signing_temp.keychain \
+            | awk '/Developer ID Application/ {print $2; exit}')"
+          [ -n "$identity" ] || { echo "::error::No Developer ID Application identity in the keychain."; exit 1; }
+          mkdir -p "$RUNNER_TEMP/dmg"
+          app="$RUNNER_TEMP/dmg/FamChat.app"
+          ditto build/macos/Build/Products/Release/famchat.app "$app"
+          sign() { codesign --force --timestamp --options runtime --keychain signing_temp.keychain --sign "$identity" "$@"; }
+          while IFS= read -r -d '' f; do sign "$f"; done \
+            < <(find "$app/Contents" \( -name '*.dylib' -o -name '*.so' \) -type f -print0)
+          for fw in "$app"/Contents/Frameworks/*.framework; do [ -e "$fw" ] && sign "$fw"; done
+          sign --entitlements macos/Runner/Release.entitlements "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Make the DMG
+        run: |
+          ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
+          mkdir -p ../dist
+          dmg="../dist/FamChat-$NAME-macos.dmg"
+          hdiutil create -volname FamChat -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "$dmg"
+          codesign --force --timestamp --keychain signing_temp.keychain --sign "$IDENTITY" "$dmg"
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+
+      - name: Notarize and staple
+        env:
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          (umask 077; printf '%s' "$ASC_KEY" > "$key")
+          auth=(--key "$key" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
+          xcrun notarytool submit "$DMG" "${auth[@]}" --wait --timeout 45m --output-format json \
+            | tee "$RUNNER_TEMP/notary.json"
+          status="$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json" 2>/dev/null || true)"
+          if [ "$status" != Accepted ]; then
+            id="$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json" 2>/dev/null || true)"
+            [ -n "$id" ] && xcrun notarytool log "$id" "${auth[@]}" || true
+            rm -f "$key"
+            echo "::error::Notarization status: ${status:-unknown}"; exit 1
+          fi
+          rm -f "$key"
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+      - uses: actions/upload-artifact@v7
+        with: { name: desktop-macos, path: dist/, if-no-files-found: error }
+
+      - name: Remove the keychain
+        if: always()
+        run: security delete-keychain signing_temp.keychain || true
+
+  windows:
+    needs: version
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run: { working-directory: app, shell: bash }
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      RELEASE_DIR: app/build/windows/x64/runner/Release
+    steps:
+      - name: Check the Windows signing secrets are set
+        working-directory: .
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          for v in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+            [ -n "${!v}" ] || { echo "::error::Secret $v is not set (run ~/.claude/templates/windows-signing/set-azure-signing-secrets.sh famchat)."; exit 1; }
+          done
+
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+
+      # No --build-number: Windows puts it in the file version, whose parts stop at 65535.
+      - name: Build
+        run: flutter build windows --release --build-name "$NAME"
+
+      - name: Sign the app's executables and DLLs
+        uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: darkharasho-signing
+          certificate-profile-name: public-trust
+          files-folder: ${{ env.RELEASE_DIR }}
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          description: FamChat
+          description-url: https://famchat.dev
+
+      # Flutter apps need the MSVC runtime; ship Microsoft's own signed copies so the app starts
+      # on machines without the VC++ redistributable. Copied after signing to keep their signatures.
+      - name: Add the MSVC runtime
+        run: cp /c/Windows/System32/{msvcp140,vcruntime140,vcruntime140_1}.dll build/windows/x64/runner/Release/
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y | Out-Null
+          }
+          & $iscc /Qp "/DAppVersion=$env:NAME" windows\installer\famchat.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sign the installer
+        uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: darkharasho-signing
+          certificate-profile-name: public-trust
+          files-folder: app/build/windows/installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          description: FamChat Setup
+          description-url: https://famchat.dev
+
+      - name: Verify the installer and app are signed
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem build\windows\installer -Filter *-setup.exe) + @(Get-Item build\windows\x64\runner\Release\famchat.exe)
+          if ($files.Count -lt 2) { Write-Error "Installer or famchat.exe missing"; exit 1 }
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($sig.Status) - $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { Write-Error "$($f.Name) is not validly signed"; exit 1 }
+          }
+          New-Item -ItemType Directory -Force ..\dist | Out-Null
+          Copy-Item build\windows\installer\*-setup.exe ..\dist\
+
+      - uses: actions/upload-artifact@v7
+        with: { name: desktop-windows, path: dist/, if-no-files-found: error }
+
+  linux:
+    needs: version
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'linux')
+    # The oldest supported image, so the AppImage runs on older glibc.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    defaults:
+      run: { working-directory: app }
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      NUMBER: ${{ needs.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
+      - name: Build
+        run: flutter build linux --release --build-name "$NAME" --build-number "$NUMBER"
+      - name: Make the AppImage
+        run: linux/packaging/build-appimage.sh "$NAME" ../dist
+      - uses: actions/upload-artifact@v7
+        with: { name: desktop-linux, path: dist/, if-no-files-found: error }
+
+  github-release:
+    needs: [version, macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.github_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      NAME: ${{ needs.version.outputs.name }}
+      NUMBER: ${{ needs.version.outputs.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with: { pattern: desktop-*, path: dist, merge-multiple: true }
+      - name: Create the draft prerelease
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$NAME-build.$NUMBER"; fi
+          ls -l dist
+          gh release create "$tag" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --draft --prerelease --title "FamChat $NAME" --generate-notes

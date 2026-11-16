@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FamChat
+Comment=Private family messenger
+Exec=famchat %U
+Icon=dev.famchat.app
+Categories=Network;InstantMessaging;Chat;
+StartupWMClass=dev.famchat.app
+Terminal=false
