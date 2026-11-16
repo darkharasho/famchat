@@ -12,16 +12,16 @@ import 'directory.dart';
 import 'wire.dart';
 
 class ChatKeys {
-  ChatKeys({required ChatDb db, required ChatApi api, required Directory directory, required LocalIdentity me})
-      : _db = db,
-        _api = api,
-        _dir = directory,
-        _me = me;
+  ChatKeys({required this.db, required this.api, required this.directory, required this.me});
 
-  final ChatDb _db;
-  final ChatApi _api;
-  final Directory _dir;
-  final LocalIdentity _me;
+  final ChatDb db;
+  final ChatApi api;
+  final Directory directory;
+  final LocalIdentity me;
+  ChatDb get _db => db;
+  ChatApi get _api => api;
+  Directory get _dir => directory;
+  LocalIdentity get _me => me;
   final _ensuring = <String, Future<bool>>{};
 
   Future<Uint8List?> key(String chatId, int epoch) => _db.key(chatId, epoch);
