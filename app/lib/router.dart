@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'screens/devices_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/chats/chats_shell.dart';
+import 'screens/chats/new_chat_screen.dart';
 import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
@@ -33,7 +34,17 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/loading', builder: (context, state) => const LoadingScreen()),
       GoRoute(path: '/join', builder: (context, state) => const JoinScreen()),
-      GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+      GoRoute(path: '/', builder: (context, state) => const ChatsShell()),
+      GoRoute(
+        path: '/chats/:id',
+        builder: (context, state) => ChatsShell(chatId: state.pathParameters['id']),
+      ),
+      GoRoute(
+        path: '/new',
+        builder: (context, state) => NewChatScreen(
+          preselected: [...?state.uri.queryParameters['with']?.split(',').where((s) => s.isNotEmpty)],
+        ),
+      ),
       GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),

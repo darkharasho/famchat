@@ -151,6 +151,13 @@ class ChatDb extends _$ChatDb {
         await into(meta).insert(MetaRow(key: 'deviceId', value: deviceId));
       });
 
+  /// Deletes everything (sign-out).
+  Future<void> wipe() => transaction(() async {
+        for (final t in allTables) {
+          await delete(t).go();
+        }
+      });
+
   // --- chats ---
 
   /// Inserts or updates a chat from the server and replaces its member list; keeps local sync state.

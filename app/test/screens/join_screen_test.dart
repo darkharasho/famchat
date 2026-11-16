@@ -28,7 +28,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('invite-field')), '  https://famchat.dev/join#$token\n');
     await tester.enterText(find.byKey(const Key('device-name-field')), 'Kitchen tablet');
     await tapJoin(tester);
-    expect(find.text('Chats coming soon'), findsOneWidget);
+    expect(find.text('No chats yet'), findsOneWidget);
     expect(server.devices.values.single.name, 'Kitchen tablet');
     expect(kv.values, isNotEmpty);
   });
@@ -73,7 +73,7 @@ void main() {
     await tapJoin(tester);
     expect(find.text("Couldn't reach FamChat. Check your connection and try again."), findsOneWidget);
     await tapJoin(tester);
-    expect(find.text('Chats coming soon'), findsOneWidget);
+    expect(find.text('No chats yet'), findsOneWidget);
     expect(server.devices, hasLength(1));
   });
 
@@ -83,7 +83,7 @@ void main() {
     expect(find.text('Joining with the invite link you opened.'), findsOneWidget);
     expect(find.byKey(const Key('invite-field')), findsNothing);
     await tapJoin(tester);
-    expect(find.text('Chats coming soon'), findsOneWidget);
+    expect(find.text('No chats yet'), findsOneWidget);
   });
 
   testWidgets('storage failure shows the explanation and retry', (tester) async {
