@@ -87,9 +87,11 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 ### Auth and devices (plans 1 and 4)
 - `POST /auth/invite/redeem`, `POST /auth/refresh`, `GET /me`, `GET /devices`, `POST /admin/invites`,
   `POST /admin/bootstrap`. Redeeming a reset link also needs `resetClaimSig` ("Account resets").
-- `GET /me` → `{userId, deviceId, name, isAdmin, recoveryCodeSet}`; `recoveryCodeSet` says an admin
-  recovery key is registered.
-- Admin routes check `users.is_admin` in the database, so a promotion counts at once.
+- `GET /me` → `{userId, deviceId, name, isAdmin, recoveryCodeSet, reviewer}`; `recoveryCodeSet` says an
+  admin recovery key is registered; `reviewer` marks a reviewer account ("Reviewer accounts").
+  Redeeming answers `{userId, deviceId, isAdmin, reviewer, accessToken, refreshToken}`.
+- Admin routes check `users.is_admin` in the database, so a promotion counts at once. Reviewer
+  accounts get 403 from every admin route.
 - `DELETE /devices/:id` → 204 (your own live device, else 404). Closes that device's WebSocket (code
   4001) and, in the same transaction, moves **every chat of your user** to `currentEpoch + 1` with
   `epochReady: false`; members get `chat {chatId}` per chat and `device {userId, deviceId, revoked: true}`.
@@ -213,10 +215,40 @@ What happens, atomically:
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
 
 Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,
-`media_expired {chatId, keys}` for their media, and everyone gets `account_deleted {userId}`.
+`media_expired {chatId, keys}` for their media, and everyone (on the same side: family or reviewers) gets `account_deleted {userId}`.
 Messages are end-to-end encrypted, so the server can't reach copies other members' devices already
 downloaded and decrypted; those stay on those devices until deleted there. A deleted user can't be
 reset, promoted, or added to a chat; their account can't be restored.
+
+### Reviewer accounts
+App-store review needs sign-in details for an app nobody can sign up to. Reviewers get accounts of
+their own, walled off from the family in both directions (`users.reviewer = 1`).
+
+- `POST /admin/reviewer-invite` (admin) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
+  `<origin>/join#review.<token>`; the `review.` marker (never sent to the server) tells the app to ask
+  the joiner for a display name. Reusable: any number of redemptions, no expiry. At most one is
+  active: creating one revokes the previous one. The server keeps its raw token so admins can show
+  the link again. It also stops working if the admin who made it is deleted.
+- `DELETE /admin/reviewer-invite` (admin) → 204: revokes it (redeeming → `410 invite_invalid`).
+  Reviewer accounts already made stay until removed with `DELETE /admin/users/:id`.
+- `GET /admin/reviewers` (admin) → `{invite: {inviteUrl, createdAt} | null, users: [{id, name,
+  createdAt, devices}]}`: the active invite and the live reviewer accounts (`devices`: live count).
+- Redeeming it: `POST /auth/invite/redeem` with `name` (1–40) as well → a new reviewer account each
+  time (`reviewer: true`, never admin). A retry with the same keys within 10 minutes returns the same
+  account. `name` is ignored for other invites.
+
+Isolation, enforced by the server:
+- `GET /users` lists only users on the caller's side: the family sees no reviewers; a reviewer sees
+  only reviewer accounts (themselves included), with their devices and resets.
+- `POST /chats` and `POST /chats/:id/members` accept only users on the caller's side (else 400).
+- Presence (`hello`, `presence`), `account_deleted` and `reset` go only to the same side; chat events
+  follow chat membership, which never mixes the two.
+- Reviewers can't be promoted or reset (404); they don't count as family for the last-admin rule or
+  for `POST /admin/bootstrap`.
+- All reviewer accounts together may hold at most 256 MiB of live media (`413 too_large`), so their
+  uploads can never push the family's media over the cap and evict family photos.
+- A lone reviewer tries the app in a group with only themselves (`userIds: []`, "Note to self"),
+  which the new-chat screen offers when there is nobody else to pick.
 
 ### Account resets (plan 10)
 An admin resets a user who lost every device. The admin can't read their messages: the new device
@@ -291,7 +323,7 @@ writes an `events` row (audit log; not exposed by the API yet).
 - `POST /chats` → `201 {chat, created: true}` or `200 {chat, created: false}`.
   - Direct: `{id, kind: "direct", userId, wraps}`. At most one per pair: if it exists, you get it back
     (your wraps are ignored).
-  - Group: `{id, kind: "group", title (1–60), userIds (others, ≥1), wraps}`.
+  - Group: `{id, kind: "group", title (1–60), userIds (others, 0–100; none = a chat with only yourself), wraps}`.
   - `wraps`: epoch 1, exactly one per live device of every member (you included), all with
     `wrapperDeviceId` = your device. Re-posting an id you created returns it.
 - `POST /chats/:id/members {userIds, wraps}` → `{chat}`. Groups only. Wraps for the **current** epoch
@@ -372,8 +404,8 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
-| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone): `GET /users` and check it |
-| `{type:"account_deleted", userId}` | that account was deleted (to everyone): `GET /users` ("Deleting an account") |
+| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone on that side, see "Reviewer accounts"): `GET /users` and check it |
+| `{type:"account_deleted", userId}` | that account was deleted (to everyone on that side): `GET /users` ("Deleting an account") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 
