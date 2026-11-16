@@ -8,6 +8,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_voice.dart';
 
+/// Stands in for the signed-in session: bumping it is a sign-out/in.
+final _session = NotifierProvider<_Session, int>(_Session.new);
+
+class _Session extends Notifier<int> {
+  @override
+  int build() => 0;
+  void bump() => state++;
+}
+
 Future<Uint8List?> Function() bytes(int n) => () async => Uint8List.fromList([n, n, n]);
 
 void main() {
@@ -23,6 +32,7 @@ void main() {
         made++;
         return player;
       }),
+      voiceScopeProvider.overrideWith((ref) => ref.watch(_session)),
     ]);
   });
   tearDown(() => c.dispose());
@@ -138,7 +148,7 @@ void main() {
     expect(player.log.where((l) => l.startsWith('load')), ['load B']);
   });
 
-  test('dispose is time-boxed', () async {
+  test('disposing the container disposes the player without waiting on a hung dispose', () async {
     player.hangDispose = true;
     await pb().toggle('A', bytes(1));
     final sw = Stopwatch()..start();
@@ -147,5 +157,89 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(player.disposed, isTrue);
     expect(sw.elapsed, lessThan(const Duration(seconds: 1)));
+  });
+
+  test('seeking while the clip loads does not load it again', () async {
+    final gate = Completer<Uint8List?>();
+    var loads = 0;
+    Future<Uint8List?> slow() {
+      loads++;
+      return gate.future;
+    }
+
+    final first = pb().seek('A', 0.1, slow);
+    await flush();
+    for (final f in [0.2, 0.3, 0.5]) {
+      unawaited(pb().seek('A', f, slow));
+    }
+    await flush();
+    gate.complete(Uint8List(3));
+    await first;
+    await flush();
+    expect(loads, 1);
+    expect(player.log, ['load A', 'seek 2000']);
+    expect(st().position, const Duration(seconds: 2));
+    expect(st().playing, isFalse);
+  });
+
+  test('play then seek while loading plays from the seek point', () async {
+    final gate = Completer<Uint8List?>();
+    final first = pb().toggle('A', () => gate.future);
+    await flush();
+    unawaited(pb().seek('A', 0.5, bytes(1)));
+    await flush();
+    gate.complete(Uint8List(3));
+    await first;
+    await flush();
+    expect(player.log, ['load A', 'seek 2000', 'play A']);
+    expect(st().playing, isTrue);
+  });
+
+  test('tapping play again while loading cancels the play', () async {
+    final gate = Completer<Uint8List?>();
+    final first = pb().toggle('A', () => gate.future);
+    await flush();
+    unawaited(pb().toggle('A', bytes(1)));
+    await flush();
+    gate.complete(Uint8List(3));
+    await first;
+    await flush();
+    expect(player.log, ['load A']);
+    expect(st().playing, isFalse);
+    expect(st().messageId, 'A');
+  });
+
+  test('a playback error shows on the clip and stops it', () async {
+    await pb().toggle('A', bytes(1));
+    await flush();
+    player.fail(StateError('decoder'));
+    await flush();
+    expect(st().error, isNotNull);
+    expect(st().playing, isFalse);
+  });
+
+  test('a play that throws shows the error', () async {
+    player.failPlay = true;
+    await pb().toggle('A', bytes(1));
+    await flush();
+    expect(st().error, isNotNull);
+    expect(st().playing, isFalse);
+  });
+
+  test('signing out disposes the player and forgets the clip', () async {
+    await pb().toggle('A', bytes(1));
+    await flush();
+    c.read(_session.notifier).bump();
+    await flush();
+    expect(st().messageId, isNull);
+    expect(player.disposed, isTrue);
+  });
+
+  test('stop after the notifier is gone does not throw', () async {
+    await pb().toggle('A', bytes(1));
+    final old = pb();
+    c.read(_session.notifier).bump();
+    c.read(voicePlaybackProvider); // rebuilt
+    await old.stop();
   });
 }

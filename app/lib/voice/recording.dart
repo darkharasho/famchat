@@ -13,6 +13,9 @@ enum RecordingStatus {
   starting,
   recording,
 
+  /// Finishing: the recorder is writing out the clip and still holds the microphone.
+  stopping,
+
   /// The last start was refused the microphone.
   denied,
 
@@ -50,7 +53,8 @@ class VoiceRecording extends ChangeNotifier {
   /// Every level (0..1) of the current recording, oldest first.
   List<double> get levels => List.unmodifiable(_levels);
 
-  bool get active => _status == RecordingStatus.starting || _status == RecordingStatus.recording;
+  bool get active =>
+      _status == RecordingStatus.starting || _status == RecordingStatus.recording || _status == RecordingStatus.stopping;
 
   void _set(RecordingStatus s) {
     _status = s;
@@ -128,13 +132,14 @@ class VoiceRecording extends ChangeNotifier {
     _stopClock();
     _sw = null;
     _rec = null;
-    _set(RecordingStatus.idle);
+    _set(RecordingStatus.stopping);
     try {
       final bytes = await rec.stop();
       if (bytes == null || bytes.isEmpty || duration <= Duration.zero) {
         _set(RecordingStatus.failed);
         return null;
       }
+      _set(RecordingStatus.idle);
       return RecordedVoice(bytes: bytes, duration: duration, waveform: waveform);
     } catch (_) {
       _set(RecordingStatus.failed);
@@ -146,6 +151,7 @@ class VoiceRecording extends ChangeNotifier {
 
   /// Stops and discards (also while starting).
   Future<void> cancel() async {
+    if (_status == RecordingStatus.stopping) return; // the clip is already on its way
     final rec = _rec;
     final wasRecording = _status == RecordingStatus.recording;
     _session++;

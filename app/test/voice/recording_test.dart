@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:famchat/voice/recording.dart';
 import 'package:famchat/voice/waveform.dart';
 import 'package:fake_async/fake_async.dart';
@@ -136,15 +138,61 @@ void main() {
     });
   });
 
-  test('cancel while starting stops the recorder once it starts', () {
+  test('cancel before permission answers never starts the recorder', () {
     fakeAsync((async) {
       final r = VoiceRecording(recorders.call);
       r.start();
       r.cancel();
       async.flushMicrotasks();
       expect(r.status, RecordingStatus.idle);
-      expect(recorders.last.calls.last, 'dispose');
-      expect(recorders.last.calls, isNot(contains('stop')));
+      expect(recorders.last.calls, ['permission', 'dispose']);
+      r.dispose();
+    });
+  });
+
+  test('cancel while the recorder is starting cancels it once it has started', () {
+    fakeAsync((async) {
+      final rec = FakeVoiceRecorder()..startGate = Completer<void>();
+      final r = VoiceRecording(() => rec);
+      r.start();
+      async.flushMicrotasks();
+      expect(rec.calls, ['permission', 'start']);
+      expect(r.status, RecordingStatus.starting);
+      r.cancel();
+      async.flushMicrotasks();
+      expect(r.status, RecordingStatus.idle);
+      rec.startGate!.complete();
+      async.flushMicrotasks();
+      expect(rec.calls, ['permission', 'start', 'cancel', 'dispose']);
+      expect(r.status, RecordingStatus.idle);
+      r.dispose();
+    });
+  });
+
+  test('finishing stays active until the recorder has stopped', () {
+    fakeAsync((async) {
+      final rec = FakeVoiceRecorder()..stopGate = Completer<void>();
+      var made = 0;
+      final r = VoiceRecording(() {
+        made++;
+        return rec;
+      });
+      r.start();
+      async.flushMicrotasks();
+      async.elapse(const Duration(seconds: 1));
+      RecordedVoice? out;
+      r.finish().then((v) => out = v);
+      async.flushMicrotasks();
+      expect(r.status, RecordingStatus.stopping);
+      expect(r.active, isTrue);
+      r.start(); // ignored: the microphone is still busy
+      r.cancel(); // ignored: the clip is on its way
+      async.flushMicrotasks();
+      expect(made, 1);
+      rec.stopGate!.complete();
+      async.flushMicrotasks();
+      expect(out, isNotNull);
+      expect(r.status, RecordingStatus.idle);
       r.dispose();
     });
   });

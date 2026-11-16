@@ -11,6 +11,9 @@ class FakeVoiceRecorder implements VoiceRecorder {
 
   bool isSupported, granted, failStart;
   Uint8List? output;
+
+  /// When set, start/stop wait for it (a slow native recorder).
+  Completer<void>? startGate, stopGate;
   final _levels = StreamController<double>.broadcast();
   final calls = <String>[];
   bool get recording => calls.isNotEmpty && calls.last == 'start';
@@ -29,6 +32,7 @@ class FakeVoiceRecorder implements VoiceRecorder {
   Future<void> start() async {
     if (failStart) throw StateError('no input device');
     calls.add('start');
+    if (startGate != null) await startGate!.future;
   }
 
   @override
@@ -36,6 +40,7 @@ class FakeVoiceRecorder implements VoiceRecorder {
   @override
   Future<Uint8List?> stop() async {
     calls.add('stop');
+    if (stopGate != null) await stopGate!.future;
     return output;
   }
 
@@ -49,11 +54,12 @@ class FakeVoiceRecorder implements VoiceRecorder {
 class FakeRecorders {
   FakeRecorders({this.supported = true, this.granted = true});
   bool supported, granted;
+  Completer<void>? stopGate;
   final made = <FakeVoiceRecorder>[];
   FakeVoiceRecorder get last => made.last;
 
   VoiceRecorder call() {
-    final r = FakeVoiceRecorder(isSupported: supported, granted: granted);
+    final r = FakeVoiceRecorder(isSupported: supported, granted: granted)..stopGate = stopGate;
     made.add(r);
     return r;
   }
@@ -64,6 +70,7 @@ class FakeVoicePlayer implements VoicePlayer {
   FakeVoicePlayer({this.duration = const Duration(seconds: 4), this.hangDispose = false});
   Duration? duration;
   bool hangDispose;
+  bool failPlay = false;
   final log = <String>[];
   final loaded = <String, Uint8List>{};
   String? current;
@@ -72,6 +79,12 @@ class FakeVoicePlayer implements VoicePlayer {
   final _position = StreamController<Duration>.broadcast();
   final _playing = StreamController<bool>.broadcast();
   final _completed = StreamController<void>.broadcast();
+  final _errors = StreamController<Object>.broadcast();
+
+  void fail(Object e) {
+    isPlaying = false;
+    _errors.add(e);
+  }
 
   void moveTo(Duration d) => _position.add(d);
   void complete() {
@@ -90,6 +103,7 @@ class FakeVoicePlayer implements VoicePlayer {
 
   @override
   Future<void> play() async {
+    if (failPlay) throw StateError('no output device');
     log.add('play $current');
     isPlaying = true;
     _playing.add(true);
@@ -114,6 +128,8 @@ class FakeVoicePlayer implements VoicePlayer {
   Stream<bool> get playing => _playing.stream;
   @override
   Stream<void> get completed => _completed.stream;
+  @override
+  Stream<Object> get errors => _errors.stream;
 
   @override
   Future<void> dispose() {

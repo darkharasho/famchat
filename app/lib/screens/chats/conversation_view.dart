@@ -10,6 +10,7 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../media/photo.dart';
+import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
@@ -34,6 +35,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   final _text = TextEditingController();
   final _focus = FocusNode();
   late final VoiceRecording _recording;
+  late final ProviderContainer _container;
+
+  /// Where a recording goes, fixed when it starts: the clip still sends if the user leaves the chat
+  /// while the recorder is finishing (when `ref` can no longer be used).
+  MediaService? _voiceTarget;
   bool _empty = true;
   RecordingStatus _recStatus = RecordingStatus.idle;
 
@@ -41,6 +47,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   void initState() {
     super.initState();
     _recording = VoiceRecording(ref.read(voiceRecorderFactoryProvider), onAutoStop: _sendVoice);
+    _container = ProviderScope.containerOf(context, listen: false);
     _recording.addListener(() {
       if (_recording.status != _recStatus && mounted) setState(() => _recStatus = _recording.status);
     });
@@ -52,7 +59,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   @override
   void dispose() {
-    _recording.dispose(); // discards an unsent recording
+    _recording.dispose(); // discards an unsent recording (one being finished still sends)
+    // No voice keeps playing without its bubble on screen (after this frame: providers cannot change
+    // while the tree is building).
+    final container = _container;
+    unawaited(Future(() async {
+      try {
+        await container.read(voicePlaybackProvider.notifier).stop();
+      } on StateError {
+        // the whole app went away
+      }
+    }));
     _text.dispose();
     _focus.dispose();
     super.dispose();
@@ -60,6 +77,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _startRecording() async {
     unawaited(ref.read(voicePlaybackProvider.notifier).stop());
+    _voiceTarget = ref.read(mediaServiceProvider);
     await _recording.start();
     switch (_recording.status) {
       case RecordingStatus.denied:
@@ -81,12 +99,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 
   Future<void> _sendVoice(RecordedVoice clip) async {
-    final media = ref.read(mediaServiceProvider);
-    if (media == null) return;
+    final media = _voiceTarget;
+    if (media == null) {
+      _snack("Couldn't send that voice message.");
+      return;
+    }
     try {
       await media.sendVoice(widget.chatId, clip);
     } on ArgumentError {
       _snack("That voice message can't be sent.");
+    } catch (_) {
+      _snack("Couldn't send that voice message.");
     }
   }
 

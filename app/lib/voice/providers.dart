@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../audio_init.dart';
+import '../media/providers.dart';
 import 'playback.dart';
 import 'voice_player.dart';
 import 'voice_recorder.dart';
@@ -25,5 +26,9 @@ final voiceRecordingSupportedProvider = FutureProvider<bool>((ref) async {
     unawaited(disposeWithin(rec.dispose));
   }
 });
+
+/// What playback is scoped to: the signed-in media service (null when signed out). A change disposes
+/// the player and deletes its decrypted temp file.
+final voiceScopeProvider = Provider<Object?>((ref) => ref.watch(mediaServiceProvider));
 
 final voicePlaybackProvider = NotifierProvider<VoicePlayback, PlaybackState>(VoicePlayback.new);

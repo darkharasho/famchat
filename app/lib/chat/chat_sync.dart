@@ -90,6 +90,7 @@ class ChatSync {
   Future<void> start() async {
     db.myUserId = me.userId;
     await db.bindDevice(me.deviceId);
+    unawaited(_enqueue(_reclassifyUnknown));
     _subs.add(hub.events.listen((e) => _enqueue(() => _onEvent(e))));
     _subs.add(hub.connection.listen((up) {
       if (up) {
@@ -288,6 +289,11 @@ class ChatSync {
     } on FormatException {
       return base;
     }
+    return _classify(base, p);
+  }
+
+  /// [base] stored as plaintext [p]'s kind.
+  static MessageRow _classify(MessageRow base, Plaintext p) {
     final body = jsonEncode(p.toJson());
     return switch (p) {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
@@ -296,6 +302,23 @@ class ChatSync {
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
+  }
+
+  /// Messages an older version stored as `unknown` (their whole body is kept): once this version
+  /// knows the kind they show as it (or as invalid when their fields don't check out).
+  Future<void> _reclassifyUnknown() async {
+    for (final r in await db.unknownKind()) {
+      final body = r.body;
+      if (body == null) continue;
+      final Plaintext p;
+      try {
+        p = Plaintext.decode(utf8.encode(body));
+      } on FormatException {
+        await db.replaceMessage(r.copyWith(kind: 'invalid', body: const Value(null), targetId: const Value(null)));
+        continue;
+      }
+      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p));
+    }
   }
 
   Future<void> _retryUndecryptable() async {

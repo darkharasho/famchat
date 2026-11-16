@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -156,6 +157,45 @@ void main() {
     expect(find.byKey(const Key('composer')), findsOneWidget);
   });
 
+  chatTestWidgets('sending then leaving the chat at once still sends the clip', (tester) async {
+    recorders.stopGate = Completer<void>();
+    await open(tester);
+    await tester.tap(find.byTooltip('Record voice message'));
+    await pumpFor(tester, const Duration(seconds: 2));
+    await tester.tap(find.byTooltip('Send voice message'));
+    await tester.pump();
+    go(tester, '/');
+    await settle(tester);
+    recorders.stopGate!.complete();
+    await settle(tester);
+    final out = await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId));
+    expect(out.single.kind, 'voice');
+  });
+
+  chatTestWidgets('a voice message that fails to send says so', (tester) async {
+    recorders.made.clear();
+    await open(tester);
+    await tester.tap(find.byTooltip('Record voice message'));
+    await pumpFor(tester, const Duration(seconds: 1));
+    recorders.last.output = Uint8List(9 * 1024 * 1024); // over the 8 MiB voice cap
+    await tester.tap(find.byTooltip('Send voice message'));
+    await settle(tester);
+    expect(find.text("That voice message can't be sent."), findsOneWidget);
+  });
+
+  chatTestWidgets('leaving the chat stops playback', (tester) async {
+    final (_, chatId) = await open(tester);
+    final (_, id) = await bobsVoice(tester, chatId);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Play voice message'));
+    await settle(tester);
+    expect(player.isPlaying, isTrue);
+    go(tester, '/');
+    await settle(tester);
+    await settle(tester); // the stop is queued after the frame that disposed the view
+    expect(player.log.last, 'pause $id');
+  });
+
   chatTestWidgets('leaving the chat while recording discards it', (tester) async {
     await open(tester);
     await tester.tap(find.byTooltip('Record voice message'));
@@ -222,13 +262,16 @@ void main() {
   });
 
   chatTestWidgets('voice messages can be reacted to', (tester) async {
-    final (hub, chatId) = await open(tester);
-    hub.setConnected(true);
-    await bobsVoice(tester, chatId);
+    final (_, chatId) = await open(tester);
+    final (_, id) = await bobsVoice(tester, chatId);
     await settle(tester);
     await tester.longPress(find.byType(VoiceBubble));
     await settle(tester);
-    expect(find.text('👍'), findsOneWidget);
+    await tester.tap(find.text('👍'));
+    await settle(tester);
+    final reaction = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    expect((reaction.kind, reaction.targetId), ('reaction', id));
+    expect(find.text('👍 1'), findsOneWidget);
   });
 
   chatTestWidgets('chat list previews a voice message', (tester) async {

@@ -12,3 +12,6 @@ Future<Uint8List> takeRecording(String url) => XFile(url).readAsBytes();
 Future<Uri> playableUri(String id, Uint8List bytes) async => Uri.dataFromBytes(bytes, mimeType: 'audio/mp4');
 
 Future<void> releasePlayable(Uri uri) async {}
+
+/// Nothing is written to disk on the web.
+Future<void> sweepVoiceFiles() async {}
