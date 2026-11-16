@@ -1,6 +1,8 @@
 // The pairing code a new device shows (docs/protocol.md "Pairing a new device"): a 4-character
 // lookup code from the server and a 12-character secret that never leaves the two devices,
 // typed as XXXX-XXXX-XXXX-XXXX or scanned from a QR that also carries the ephemeral public key.
+// In reverse pairing a signed-in device shows the same kind of code (its offer's lookup code and a
+// secret) in a `famchat-link` QR, and the new device scans or types it.
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -75,3 +77,23 @@ class PairQr {
   final code = PairCode.parse(input);
   return code == null ? null : (code: code, ephPub: null);
 }
+
+/// What a signed-in device's QR holds for reverse pairing: `famchat-link:1:<16-char code>`.
+class LinkQr {
+  const LinkQr(this.code);
+  final PairCode code;
+
+  static const prefix = 'famchat-link:1:';
+
+  String encode() => '$prefix${code.compact}';
+
+  static LinkQr? parse(String text) {
+    final t = text.trim();
+    if (!t.startsWith(prefix)) return null;
+    final rest = t.substring(prefix.length);
+    return _compact.hasMatch(rest) ? LinkQr(PairCode.parse(rest)!) : null;
+  }
+}
+
+/// On a new device: a scanned link QR or a typed code, or null.
+PairCode? parseLinkInput(String input) => LinkQr.parse(input)?.code ?? PairCode.parse(input);

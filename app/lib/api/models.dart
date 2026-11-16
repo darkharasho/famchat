@@ -124,6 +124,34 @@ class PairSessionInfo {
   final String lookup, deviceId, ephPub, encPub, signPub, keysMac, deviceName, platform;
 }
 
+/// `POST /devices/pair/offer`: an offer a new device can take (reverse pairing).
+class PairOffer {
+  const PairOffer({required this.offerId, required this.lookup, required this.expiresIn});
+  final String offerId, lookup;
+  final Duration expiresIn;
+}
+
+/// `GET /devices/pair/offer/:id`.
+sealed class PairOfferStatus {
+  const PairOfferStatus();
+}
+
+/// No device has taken the offer yet.
+class OfferWaiting extends PairOfferStatus {
+  const OfferWaiting();
+}
+
+/// A new device took the offer; [session] is unverified until the MAC checks.
+class OfferTaken extends PairOfferStatus {
+  const OfferTaken(this.session);
+  final PairSessionInfo session;
+}
+
+/// Already approved.
+class OfferApproved extends PairOfferStatus {
+  const OfferApproved();
+}
+
 class Invite {
   const Invite({required this.inviteToken, required this.inviteUrl, required this.expiresAt});
   final String inviteToken, inviteUrl;

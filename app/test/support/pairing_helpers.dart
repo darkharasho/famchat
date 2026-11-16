@@ -71,12 +71,14 @@ class StartedPairing {
   String get qr => PairQr(code, ephPub).encode();
 }
 
-Future<StartedPairing> startPairing(FakeServer server, {String deviceName = 'Laptop', String platform = 'linux'}) async {
+/// With [offer] (reverse pairing) the session takes that offer and MACs with its secret.
+Future<StartedPairing> startPairing(FakeServer server,
+    {String deviceName = 'Laptop', String platform = 'linux', PairCode? offer}) async {
   final api = ApiClient(client: server.client, base: testBase);
   final eph = await X25519().newKeyPair();
   final ephPub = await publicKeyOf(eph);
   final keys = await DeviceKeys.generate();
-  final secret = newPairSecret();
+  final secret = offer?.secret ?? newPairSecret();
   final encPub = await keys.encPub(), signPub = await keys.signPub();
   final s = await api.pairStart(
     ephPub: b64url(ephPub),
@@ -86,6 +88,7 @@ Future<StartedPairing> startPairing(FakeServer server, {String deviceName = 'Lap
         secret: secret, ephPub: ephPub, encPub: encPub, signPub: signPub, deviceName: deviceName, platform: platform)),
     deviceName: deviceName,
     platform: platform,
+    offer: offer?.lookup,
   );
   return StartedPairing(s, PairCode(s.lookup, secret), eph, ephPub, keys);
 }

@@ -59,4 +59,29 @@ void main() {
     expect(typed.ephPub, isNull);
     expect(parsePairInput('nope'), isNull);
   });
+
+  test('link QR (reverse pairing) round-trips', () {
+    final qr = LinkQr(code).encode();
+    expect(qr, 'famchat-link:1:7K2MABCDEFGH0123');
+    expect(LinkQr.parse(' $qr\n')!.code.compact, code.compact);
+  });
+
+  test('link QR garbage is rejected', () {
+    for (final s in [
+      '',
+      'famchat-link:2:7K2MABCDEFGH0123',
+      'famchat-link:1:short',
+      'famchat-link:1:7K2MABCDEFGH0123:extra',
+      PairQr(code, Uint8List(32)).encode(),
+    ]) {
+      expect(LinkQr.parse(s), isNull, reason: s);
+    }
+  });
+
+  test('link input takes a link QR or a typed code, not a new device\'s QR', () {
+    expect(parseLinkInput(LinkQr(code).encode())!.compact, code.compact);
+    expect(parseLinkInput('7k2m abcd efgh 0123')!.compact, code.compact);
+    expect(parseLinkInput(PairQr(code, Uint8List(32)).encode()), isNull);
+    expect(parseLinkInput('nope'), isNull);
+  });
 }

@@ -7,6 +7,7 @@ import 'package:famchat/pairing/pair_code.dart';
 import 'package:famchat/pairing/pairing_providers.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -28,8 +29,8 @@ void main() {
 
   final fastPoll = [pairPollEveryProvider.overrideWithValue(const Duration(milliseconds: 50))];
 
-  Future<void> openPair(WidgetTester tester) async {
-    await pumpApp(tester, server: server, kv: kv, extra: fastPoll);
+  Future<void> openPair(WidgetTester tester, {List<Override> extra = const []}) async {
+    await pumpApp(tester, server: server, kv: kv, extra: [...fastPoll, ...extra]);
     await tester.tap(find.byKey(const Key('pair-link')));
     await tester.pumpAndSettle();
   }
@@ -99,6 +100,91 @@ void main() {
     await tapCancel(tester);
     expect(find.text('Join FamChat'), findsOneWidget);
     expect(server.pairSessionByCode(code.lookup)!.cancelledAt, isNotNull);
+  });
+
+  group('a code from the other device (reverse pairing)', () {
+    /// An offer from a signed-in device; returns the code that device would show.
+    Future<PairCode> offer(WidgetTester tester) async {
+      final alice = (await tester.runAsync(() => signedInClient(server)))!;
+      final o = (await tester.runAsync(alice.api.pairOffer))!;
+      return PairCode(o.lookup, newPairSecret());
+    }
+
+    Future<void> openEnter(WidgetTester tester, {List<Override> extra = const [], String name = 'New phone'}) async {
+      await openPair(tester, extra: extra.isEmpty ? [qrScannerProvider.overrideWithValue(null)] : extra);
+      await tester.enterText(find.byKey(const Key('pair-device-name')), name);
+      await tester.tap(find.byKey(const Key('pair-scan-start')));
+      await tester.pumpAndSettle();
+    }
+
+    /// Approves the session that took the offer, as the offering device would (by hand).
+    Future<void> approveTaken(WidgetTester tester, PairCode code, {String? secret}) async {
+      final x = server.pairSessions.values.single;
+      expect(server.pairOffers.values.single.sessionId, x.id);
+      await tester.runAsync(() => approveByHand(server, PairCode(x.code, code.secret), secret: secret));
+    }
+
+    chatTestWidgets('typed code from the other device signs in after approval', (tester) async {
+      final code = await offer(tester);
+      await openEnter(tester);
+      expect(find.textContaining('Show a code'), findsWidgets);
+      await tester.enterText(find.byKey(const Key('link-code-field')), code.display.toLowerCase());
+      await tester.tap(find.byKey(const Key('link-connect')));
+      await polls(tester, 1);
+      expect(find.textContaining('approve "New phone"'), findsOneWidget);
+      expect(server.pairSessions.values.single.body['deviceName'], 'New phone');
+
+      await approveTaken(tester, code);
+      await polls(tester);
+      await settle(tester);
+      expect(find.text('No chats yet'), findsOneWidget);
+      expect(appContainer(tester).read(sessionProvider), isA<SignedIn>());
+    });
+
+    chatTestWidgets('a scanned code connects straight away', (tester) async {
+      final code = await offer(tester);
+      await openEnter(tester, extra: [
+        qrScannerProvider.overrideWithValue(
+          (context, onCode) => TextButton(onPressed: () => onCode(LinkQr(code).encode()), child: const Text('Fake scan')),
+        ),
+      ]);
+      await tester.tap(find.text('Fake scan'));
+      await polls(tester, 1);
+      expect(server.pairOffers.values.single.sessionId, isNotNull);
+      expect(find.textContaining('approve "New phone"'), findsOneWidget);
+      await tapCancel(tester);
+      expect(server.pairSessions.values.single.cancelledAt, isNotNull);
+    });
+
+    testWidgets('a bad or unknown code shows an error and lets you try again', (tester) async {
+      await openEnter(tester);
+      await tester.enterText(find.byKey(const Key('link-code-field')), 'hello');
+      await tester.tap(find.byKey(const Key('link-connect')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining("isn't a FamChat code"), findsOneWidget);
+      expect(server.pairSessions, isEmpty);
+
+      await tester.enterText(find.byKey(const Key('link-code-field')), 'ZZZZ-ABCD-EFGH-0123');
+      await tester.tap(find.byKey(const Key('link-connect')));
+      await tester.pumpAndSettle();
+      expect(find.text(unknownOfferMessage), findsOneWidget);
+      await tester.tap(find.byKey(const Key('pair-restart')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('link-code-field')), findsOneWidget);
+    });
+
+    testWidgets('a forged approval is refused', (tester) async {
+      final code = await offer(tester);
+      await openEnter(tester);
+      await tester.enterText(find.byKey(const Key('link-code-field')), code.display);
+      await tester.tap(find.byKey(const Key('link-connect')));
+      await polls(tester, 1);
+      await approveTaken(tester, code, secret: 'ZZZZZZZZZZZZ');
+      await polls(tester);
+      await tester.pumpAndSettle();
+      expect(find.text(forgedBundleMessage), findsOneWidget);
+      expect(appContainer(tester).read(sessionProvider), isA<SignedOut>());
+    });
   });
 
   testWidgets('a forged approval is refused and nothing is saved', (tester) async {
