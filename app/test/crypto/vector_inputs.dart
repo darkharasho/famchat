@@ -8,6 +8,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:famchat/crypto/device_cert.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/crypto/media.dart';
 import 'package:famchat/crypto/sealed_box.dart';
 import 'package:famchat/crypto/wrap.dart';
 
@@ -22,6 +23,9 @@ const senderDeviceId = '01JDEVA0000000000000000000';
 const recipientDeviceId = '01JDEVB0000000000000000000';
 const epoch = 3;
 const plaintext = '{"kind":"text","text":"hello famchat"}';
+final mediaKey = filled(32, 0x11);
+final mediaNonce = filled(24, 0x09);
+const mediaPlaintext = 'famchat photo';
 
 String hexOf(List<int> b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 
@@ -80,6 +84,9 @@ class VectorInputs {
       envelope: e, chatKey: chatKey, chatId: chatId, messageId: messageId, senderDeviceId: senderDeviceId,
       senderSignPub: await sender.signPub());
 
+  Future<Uint8List> mediaBlob() => encryptMedia(
+      key: mediaKey, plaintext: utf8.encode(mediaPlaintext), purpose: MediaPurpose.file, nonce: mediaNonce);
+
   /// Every vector, in a fixed order.
   Future<Map<String, String>> compute() async {
     final certJson = (await cert()).toJson();
@@ -92,6 +99,9 @@ class VectorInputs {
       'envelope.aad': hexOf(envelopeAad(
           v: 1, chatId: chatId, epoch: epoch, messageId: messageId, senderDeviceId: senderDeviceId)),
       'envelope.json': jsonEncode((await envelope()).toJson()),
+      'media.aad.thumb': hexOf(mediaAad(MediaPurpose.thumb)),
+      'media.blob': b64urlOf(await mediaBlob()),
+      'media.sha256': b64urlOf(await sha256Of(await mediaBlob())),
     };
   }
 }
