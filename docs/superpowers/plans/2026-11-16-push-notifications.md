@@ -4,7 +4,7 @@
 
 **Goal:** A family member whose devices are all offline gets a push notification ("Mom" / "New message", or "Parents" / "New message from Mom") on Android, iOS and the web, and tapping it opens that chat. Desktop apps (and a hidden web tab) show a local notification from the socket while running. Push stays cleanly off until Firebase is configured.
 
-**Architecture:** Server: `PUT /api/devices/me/push` stores the device's FCM token (cleared on revoke/sign-out as before). `FamilyHub` prunes half-open sockets (no ping for 60 s) before deciding who is offline, then sends a `PushJob` to the `famchat-push` Queue. The same Worker's `queue()` handler resolves names from D1, gets a Google OAuth token from the service-account JWT (RS256, WebCrypto, cached), and calls FCM HTTP v1 once per device token with `android`/`apns`/`webpush` blocks. 404/`UNREGISTERED` clears the token; 429/5xx re-enqueue only the failed devices (3 attempts). No `FCM_SERVICE_ACCOUNT` secret → jobs are acked and dropped. `POST /api/devices/me/push/test` sends a test notification to the caller's own devices synchronously and reports per-device results.
+**Architecture:** Server: `PUT /api/devices/me/push` stores the device's FCM token (cleared on revoke/sign-out as before). `FamilyHub` prunes half-open sockets (no ping for 90 s) before deciding who is offline, then sends a `PushJob` to the `famchat-push` Queue. The same Worker's `queue()` handler resolves names from D1, gets a Google OAuth token from the service-account JWT (RS256, WebCrypto, cached), and calls FCM HTTP v1 once per device token with `android`/`apns`/`webpush` blocks. 404/`UNREGISTERED` clears the token; 429/5xx re-enqueue only the failed devices (3 attempts). No `FCM_SERVICE_ACCOUNT` secret → jobs are acked and dropped. `POST /api/devices/me/push/test` sends a test notification to the caller's own devices synchronously and reports per-device results.
 
 Client: `lib/push/` — `firebase_options.dart` is a committed stub whose `currentPlatform` throws `UnsupportedError` until `flutterfire configure` overwrites it; `pushSupported` is true only on Android/iOS/web with options. `PushController` (Riverpod) requests permission, registers the token and its refreshes, routes taps (`getInitialMessage`, `onMessageOpenedApp`) through `DeepLinks`, and shows foreground messages in-app unless that chat is open. `DesktopNotifier` (macOS/Windows/Linux via `flutter_local_notifications`, web via the `Notification` API) shows a notification for socket `msg` events from others while the window isn't focused. The router remembers a signed-in location that a loading redirect swallowed and returns to it once the session is ready (cold-start notification taps and web deep links). Mobile clients close their socket when paused so pushes start immediately.
 
@@ -16,7 +16,7 @@ Client: `lib/push/` — `firebase_options.dart` is a committed stub whose `curre
 
 - Notification text is built server-side from metadata only: direct chat → title `<sender name>`, body `New message`; group → title `<chat title>`, body `New message from <sender name>`. Data: `{chatId}` only. Never envelope fields.
 - One `notification`/`data` pair per device token; `android.notification.channel_id = "messages"`, `android.notification.tag = chatId`, `android.priority = "high"`; `apns.payload.aps = {sound: "default", "thread-id": chatId}`; `webpush.fcm_options.link = APP_ORIGIN + "/chats/" + chatId`, `webpush.notification.tag = chatId`.
-- Presence: a socket is stale when neither its last auto-responded ping nor its connect time is within `STALE_SOCKET_MS = 60_000`; stale sockets are closed with 4002 and treated as gone (presence offline broadcast).
+- Presence: a socket is stale when neither its last auto-responded ping nor its connect time is within `STALE_SOCKET_MS = 90_000 (Chrome throttles hidden-tab timers to ~1/min)`; stale sockets are closed with 4002 and treated as gone (presence offline broadcast).
 - Push is disabled, never failing, when: no `PUSH_QUEUE` binding (hub logs nothing), no `FCM_SERVICE_ACCOUNT` (consumer acks), no Firebase options on the client (`pushSupported == false`).
 - Chat ids in notification data are validated as ULIDs before routing.
 - No Firebase config is committed tonight; every platform must build without it.
@@ -30,7 +30,7 @@ Client: `lib/push/` — `firebase_options.dart` is a committed stub whose `curre
 4. **Vendored `firebase_core` without Windows** (`app/third_party/firebase_core`, `dependency_overrides`). Its Windows plugin downloads a 960 MB C++ SDK on every Windows build and we never use Firebase on Windows. Cost if wrong: re-vendor on every firebase_core bump (documented in its README).
 5. **FCM only on Android, iOS and web.** macOS uses local notifications from the socket (spec: desktop only while running). Cost if wrong: macOS FCM later needs APNs entitlements on macOS.
 6. **Presence pruning is lazy** (on every `send` and every new connection), not alarm-driven. Cost if wrong: an offline presence dot can lag until the next send/connection; pushes are correct because pruning runs before the offline calculation.
-7. **Mobile clients close the socket when paused** and reopen on resume, so a backgrounded phone gets pushes at once instead of after the 60 s stale window. Cost if wrong: a few reconnects per day; outbox already handles reconnects.
+7. **Mobile clients close the socket when paused** and reopen on resume, so a backgrounded phone gets pushes at once instead of after the 90 s stale window. Cost if wrong: a few reconnects per day; outbox already handles reconnects.
 8. **Notification text** as in Global Constraints (spec's `"<sender>" in "<chat title>"` rendered as title/body). Cost if wrong: a string change.
 9. **Test endpoint is per user, not admin:** `POST /api/devices/me/push/test` sends only to the caller's own devices. Cost if wrong: none (no one else is reachable).
 10. **Token uniqueness:** registering a token clears it from any other device row (a reinstalled app paired again). Cost if wrong: none.
@@ -41,7 +41,7 @@ Client: `lib/push/` — `firebase_options.dart` is a committed stub whose `curre
 
 ## Review Focus
 
-1. Half-open socket (phone vanished) → after 60 s without ping its user counts as offline and gets a push. Test `a socket silent for over a minute is pruned and its user pushed` (Task 2).
+1. Half-open socket (phone vanished) → after 90 s without ping its device counts as offline and gets a push. Test `a socket silent for over a minute is pruned and its user pushed` (Task 2).
 2. FCM 404 / `UNREGISTERED` → that token is cleared; others still sent. Test `stale tokens are cleared` (Task 3).
 3. FCM request body never contains the envelope (`ct`, `nonce`, `sig`) or plaintext. Test `payload has names and chatId only` (Task 3).
 4. No secret → job acked, no fetch. Test `without FCM_SERVICE_ACCOUNT jobs are dropped` (Task 3).

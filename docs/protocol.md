@@ -99,8 +99,9 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
   name, body "New message". Group: title = group title, body "New message from <sender>". Never message
   content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
-- Who gets one: members other than the sender with **no open socket** when the message is stored.
-  Sockets that answered no ping for 60 s are closed first (code 4002) and their user counts as offline.
+- Who gets one: every device of the other members that has a token and **no open socket** when the
+  message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
+  answered no ping for 90 s are closed first (code 4002).
   Mobile apps close their socket when sent to the background.
 
 ### Pairing a new device (plan 6)
@@ -238,7 +239,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | close code 4001 | this device was revoked |
-| close code 4002 | no ping for 60 s (a half-open socket); reconnect |
+| close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 
 ### `send` rules
 - `envelope.v == 1`, `nonce`/`ct`/`sig` base64url, JSON ≤ 64 KiB, `envelope.epoch == currentEpoch` and

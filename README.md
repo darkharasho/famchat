@@ -26,6 +26,6 @@ To turn push on, once:
 3. On a phone, allow notifications, then Devices → "Send a test notification".
 
 How it works: `FamilyHub` puts a job on the `famchat-push` Queue for members with no open socket
-(sockets silent for 60 s are dropped first); the Worker's `queue()` handler sends one FCM HTTP v1
+(sockets silent for 90 s are dropped first); the Worker's `queue()` handler sends one FCM HTTP v1
 message per device token with the sender's name and the chat title only, never message content, and
 clears tokens FCM reports as gone. See `docs/protocol.md` ("Push").

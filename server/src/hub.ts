@@ -36,9 +36,10 @@ export function queuePush(env: Pick<Env, "PUSH_QUEUE">): PushHook {
 
 /**
  * A socket that answered no ping (clients ping every 25 s) for this long is half-open: a phone that
- * lost its network without closing. It is closed so its user counts as offline and gets pushes.
+ * lost its network without closing. It is closed so its device counts as offline and gets pushes.
+ * Not 60 s: Chrome throttles timers in long-hidden tabs to about once a minute.
  */
-export const STALE_SOCKET_MS = 60_000;
+export const STALE_SOCKET_MS = 90_000;
 
 /** [at]: when the socket connected (Unix ms). */
 type Att = { userId: string; deviceId: string; at: number };
@@ -252,19 +253,36 @@ export class FamilyHub extends DurableObject<Env> {
         envelope: JSON.stringify(env), created_at: now,
       }),
     });
-    const offline: string[] = [];
+    const others: string[] = [];
     for (const u of await this.memberIds(chatId)) {
-      const socks = this.sockets(u, ws);
-      for (const s of socks) trySend(s, msg);
-      if (u !== att.userId && this.sockets(u).length === 0) offline.push(u);
+      for (const s of this.sockets(u, ws)) trySend(s, msg);
+      if (u !== att.userId) others.push(u);
     }
-    if (offline.length) {
-      try {
-        await this.push.notify({ chatId, senderUserId: att.userId, messageId: id, userIds: offline });
-      } catch (e) {
-        console.error("push hook failed", e);
-      }
-    }
+    // Not awaited: the next send shouldn't wait for the push lookup and the queue.
+    this.pushOffline({ chatId, senderUserId: att.userId, messageId: id }, others).catch((e) =>
+      console.error("push hook failed", e),
+    );
+  }
+
+  /**
+   * Pushes go per device: every device of [userIds] with a push token and no open socket. A phone is
+   * pushed even while the same person's desktop app is connected (it may be at home, unwatched).
+   */
+  private async pushOffline(msg: Omit<PushJob, "userIds">, userIds: string[]): Promise<void> {
+    if (userIds.length === 0) return;
+    const { results } = await this.env.DB.prepare(
+      `SELECT id, user_id FROM devices WHERE user_id IN (${userIds.map(() => "?").join(",")})
+       AND revoked_at IS NULL AND push_token IS NOT NULL ORDER BY id`,
+    ).bind(...userIds).all<{ id: string; user_id: string }>();
+    const targets = results.filter((d) =>
+      this.ctx.getWebSockets(`d:${d.id}`).every((s) => s.readyState !== WebSocket.READY_STATE_OPEN),
+    );
+    if (targets.length === 0) return;
+    await this.push.notify({
+      ...msg,
+      userIds: [...new Set(targets.map((d) => d.user_id))],
+      deviceIds: targets.map((d) => d.id),
+    });
   }
 
   private async handleTyping(att: Att, m: Incoming): Promise<void> {

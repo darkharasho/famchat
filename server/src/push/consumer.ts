@@ -82,10 +82,12 @@ export async function deliverJob(env: Env, sa: ServiceAccount, job: PushJob, fet
   const retry = deliveries.filter((d) => d.result === "retry").map((d) => d.deviceId);
   const attempt = (job.attempt ?? 0) + 1;
   if (retry.length && attempt < MAX_ATTEMPTS && env.PUSH_QUEUE) {
+    // After FCM calls went out, nothing may throw: a retry of the whole job would notify the devices
+    // that already got it a second time.
     await env.PUSH_QUEUE.send(
       { chatId: job.chatId, senderUserId: job.senderUserId, messageId: job.messageId, userIds: job.userIds, deviceIds: retry, attempt },
       { delaySeconds: RETRY_DELAY_S * attempt },
-    );
+    ).catch((e) => console.error("push retry not queued", e));
   }
   return deliveries;
 }
@@ -107,14 +109,17 @@ export async function sendAll(
   const refused = sent.filter((s) => s.result === "auth").map((s) => s.d);
   if (refused.length) {
     invalidateAccessToken();
-    const again = await sendEach(refused);
+    const again = await sendEach(refused).catch((e) => {
+      console.error("fcm token renewal failed", e);
+      return refused.map((d) => ({ d, result: "retry" as SendResult }));
+    });
     sent = [...sent.filter((s) => s.result !== "auth"), ...again.map((s) => ({ ...s, result: s.result === "auth" ? ("retry" as const) : s.result }))];
   }
   const stale = sent.filter((s) => s.result === "stale");
   if (stale.length) {
     await env.DB.batch(
       stale.map((s) => env.DB.prepare("UPDATE devices SET push_token = NULL WHERE id = ? AND push_token = ?").bind(s.d.id, s.d.push_token)),
-    );
+    ).catch((e) => console.error("stale tokens not cleared", e)); // cleared on the next push
   }
   return sent.map((s) => ({ deviceId: s.d.id, result: s.result }));
 }

@@ -191,6 +191,16 @@ describe("push queue consumer", () => {
     expect(g.calls).toEqual([]);
   });
 
+  it("once FCM calls went out, a failing re-queue doesn't fail the job (no duplicate pushes)", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    const { env: e, sa } = await pushEnv();
+    const broken = { ...e, PUSH_QUEUE: { send: async () => { throw new Error("queue down"); } } as unknown as Queue<PushJob> };
+    const g = fakeGoogle((t) => (t === "dad-laptop" ? fcmError(503, "UNAVAILABLE") : Response.json({ name: "x" })));
+    const out = await deliverJob(broken, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId] }, g.fetcher);
+    expect(out).toHaveLength(2);
+  });
+
   it("a job that throws is retried", async () => {
     const { mom, dad, dadLaptop } = await family();
     const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);

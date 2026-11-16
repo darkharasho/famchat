@@ -95,7 +95,8 @@ describe("FCM message", () => {
       [Response.json({ name: "x" }), "ok"],
       [fcmError(404, "UNREGISTERED"), "stale"],
       [fcmError(400, "UNREGISTERED"), "stale"],
-      [fcmError(403, "SENDER_ID_MISMATCH"), "stale"],
+      [fcmError(403, "SENDER_ID_MISMATCH"), "error"], // a key from another project: keep the tokens
+      [new Response("Not Found", { status: 404 }), "error"], // wrong project id, not a dead token
       [fcmError(401, "UNAUTHENTICATED"), "auth"],
       [fcmError(429, "QUOTA_EXCEEDED"), "retry"],
       [fcmError(503, "UNAVAILABLE"), "retry"],

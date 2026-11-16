@@ -101,8 +101,18 @@ export function fcmMessage(token: string, n: Notification, appOrigin: string) {
   };
 }
 
+function errorCode(text: string): string | null {
+  try {
+    const details = (JSON.parse(text) as { error?: { details?: { errorCode?: unknown }[] } }).error?.details ?? [];
+    for (const d of details) if (typeof d.errorCode === "string") return d.errorCode;
+  } catch {
+    /* not JSON */
+  }
+  return null;
+}
+
 /**
- * ok; stale: the token is dead (404, UNREGISTERED, or another project's token) and should be
+ * ok; stale: FCM says the token is dead (errorCode UNREGISTERED, sent with 404) and it should be
  * cleared; retry: try again later (429, 5xx, network); auth: our access token was refused;
  * error: anything else (logged, not retried).
  */
@@ -129,7 +139,9 @@ export async function sendFcm(
   }
   if (res.ok) return "ok";
   const text = await res.text().catch(() => "");
-  if (res.status === 404 || text.includes("UNREGISTERED") || text.includes("SENDER_ID_MISMATCH")) return "stale";
+  // Only FCM's own verdict on the token clears it. A bare 404 (wrong project id) or
+  // SENDER_ID_MISMATCH (a key from another project) would otherwise wipe every token at once.
+  if (errorCode(text) === "UNREGISTERED") return "stale";
   if (res.status === 401) return "auth";
   if (res.status === 429 || res.status >= 500) return "retry";
   console.error("fcm send refused", res.status, text.slice(0, 500));

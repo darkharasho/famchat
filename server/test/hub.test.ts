@@ -2,7 +2,7 @@ import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FamilyHub, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
-import { api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
+import { addDevice, api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
 import { BASE, insertUserWithDevice, resetDb } from "./helpers";
 
 type Msg = Record<string, unknown> & { type: string };
@@ -68,6 +68,9 @@ async function connect(u: TestUser): Promise<Client> {
     },
   };
 }
+
+const setPushToken = (deviceId: string, tok: string) =>
+  env.DB.prepare("UPDATE devices SET push_token = ? WHERE id = ?").bind(tok, deviceId).run();
 
 const envelope = (epoch = 1) => ({ v: 1, epoch, nonce: "AAAA", ct: "AAAAAAAAAAAAAAAAAAAAAA", sig: "AAAA" });
 
@@ -268,11 +271,12 @@ describe("send", () => {
     expect((await ca.next("error")).error).toBe("invalid_request");
   });
 
-  it("members with no open socket are passed to the push hook", async () => {
+  it("devices with a push token and no open socket are passed to the push hook", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();
     const c = await insertUserWithDevice();
     const chat = await createGroup(a, [b, c]);
+    for (const u of [a, b, c]) await setPushToken(u.deviceId, `tok-${u.deviceId}`);
     const jobs: PushJob[] = [];
     await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
       hub.push = { notify: async (j) => void jobs.push(j) };
@@ -283,7 +287,46 @@ describe("send", () => {
     ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
     await ca.next("ack");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId] }]);
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId] }]);
+  });
+
+  it("a phone is pushed even while the same user's desktop is connected", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const bPhone = await addDevice(b.userId);
+    const bOld = await addDevice(b.userId); // no token: nothing to push to
+    await setPushToken(bPhone, "b-phone");
+    await setPushToken(b.deviceId, "b-desktop");
+    const chat = await createGroup(a, [b], "Family", [bPhone, bOld]);
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const cb = await connect(b); // b's desktop (b.deviceId) is online
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    await ca.next("ack");
+    await cb.next("msg");
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [b.userId], deviceIds: [bPhone] }]);
+  });
+
+  it("no job when every token-holding device is connected", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setPushToken(b.deviceId, "b");
+    const chat = await createDirect(a, b);
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const cb = await connect(b);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
+    await cb.next("msg");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(jobs).toEqual([]);
   });
 
   it("a socket silent for over a minute is pruned and its user pushed", async () => {
@@ -291,6 +334,7 @@ describe("send", () => {
     const b = await insertUserWithDevice();
     const c = await insertUserWithDevice();
     const chat = await createGroup(a, [b, c]);
+    for (const u of [b, c]) await setPushToken(u.deviceId, `tok-${u.deviceId}`);
     const ca = await connect(a);
     const cb = await connect(b);
     const cc = await connect(c);
@@ -313,7 +357,7 @@ describe("send", () => {
     expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: false });
     await cb.next("msg");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId] }]);
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId] }]);
   });
 
   it("the default push hook puts the job on the queue", async () => {
