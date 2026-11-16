@@ -2,6 +2,7 @@
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:meta/meta.dart';
 
 import 'encoding.dart';
 import 'keys.dart';
@@ -68,9 +69,12 @@ Future<ChatKeyWrap> wrapChatKey({
   required List<int> recipientEncPub,
   required String wrapperDeviceId,
   required SimpleKeyPair wrapperSignKey,
+  @visibleForTesting SimpleKeyPair? ephemeral,
+  @visibleForTesting List<int>? nonce,
 }) async {
   if (chatKey.length != 32) throw ArgumentError('chat key must be 32 bytes');
-  final sealed = await sealBox(recipientEncPub, chatKey);
+  // ignore: invalid_use_of_visible_for_testing_member
+  final sealed = await sealBox(recipientEncPub, chatKey, ephemeral: ephemeral, nonce: nonce);
   final sig = await _ed25519.sign(
     wrapSignedBytes(chatId, epoch, recipientDeviceId, wrapperDeviceId, sealed),
     keyPair: wrapperSignKey,
