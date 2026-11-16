@@ -24,6 +24,8 @@
   ],
   // One FamilyHub for the whole family (idFromName("family")): WebSockets, message sequencing, events.
   "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "FamilyHub" }] },
-  "migrations": [{ "tag": "v1-hub", "new_sqlite_classes": ["FamilyHub"] }]
+  "migrations": [{ "tag": "v1-hub", "new_sqlite_classes": ["FamilyHub"] }],
+  // Encrypted photos, thumbnails and voice clips (ciphertext only). See src/lib/media.ts for the quota.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "famchat-media" }]
   // Secrets (wrangler secret put): TOKEN_SECRET, BOOTSTRAP_SECRET
 }

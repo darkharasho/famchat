@@ -3,6 +3,7 @@ import type { FamilyHub } from "./hub";
 export interface Env {
   DB: D1Database;
   HUB: DurableObjectNamespace<FamilyHub>;
+  MEDIA: R2Bucket;
   TOKEN_SECRET: string;
   BOOTSTRAP_SECRET: string;
   APP_ORIGIN: string;
