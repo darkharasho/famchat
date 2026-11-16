@@ -126,5 +126,5 @@ void main() {
       'signPub': cert.signPub,
       'certSig': cert.certSig,
     });
-  });
+  }, testOn: 'vm'); // reads a file, so it can't run in the browser
 }
