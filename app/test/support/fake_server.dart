@@ -4,14 +4,21 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:famchat/crypto/device_cert.dart';
+import 'package:famchat/crypto/encoding.dart';
+import 'package:famchat/crypto/reset.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 class FakeUser {
   FakeUser(this.id, this.name, this.isAdmin, this.identityPub);
-  final String id, identityPub;
+  final String id;
+  String identityPub;
   String name;
   bool isAdmin;
+  String? recoveryPub, recoverySig;
+
+  /// Directory reset records (server/src/lib/reset.ts resetOut).
+  final resets = <Map<String, Object?>>[];
 }
 
 class FakeDevice {
@@ -25,12 +32,16 @@ class FakeDevice {
 }
 
 class FakeInvite {
-  FakeInvite(this.name, this.admin, this.expiresAt);
+  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset});
   final String name;
   final bool admin;
-  final DateTime expiresAt;
+  DateTime expiresAt;
   String? usedBy;
   DateTime? usedAt;
+
+  /// A reset invite: signs [userId] in again; [reset] is its directory record.
+  final String? userId;
+  final Map<String, Object?>? reset;
 }
 
 /// A pairing session (server/src/routes/pairing.ts).
@@ -200,6 +211,11 @@ class FakeServer {
     if (r.method == 'POST' && path == '/api/auth/refresh') return _refresh(_body(r));
     if (r.method == 'POST' && path == '/api/devices/pair/start') return _pairStart(_body(r));
     if (r.method == 'POST' && path == '/api/devices/pair/claim') return await _pairClaim(_body(r));
+    if (r.method == 'POST' && path == '/api/auth/recover/lookup') {
+      final u = _recoveryUser(_body(r)['recoveryPub']);
+      return u == null ? _err('unauthorized') : _json({'userId': u.id, 'identityPub': u.identityPub});
+    }
+    if (r.method == 'POST' && path == '/api/auth/recover') return await _recover(_body(r));
     if (r.method == 'POST' && path == '/api/devices/pair/cancel') {
       final x = _owned(_body(r));
       if (x == null) return _err('not_found');
@@ -211,7 +227,66 @@ class FakeServer {
     final userId = c['sub'] as String, deviceId = c['dev'] as String;
     if (r.method == 'GET' && path == '/api/me') {
       final u = users[userId]!;
-      return _json({'userId': userId, 'deviceId': deviceId, 'name': u.name, 'isAdmin': u.isAdmin});
+      return _json({
+        'userId': userId,
+        'deviceId': deviceId,
+        'name': u.name,
+        'isAdmin': u.isAdmin,
+        'recoveryCodeSet': u.recoveryPub != null,
+      });
+    }
+    if (r.method == 'GET' && path == '/api/users') {
+      return _json({
+        'users': [
+          for (final u in users.values)
+            {
+              'id': u.id,
+              'name': u.name,
+              'isAdmin': u.isAdmin,
+              'identityPub': u.identityPub,
+              'devices': [
+                for (final d in devices.values.where((d) => d.userId == u.id))
+                  {
+                    'id': d.id,
+                    'name': d.name,
+                    'platform': d.platform,
+                    'encPub': d.cert['encPub'] ?? '',
+                    'signPub': d.cert['signPub'] ?? '',
+                    'certSig': d.cert['certSig'] ?? '',
+                    'revoked': d.revokedAt != null,
+                  },
+              ],
+              'resets': u.resets,
+            },
+        ],
+      });
+    }
+    final adminUser = RegExp(r'^/api/admin/users/([^/]+)/(reset|admin)$').firstMatch(path);
+    if (r.method == 'POST' && adminUser != null) {
+      if (!users[userId]!.isAdmin) return _err('forbidden');
+      final target = users[adminUser[1]];
+      if (target == null) return _err('not_found');
+      if (adminUser[2] == 'admin') {
+        target.isAdmin = true;
+        return http.Response('', 204);
+      }
+      return await _reset(_body(r), users[userId]!, target);
+    }
+    if (r.method == 'POST' && path == '/api/admin/recovery-key') {
+      final u = users[userId]!;
+      if (!u.isAdmin) return _err('forbidden');
+      final b = _body(r);
+      final ok = await verifyRecoveryKey(
+        identityPub: b64urlDecode(u.identityPub),
+        userId: u.id,
+        recoveryPub: b64urlDecode(b['recoveryPub'] as String),
+        sig: b64urlDecode(b['sig'] as String),
+      );
+      if (!ok) return _err('invalid_request');
+      u
+        ..recoveryPub = b['recoveryPub'] as String
+        ..recoverySig = b['sig'] as String;
+      return http.Response('', 204);
     }
     if (r.method == 'GET' && path == '/api/devices') {
       return _json({
@@ -368,6 +443,107 @@ class FakeServer {
     });
   }
 
+  FakeUser? _recoveryUser(Object? pub) =>
+      pub is String ? users.values.where((u) => u.isAdmin && u.recoveryPub == pub).firstOrNull : null;
+
+  void _revokeAll(String userId) {
+    for (final d in liveDevices(userId)) {
+      revoke(d.id);
+    }
+  }
+
+  /// `POST /admin/users/:id/reset` (server/src/routes/admin.ts).
+  Future<http.Response> _reset(Map<String, Object?> b, FakeUser admin, FakeUser target) async {
+    if (admin.id == target.id) return _err('invalid_request');
+    final st = ResetStatement(
+      resetId: b['resetId'] as String,
+      userId: target.id,
+      signerUserId: admin.id,
+      signerKind: 'admin',
+      oldIdentityPub: b64urlDecode(b['oldIdentityPub'] as String),
+      claimPub: b64urlDecode(b['claimPub'] as String),
+      createdAt: b['createdAt'] as int,
+    );
+    if (!await verifyReset(st, signerPub: b64urlDecode(admin.identityPub), sig: b64urlDecode(b['sig'] as String))) {
+      return _err('invalid_request');
+    }
+    if (b['oldIdentityPub'] != target.identityPub) return _json({'error': 'conflict'}, 409);
+    final record = <String, Object?>{
+      'id': st.resetId,
+      'signerUserId': admin.id,
+      'signerKind': 'admin',
+      'signerPub': admin.identityPub,
+      'recoverySig': null,
+      'oldIdentityPub': b['oldIdentityPub'],
+      'claimPub': b['claimPub'],
+      'createdAt': st.createdAt,
+      'sig': b['sig'],
+      'newIdentityPub': null,
+      'claimSig': null,
+      'completedAt': null,
+    };
+    target.resets.add(record);
+    _revokeAll(target.id);
+    for (final i in invites.values.where((i) => i.userId == target.id && i.usedBy == null)) {
+      i.expiresAt = now();
+    }
+    final token = _token();
+    invites[token] = FakeInvite(target.name, false, now().add(const Duration(days: 7)), userId: target.id, reset: record);
+    return _json({
+      'resetId': st.resetId,
+      'inviteToken': token,
+      'inviteUrl': 'https://famchat.dev/join#$token',
+      'expiresAt': invites[token]!.expiresAt.millisecondsSinceEpoch,
+    }, 201);
+  }
+
+  /// `POST /auth/recover` (server/src/routes/auth.ts).
+  Future<http.Response> _recover(Map<String, Object?> b) async {
+    final u = _recoveryUser(b['recoveryPub']);
+    if (u == null) return _err('unauthorized');
+    final cert = {for (final k in ['identityPub', 'encPub', 'signPub', 'certSig']) k: b[k] as String};
+    final st = ResetStatement(
+      resetId: b['resetId'] as String,
+      userId: u.id,
+      signerUserId: u.id,
+      signerKind: 'recovery',
+      oldIdentityPub: b64urlDecode(b['oldIdentityPub'] as String),
+      claimPub: b64urlDecode(b['claimPub'] as String),
+      createdAt: b['createdAt'] as int,
+    );
+    final ok = await verifyDeviceCert(DeviceCert.fromJson(cert)) &&
+        await verifyReset(st, signerPub: b64urlDecode(u.recoveryPub!), sig: b64urlDecode(b['sig'] as String)) &&
+        await verifyResetClaim(
+          claimPub: st.claimPub,
+          newIdentityPub: b64urlDecode(cert['identityPub']!),
+          sig: b64urlDecode(b['claimSig'] as String),
+        );
+    if (!ok) return _err('invalid_request');
+    if (b['oldIdentityPub'] != u.identityPub) return _json({'error': 'conflict'}, 409);
+    u.resets.add({
+      'id': st.resetId,
+      'signerUserId': u.id,
+      'signerKind': 'recovery',
+      'signerPub': u.recoveryPub,
+      'recoverySig': u.recoverySig,
+      'oldIdentityPub': b['oldIdentityPub'],
+      'claimPub': b['claimPub'],
+      'createdAt': st.createdAt,
+      'sig': b['sig'],
+      'newIdentityPub': cert['identityPub'],
+      'claimSig': b['claimSig'],
+      'completedAt': now().millisecondsSinceEpoch,
+    });
+    _revokeAll(u.id);
+    u
+      ..identityPub = cert['identityPub']!
+      ..recoveryPub = null
+      ..recoverySig = null;
+    final deviceId = _id('D'), refresh = _token();
+    devices[deviceId] = FakeDevice(deviceId, u.id, b['deviceName'] as String, b['platform'] as String, cert, refresh, now());
+    return _redeemed(u.id, deviceId, refresh);
+  }
+
   Future<http.Response> _redeem(Map<String, Object?> b) async {
     final token = b['token'] as String;
     final deviceName = (b['deviceName'] as String).trim();
@@ -384,6 +560,29 @@ class FakeServer {
     final inv = invites[token];
     final t = now();
     final refresh = _token();
+    final reset = inv?.reset;
+    if (inv != null && reset != null && inv.usedBy == null && inv.expiresAt.isAfter(t)) {
+      final claimSig = b['resetClaimSig'];
+      if (claimSig is! String ||
+          !await verifyResetClaim(
+            claimPub: b64urlDecode(reset['claimPub'] as String),
+            newIdentityPub: b64urlDecode(cert['identityPub']!),
+            sig: b64urlDecode(claimSig),
+          )) {
+        return _err('invalid_request');
+      }
+      final u = users[inv.userId]!..identityPub = cert['identityPub']!;
+      reset
+        ..['newIdentityPub'] = cert['identityPub']
+        ..['claimSig'] = claimSig
+        ..['completedAt'] = t.millisecondsSinceEpoch;
+      final deviceId = _id('D');
+      devices[deviceId] = FakeDevice(deviceId, u.id, deviceName, b['platform'] as String, cert, refresh, t);
+      inv
+        ..usedBy = u.id
+        ..usedAt = t;
+      return _redeemed(u.id, deviceId, refresh);
+    }
     if (inv != null && inv.usedBy == null && inv.expiresAt.isAfter(t)) {
       final userId = _id('U'), deviceId = _id('D');
       users[userId] = FakeUser(userId, inv.name, inv.admin, cert['identityPub']!);
