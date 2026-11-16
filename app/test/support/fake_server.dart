@@ -33,6 +33,20 @@ class FakeInvite {
   DateTime? usedAt;
 }
 
+/// A pairing session (server/src/routes/pairing.ts).
+class FakePairSession {
+  FakePairSession(this.id, this.code, this.secret, this.deviceId, this.body, this.createdAt);
+  final String id, code, secret, deviceId;
+
+  /// ephPub, encPub, signPub, keysMac, deviceName, platform as posted.
+  final Map<String, String> body;
+  final DateTime createdAt;
+  String? userId, certSig, bundle;
+  DateTime? approvedAt, claimedAt, cancelledAt;
+
+  DateTime get expiresAt => createdAt.add(FakeServer.pairTtl);
+}
+
 class FakeServer {
   FakeServer({DateTime Function()? now}) : now = now ?? DateTime.now;
 
@@ -55,6 +69,39 @@ class FakeServer {
 
   /// The next N refresh calls answer 500.
   int failNext5xx = 0;
+
+  final pairSessions = <String, FakePairSession>{};
+
+  /// Replaces fields of the next `GET /devices/pair/:code` answer (a lying server).
+  Map<String, String>? tamperNextLookup;
+
+  /// The next approved claim succeeds server-side, then the response is lost.
+  bool dropNextClaimResponse = false;
+
+  /// The next N claims answer 500.
+  int failNextClaims = 0;
+
+  static const pairTtl = Duration(minutes: 5);
+  static const claimRetry = Duration(minutes: 10);
+
+  /// Adds a user with [identityPub] (base64url) and no device, as if they joined elsewhere.
+  String addUser(String name, {required String identityPub, bool admin = false}) {
+    final id = _id('U');
+    users[id] = FakeUser(id, name, admin, identityPub);
+    return id;
+  }
+
+  FakePairSession? pairSessionByCode(String code) => pairSessions.values.where((x) => x.code == code).firstOrNull;
+
+  /// What an approving device posts, without HTTP.
+  void approvePairing(String code, {required String userId, required String certSig, required String bundle}) {
+    final x = pairSessionByCode(code)!;
+    x
+      ..userId = userId
+      ..certSig = certSig
+      ..bundle = bundle
+      ..approvedAt = now();
+  }
 
   int _epoch = 0;
   int _ids = 0;
@@ -123,7 +170,7 @@ class FakeServer {
         'unauthorized' => 401,
         'forbidden' => 403,
         'not_found' => 404,
-        'invite_invalid' => 410,
+        'invite_invalid' || 'pairing_invalid' => 410,
         _ => 500,
       });
 
@@ -145,6 +192,14 @@ class FakeServer {
     final path = r.url.path;
     if (r.method == 'POST' && path == '/api/auth/invite/redeem') return await _redeem(_body(r));
     if (r.method == 'POST' && path == '/api/auth/refresh') return _refresh(_body(r));
+    if (r.method == 'POST' && path == '/api/devices/pair/start') return _pairStart(_body(r));
+    if (r.method == 'POST' && path == '/api/devices/pair/claim') return _pairClaim(_body(r));
+    if (r.method == 'POST' && path == '/api/devices/pair/cancel') {
+      final x = _owned(_body(r));
+      if (x == null) return _err('not_found');
+      if (x.claimedAt == null) x.cancelledAt ??= now();
+      return http.Response('', 204);
+    }
     final c = _claims(r);
     if (c == null) return _err('unauthorized');
     final userId = c['sub'] as String, deviceId = c['dev'] as String;
@@ -167,6 +222,45 @@ class FakeServer {
         ],
       });
     }
+    final pair = RegExp(r'^/api/devices/pair/([^/]+)(/approve)?$').firstMatch(path);
+    if (pair != null) {
+      final x = pairSessions.values
+          .where((x) =>
+              x.code == pair[1]!.toUpperCase() &&
+              x.approvedAt == null &&
+              x.cancelledAt == null &&
+              x.expiresAt.isAfter(now()))
+          .firstOrNull;
+      if (x == null) return _err('not_found');
+      if (r.method == 'GET' && pair[2] == null) {
+        final session = {
+          'code': x.code,
+          'deviceId': x.deviceId,
+          ...x.body,
+          'expiresAt': x.expiresAt.millisecondsSinceEpoch,
+          ...?tamperNextLookup,
+        };
+        tamperNextLookup = null;
+        return _json({'session': session});
+      }
+      if (r.method == 'POST' && pair[2] != null) {
+        final b = _body(r);
+        if (b['deviceId'] != x.deviceId) return _err('invalid_request');
+        final cert = {
+          'identityPub': users[userId]!.identityPub,
+          'encPub': x.body['encPub']!,
+          'signPub': x.body['signPub']!,
+          'certSig': b['certSig'] as String,
+        };
+        try {
+          if (!await verifyDeviceCert(DeviceCert.fromJson(cert))) return _err('invalid_request');
+        } catch (_) {
+          return _err('invalid_request');
+        }
+        approvePairing(x.code, userId: userId, certSig: cert['certSig']!, bundle: b['bundle'] as String);
+        return http.Response('', 204);
+      }
+    }
     if (r.method == 'DELETE' && path.startsWith('/api/devices/')) {
       final d = devices[path.substring('/api/devices/'.length)];
       if (d == null || d.userId != userId || d.revokedAt != null) return _err('not_found');
@@ -185,6 +279,82 @@ class FakeServer {
       }, 201);
     }
     return _err('not_found');
+  }
+
+  http.Response _pairStart(Map<String, Object?> b) {
+    const platforms = ['ios', 'android', 'macos', 'windows', 'linux', 'web'];
+    final body = {
+      for (final k in ['ephPub', 'encPub', 'signPub', 'keysMac', 'deviceName', 'platform'])
+        if (b[k] is String) k: b[k] as String,
+    };
+    if (body.length != 6 || !platforms.contains(body['platform']) || body['deviceName']!.trim().isEmpty) {
+      return _err('invalid_request');
+    }
+    final id = _id('P');
+    const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+    final code = String.fromCharCodes(List.generate(4, (_) => alphabet.codeUnitAt(_rand.nextInt(32))));
+    final x = FakePairSession(id, code, _token(), _id('D'), body, now());
+    pairSessions[id] = x;
+    return _json({
+      'sessionId': id,
+      'code': code,
+      'secret': x.secret,
+      'deviceId': x.deviceId,
+      'expiresAt': x.expiresAt.millisecondsSinceEpoch,
+      'expiresIn': pairTtl.inMilliseconds,
+    }, 201);
+  }
+
+  FakePairSession? _owned(Map<String, Object?> b) {
+    final x = pairSessions[b['sessionId']];
+    return x != null && x.secret == b['secret'] ? x : null;
+  }
+
+  http.Response _pairClaim(Map<String, Object?> b) {
+    if (failNextClaims > 0) {
+      failNextClaims--;
+      return _err('internal');
+    }
+    final x = _owned(b);
+    if (x == null) return _err('not_found');
+    final t = now();
+    if (x.cancelledAt != null) return _err('pairing_invalid');
+    if (x.approvedAt == null) {
+      if (!x.expiresAt.isAfter(t)) return _err('pairing_invalid');
+      return _json({'status': 'waiting'});
+    }
+    final refresh = _token();
+    if (x.claimedAt == null) {
+      if (!x.approvedAt!.add(claimRetry).isAfter(t)) return _err('pairing_invalid');
+      x.claimedAt = t;
+      final cert = {
+        'identityPub': users[x.userId]!.identityPub,
+        'encPub': x.body['encPub']!,
+        'signPub': x.body['signPub']!,
+        'certSig': x.certSig!,
+      };
+      devices[x.deviceId] = FakeDevice(x.deviceId, x.userId!, x.body['deviceName']!, x.body['platform']!, cert, refresh, t);
+    } else {
+      final d = devices[x.deviceId]!;
+      if (!x.claimedAt!.add(claimRetry).isAfter(t) || d.revokedAt != null) return _err('pairing_invalid');
+      d
+        ..refresh = refresh
+        ..prevRefresh = null;
+    }
+    if (dropNextClaimResponse) {
+      dropNextClaimResponse = false;
+      throw http.ClientException('connection reset');
+    }
+    final adm = users[x.userId]!.isAdmin;
+    return _json({
+      'status': 'approved',
+      'userId': x.userId,
+      'deviceId': x.deviceId,
+      'isAdmin': adm,
+      'accessToken': _access(x.userId!, x.deviceId, adm),
+      'refreshToken': refresh,
+      'bundle': x.bundle,
+    });
   }
 
   Future<http.Response> _redeem(Map<String, Object?> b) async {

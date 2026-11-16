@@ -90,6 +90,79 @@ class ApiClient {
             ));
       });
 
+  // --- pairing (docs/protocol.md "Pairing a new device") ---
+
+  /// Unauthenticated: the new device opens a session.
+  Future<PairStartResult> pairStart({
+    required String ephPub,
+    required String encPub,
+    required String signPub,
+    required String keysMac,
+    required String deviceName,
+    required String platform,
+  }) async {
+    final j = await _send('POST', '/devices/pair/start', body: {
+      'ephPub': ephPub,
+      'encPub': encPub,
+      'signPub': signPub,
+      'keysMac': keysMac,
+      'deviceName': deviceName,
+      'platform': platform,
+    });
+    return _parse(201, () => PairStartResult(
+          sessionId: j!['sessionId'] as String,
+          lookup: j['code'] as String,
+          secret: j['secret'] as String,
+          deviceId: j['deviceId'] as String,
+          expiresIn: Duration(milliseconds: j['expiresIn'] as int),
+        ));
+  }
+
+  /// Unauthenticated: the new device asks whether it was approved.
+  Future<PairClaim> pairClaim(String sessionId, String secret) async {
+    final j = await _send('POST', '/devices/pair/claim', body: {'sessionId': sessionId, 'secret': secret});
+    return _parse(200, () {
+      if (j!['status'] == 'waiting') return const PairWaiting();
+      if (j['status'] != 'approved') throw TypeError();
+      return PairApproved(
+        RedeemResult(
+          userId: j['userId'] as String,
+          deviceId: j['deviceId'] as String,
+          isAdmin: j['isAdmin'] as bool,
+          accessToken: j['accessToken'] as String,
+          refreshToken: j['refreshToken'] as String,
+        ),
+        j['bundle'] as String,
+      );
+    });
+  }
+
+  Future<void> pairCancel(String sessionId, String secret) =>
+      _send('POST', '/devices/pair/cancel', body: {'sessionId': sessionId, 'secret': secret});
+
+  /// Authed: the approving device fetches the session by its lookup code.
+  Future<PairSessionInfo> pairLookup(String lookup) => _authed((t) async {
+        final j = await _send('GET', '/devices/pair/${Uri.encodeComponent(lookup)}', bearer: t);
+        return _parse(200, () {
+          final s = j!['session'] as Map<String, Object?>;
+          return PairSessionInfo(
+            lookup: s['code'] as String,
+            deviceId: s['deviceId'] as String,
+            ephPub: s['ephPub'] as String,
+            encPub: s['encPub'] as String,
+            signPub: s['signPub'] as String,
+            keysMac: s['keysMac'] as String,
+            deviceName: s['deviceName'] as String,
+            platform: s['platform'] as String,
+          );
+        });
+      });
+
+  /// Authed: approves the session with the new device's cert and the sealed bundle (base64url).
+  Future<void> pairApprove(String lookup, {required String deviceId, required String certSig, required String bundle}) =>
+      _authed((t) => _send('POST', '/devices/pair/${Uri.encodeComponent(lookup)}/approve',
+          body: {'deviceId': deviceId, 'certSig': certSig, 'bundle': bundle}, bearer: t));
+
   /// An authed call for routes without a typed method here (the chat API). Returns the decoded JSON
   /// object, or null for an empty body.
   Future<Map<String, Object?>?> authedJson(String method, String path, {Object? body, Map<String, String>? query}) =>
