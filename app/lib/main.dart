@@ -9,6 +9,8 @@ import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 
 void main() {
+  // Web: real paths (famchat.dev/join), not #/join. The Worker serves index.html for app routes.
+  usePathUrlStrategy();
   WidgetsFlutterBinding.ensureInitialized();
   // famchat.dev/join#<token>: the fragment is the invite, not a route, so use path URLs.
   usePathUrlStrategy();
