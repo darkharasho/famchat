@@ -34,7 +34,7 @@ class FamilyScreen extends ConsumerWidget {
       ),
       body: switch (family) {
         AsyncData(value: final users) => ListView(
-            padding: const EdgeInsets.only(top: Space.sm, bottom: Space.xxl),
+            padding: EdgeInsets.only(top: Space.sm, bottom: Space.xxl + MediaQuery.paddingOf(context).bottom),
             children: [
               ContentWidth(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

@@ -42,7 +42,7 @@ class ChatList extends ConsumerWidget {
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: Space.xs),
+      padding: EdgeInsets.only(top: Space.xs, bottom: Space.xs + MediaQuery.paddingOf(context).bottom),
       itemCount: items.length,
       itemBuilder: (context, i) => _ChatTile(
         item: items[i],

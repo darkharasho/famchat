@@ -75,7 +75,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
         title: Text(group ? 'Group info' : 'Chat info'),
         leading: BackButton(onPressed: () => context.go('/chats/$chatId')),
       ),
-      body: ListView(padding: const EdgeInsets.only(bottom: Space.xxl), children: [
+      body: ListView(padding: EdgeInsets.only(bottom: Space.xxl + MediaQuery.paddingOf(context).bottom), children: [
         ContentWidth(
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const SizedBox(height: Space.lg),

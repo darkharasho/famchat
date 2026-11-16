@@ -38,7 +38,7 @@ class SettingsScreen extends ConsumerWidget {
         leading: BackButton(onPressed: () => context.go('/')),
         title: const Text('Settings'),
       ),
-      body: ListView(padding: const EdgeInsets.only(bottom: Space.xxl), children: [
+      body: ListView(padding: EdgeInsets.only(bottom: Space.xxl + MediaQuery.paddingOf(context).bottom), children: [
         ContentWidth(
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Padding(

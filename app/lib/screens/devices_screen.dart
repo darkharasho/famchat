@@ -86,7 +86,7 @@ class DevicesScreen extends ConsumerWidget {
         data: (list) => RefreshIndicator(
           onRefresh: () => ref.refresh(devicesProvider.future),
           child: ListView(
-            padding: const EdgeInsets.only(top: Space.sm, bottom: 96), // clear of the button
+            padding: EdgeInsets.only(top: Space.sm, bottom: 96 + MediaQuery.paddingOf(context).bottom), // clear of the button
             children: [
               ContentWidth(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
