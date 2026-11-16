@@ -46,7 +46,8 @@ class ChatKeys {
       ];
 
   /// Fetches wraps for this device, keeps the ones that verify and returns how many keys were new.
-  /// A wrap counts only if its wrapper's certificate chains to a current member's identity key.
+  /// A wrap counts only if its wrapper is a live device whose certificate chains to a current
+  /// member's identity key (a revoked device's key may be in the wrong hands).
   Future<int> fetch({String? chatId}) async {
     final wraps = await _api.wraps(chatId: chatId);
     var added = 0;
@@ -54,7 +55,7 @@ class ChatKeys {
       if (await _db.key(w.chatId, w.epoch) != null) continue;
       final members = {for (final m in await _db.membersOf(w.chatId)) m.userId};
       final wrapper = await _dir.device(w.wrapperDeviceId);
-      if (wrapper == null || !wrapper.trusted || !members.contains(wrapper.userId)) continue;
+      if (wrapper == null || wrapper.revoked || !wrapper.trusted || !members.contains(wrapper.userId)) continue;
       try {
         final k = await unwrapChatKey(
           wrap: w,

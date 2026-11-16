@@ -350,6 +350,9 @@ class ChatDb extends _$ChatDb {
   Future<Uint8List?> key(String chatId, int epoch) async =>
       (await (select(localKeys)..where((k) => k.chatId.equals(chatId) & k.epoch.equals(epoch))).getSingleOrNull())?.key;
 
+  /// Every chat key held (pairing hands them all to a new device).
+  Future<List<KeyRow>> allKeys() => select(localKeys).get();
+
   Future<List<KeyRow>> keysOf(String chatId) => (select(localKeys)..where((k) => k.chatId.equals(chatId))).get();
 
   // --- directory ---

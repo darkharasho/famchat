@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>FamChat uses the camera to scan the code shown on a new device you are signing in.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>FamChat uses the microphone to record voice messages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

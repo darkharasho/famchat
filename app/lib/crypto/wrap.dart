@@ -52,7 +52,7 @@ class ChatKeyWrap {
 /// "famchat-wrap-v1" ‖ str(chatId) ‖ u32(epoch) ‖ str(recipientDeviceId) ‖ str(wrapperDeviceId) ‖ sealed.
 Uint8List wrapSignedBytes(
         String chatId, int epoch, String recipientDeviceId, String wrapperDeviceId, List<int> sealed) =>
-    (ByteWriter('famchat-wrap-v1')
+    (ByteWriter(domainWrap)
           ..str(chatId)
           ..u32(epoch)
           ..str(recipientDeviceId)
