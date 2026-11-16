@@ -90,6 +90,11 @@ class ApiClient {
             ));
       });
 
+  /// An authed call for routes without a typed method here (the chat API). Returns the decoded JSON
+  /// object, or null for an empty body.
+  Future<Map<String, Object?>?> authedJson(String method, String path, {Object? body, Map<String, String>? query}) =>
+      _authed((t) => _send(method, path, body: body, bearer: t, query: query));
+
   Future<T> _authed<T>(Future<T> Function(String accessToken) call) async {
     final tm = tokens;
     if (tm == null) throw const SignedOutException();
@@ -119,9 +124,11 @@ class ApiClient {
     Object? body,
     String? bearer,
     Duration timeout = timeout,
+    Map<String, String>? query,
   }) async {
     final abort = Completer<void>();
-    final req = http.AbortableRequest(method, base.replace(path: '/api$path'), abortTrigger: abort.future);
+    final url = base.replace(path: '/api$path', queryParameters: query == null || query.isEmpty ? null : query);
+    final req = http.AbortableRequest(method, url, abortTrigger: abort.future);
     if (bearer != null) req.headers['authorization'] = 'Bearer $bearer';
     if (body != null) {
       req.headers['content-type'] = 'application/json';

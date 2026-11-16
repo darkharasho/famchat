@@ -1,0 +1,167 @@
+// The chat API's JSON shapes (docs/protocol.md) and the interface the sync engine talks to.
+import '../crypto/wrap.dart';
+
+T _f<T>(Map<String, Object?> j, String k) {
+  final v = j[k];
+  if (v is T) return v;
+  throw FormatException('bad $k');
+}
+
+List<Map<String, Object?>> _list(Map<String, Object?> j, String k) {
+  final v = j[k];
+  if (v is! List) throw FormatException('bad $k');
+  return [
+    for (final x in v)
+      if (x is Map<String, Object?>) x else throw FormatException('bad $k item'),
+  ];
+}
+
+class DeviceDto {
+  const DeviceDto({
+    required this.id,
+    required this.userId,
+    required this.name,
+    required this.platform,
+    required this.encPub,
+    required this.signPub,
+    required this.certSig,
+    required this.revoked,
+  });
+
+  final String id, userId, name, platform, encPub, signPub, certSig;
+  final bool revoked;
+
+  factory DeviceDto.fromJson(String userId, Map<String, Object?> j) => DeviceDto(
+        id: _f(j, 'id'),
+        userId: userId,
+        name: _f(j, 'name'),
+        platform: _f(j, 'platform'),
+        encPub: _f(j, 'encPub'),
+        signPub: _f(j, 'signPub'),
+        certSig: _f(j, 'certSig'),
+        revoked: _f(j, 'revoked'),
+      );
+}
+
+class UserDto {
+  const UserDto({required this.id, required this.name, required this.isAdmin, required this.identityPub, required this.devices});
+
+  final String id, name, identityPub;
+  final bool isAdmin;
+  final List<DeviceDto> devices;
+
+  factory UserDto.fromJson(Map<String, Object?> j) {
+    final id = _f<String>(j, 'id');
+    return UserDto(
+      id: id,
+      name: _f(j, 'name'),
+      isAdmin: _f(j, 'isAdmin'),
+      identityPub: _f(j, 'identityPub'),
+      devices: [for (final d in _list(j, 'devices')) DeviceDto.fromJson(id, d)],
+    );
+  }
+}
+
+class MemberDto {
+  const MemberDto({required this.userId, required this.joinedSeq, required this.lastReadSeq});
+  final String userId;
+  final int joinedSeq, lastReadSeq;
+
+  factory MemberDto.fromJson(Map<String, Object?> j) =>
+      MemberDto(userId: _f(j, 'userId'), joinedSeq: _f(j, 'joinedSeq'), lastReadSeq: _f(j, 'lastReadSeq'));
+}
+
+class ChatDto {
+  const ChatDto({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.createdBy,
+    required this.currentEpoch,
+    required this.epochReady,
+    required this.lastSeq,
+    required this.lastMessageAt,
+    required this.createdAt,
+    required this.members,
+  });
+
+  final String id, kind, createdBy;
+  final String? title;
+  final int currentEpoch, lastSeq, createdAt;
+  final int? lastMessageAt;
+  final bool epochReady;
+  final List<MemberDto> members;
+
+  bool get isDirect => kind == 'direct';
+
+  factory ChatDto.fromJson(Map<String, Object?> j) => ChatDto(
+        id: _f(j, 'id'),
+        kind: _f(j, 'kind'),
+        title: _f<String?>(j, 'title'),
+        createdBy: _f(j, 'createdBy'),
+        currentEpoch: _f(j, 'currentEpoch'),
+        epochReady: _f(j, 'epochReady'),
+        lastSeq: _f(j, 'lastSeq'),
+        lastMessageAt: _f<int?>(j, 'lastMessageAt'),
+        createdAt: _f(j, 'createdAt'),
+        members: [for (final m in _list(j, 'members')) MemberDto.fromJson(m)],
+      );
+}
+
+class MessageDto {
+  const MessageDto({
+    required this.chatId,
+    required this.seq,
+    required this.id,
+    required this.senderUserId,
+    required this.senderDeviceId,
+    required this.envelope,
+    required this.createdAt,
+  });
+
+  final String chatId, id, senderUserId, senderDeviceId;
+  final int seq, createdAt;
+  final Map<String, Object?> envelope;
+
+  factory MessageDto.fromJson(Map<String, Object?> j) => MessageDto(
+        chatId: _f(j, 'chatId'),
+        seq: _f(j, 'seq'),
+        id: _f(j, 'id'),
+        senderUserId: _f(j, 'senderUserId'),
+        senderDeviceId: _f(j, 'senderDeviceId'),
+        envelope: _f(j, 'envelope'),
+        createdAt: _f(j, 'createdAt'),
+      );
+}
+
+class MissingWrap {
+  const MissingWrap({required this.chatId, required this.epoch, required this.deviceId});
+  final String chatId, deviceId;
+  final int epoch;
+
+  factory MissingWrap.fromJson(Map<String, Object?> j) =>
+      MissingWrap(chatId: _f(j, 'chatId'), epoch: _f(j, 'epoch'), deviceId: _f(j, 'deviceId'));
+}
+
+/// The REST side of the chat protocol. Errors are `ApiException` / `NetworkException` /
+/// `SignedOutException` from `lib/api/models.dart`; malformed bodies throw [FormatException].
+abstract interface class ChatApi {
+  Future<List<UserDto>> users();
+  Future<List<ChatDto>> chats();
+  Future<ChatDto> chat(String id);
+  Future<({ChatDto chat, bool created})> createChat({
+    required String id,
+    required String kind,
+    String? title,
+    required List<String> userIds,
+    required List<ChatKeyWrap> wraps,
+  });
+  Future<ChatDto> addMembers(String chatId, List<String> userIds, List<ChatKeyWrap> wraps);
+  Future<void> removeMember(String chatId, String userId);
+  Future<void> createEpoch(String chatId, int epoch, List<ChatKeyWrap> wraps);
+  Future<List<MessageDto>> messages(String chatId, {int? after, int? before, int limit = 100});
+  Future<List<ChatKeyWrap>> wraps({String? chatId});
+  Future<int> putWraps(List<ChatKeyWrap> wraps);
+  Future<List<MissingWrap>> missingWraps();
+  Future<String> wsTicket();
+}
