@@ -18,6 +18,9 @@ final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
 
 final _lines = <String>[];
 
+/// Per-test bound: a spike that can't finish fails here instead of hanging the CI job.
+const _spikeTimeout = Timeout(Duration(seconds: 60));
+
 void report(String name, Object result) {
   final line = 'SPIKE $name $platform $result';
   _lines.add(line);
@@ -55,31 +58,37 @@ void main() {
     sw.stop();
     report('crypto', '${sw.elapsedMilliseconds}ms/100');
     expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
-  });
+  }, timeout: _spikeTimeout);
 
   testWidgets('database persists across reopen', (_) async {
     final body = await dbRoundTrip('spike_$platform');
     report('db', 'ok');
     expect(body, startsWith('hello '));
-  });
+  }, timeout: _spikeTimeout);
 
   testWidgets('websocket echo', (_) async {
     final r = await wsEchoRoundTrip(echoUrl());
     report('ws', r);
     expect(r.allOk, isTrue);
-  });
+  }, timeout: _spikeTimeout);
 
   testWidgets('audio fixture plays', (_) async {
     if (audioInitError != null) {
       report('audio', 'init failed: $audioInitError');
       fail('audio backend init failed: $audioInitError');
     }
-    final r = await playFixture();
+    final PlayResult r;
+    try {
+      r = await playFixture();
+    } catch (e) {
+      report('audio', 'error: $e');
+      rethrow;
+    }
     report('audio', r);
     expect(r.duration, isNotNull);
     expect(r.duration!.inMilliseconds, inInclusiveRange(1800, 2200));
     expect(r.reachedEnd, isTrue);
-  });
+  }, timeout: _spikeTimeout);
 
   testWidgets('recorder probe', (_) async {
     try {
@@ -87,5 +96,5 @@ void main() {
     } catch (e) {
       report('recorder', 'error: $e');
     }
-  });
+  }, timeout: _spikeTimeout);
 }

@@ -5,8 +5,13 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../audio_init.dart';
+
 const kFixtureAsset = 'assets/spike/sample.m4a';
 const _timeout = Duration(seconds: 10);
+
+/// Upper bound for a whole play (load, playback, dispose): a spike may fail, it must never hang.
+const playBudget = Duration(seconds: 30);
 
 class PlayResult {
   const PlayResult({required this.duration, required this.reachedEnd});
@@ -27,7 +32,10 @@ class RecordProbe {
   String toString() => 'aacLc=$aacLc opus=$opus permission=$hasPermission';
 }
 
-Future<PlayResult> _play(Future<Duration?> Function(AudioPlayer) load, {double volume = 0}) async {
+Future<PlayResult> _play(Future<Duration?> Function(AudioPlayer) load, {double volume = 0}) =>
+    _playOnce(load, volume: volume).timeout(playBudget);
+
+Future<PlayResult> _playOnce(Future<Duration?> Function(AudioPlayer) load, {double volume = 0}) async {
   final player = AudioPlayer();
   try {
     final duration = await load(player).timeout(_timeout);
@@ -41,7 +49,7 @@ Future<PlayResult> _play(Future<Duration?> Function(AudioPlayer) load, {double v
     });
     return PlayResult(duration: duration, reachedEnd: reachedEnd);
   } finally {
-    await player.dispose();
+    await disposeWithin(player.dispose);
   }
 }
 
@@ -53,12 +61,12 @@ Future<RecordProbe> probeRecorder() async {
   final rec = AudioRecorder();
   try {
     return RecordProbe(
-      aacLc: await rec.isEncoderSupported(AudioEncoder.aacLc),
-      opus: await rec.isEncoderSupported(AudioEncoder.opus),
-      hasPermission: await rec.hasPermission(request: false),
+      aacLc: await rec.isEncoderSupported(AudioEncoder.aacLc).timeout(_timeout),
+      opus: await rec.isEncoderSupported(AudioEncoder.opus).timeout(_timeout),
+      hasPermission: await rec.hasPermission(request: false).timeout(_timeout),
     );
   } finally {
-    await rec.dispose();
+    await disposeWithin(rec.dispose);
   }
 }
 
@@ -81,6 +89,6 @@ Future<Duration?> recordAndPlay(Duration length) async {
     final result = await _play((p) => kIsWeb ? p.setUrl(out) : p.setFilePath(out), volume: 1);
     return result.duration;
   } finally {
-    await rec.dispose();
+    await disposeWithin(rec.dispose);
   }
 }

@@ -34,7 +34,7 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -47,9 +47,13 @@ jobs:
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
       - name: Integration test
+        # libmpv under xvfb has hung the audio spike past every Dart timeout (a stuck native call), and
+        # reruns passed. Kill a run that outlives its budget and try once more instead of waiting out
+        # the job timeout; a real failure still fails after the second attempt.
         run: |
           set -o pipefail
-          xvfb-run -a flutter test integration_test -d linux 2>&1 | tee spikes.log
+          run() { timeout --kill-after=30s 480 xvfb-run -a flutter test integration_test -d linux 2>&1 | tee -a spikes.log; }
+          run || { echo "::warning::integration test failed or timed out; retrying once"; run; }
       - name: Spike summary
         if: always()
         run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
