@@ -41,7 +41,7 @@ class FakePairSession {
   /// ephPub, encPub, signPub, keysMac, deviceName, platform as posted.
   final Map<String, String> body;
   final DateTime createdAt;
-  String? userId, certSig, bundle;
+  String? userId, certSig, bundle, approvedByDevice;
   DateTime? approvedAt, claimedAt, cancelledAt;
 
   DateTime get expiresAt => createdAt.add(FakeServer.pairTtl);
@@ -94,9 +94,11 @@ class FakeServer {
   FakePairSession? pairSessionByCode(String code) => pairSessions.values.where((x) => x.code == code).firstOrNull;
 
   /// What an approving device posts, without HTTP.
-  void approvePairing(String code, {required String userId, required String certSig, required String bundle}) {
+  void approvePairing(String code,
+      {required String userId, required String certSig, required String bundle, String? approverDeviceId}) {
     final x = pairSessionByCode(code)!;
     x
+      ..approvedByDevice = approverDeviceId
       ..userId = userId
       ..certSig = certSig
       ..bundle = bundle
@@ -128,6 +130,10 @@ class FakeServer {
     final d = devices[deviceId]!;
     d.revokedAt = now();
     d.refresh = d.prevRefresh = null;
+    // Unclaimed pairings this device approved die with it (server/src/routes/devices.ts).
+    for (final x in pairSessions.values) {
+      if (x.approvedByDevice == deviceId && x.claimedAt == null) x.cancelledAt ??= now();
+    }
   }
 
   /// Makes every access token issued so far invalid (like a server-side expiry).
@@ -193,7 +199,7 @@ class FakeServer {
     if (r.method == 'POST' && path == '/api/auth/invite/redeem') return await _redeem(_body(r));
     if (r.method == 'POST' && path == '/api/auth/refresh') return _refresh(_body(r));
     if (r.method == 'POST' && path == '/api/devices/pair/start') return _pairStart(_body(r));
-    if (r.method == 'POST' && path == '/api/devices/pair/claim') return _pairClaim(_body(r));
+    if (r.method == 'POST' && path == '/api/devices/pair/claim') return await _pairClaim(_body(r));
     if (r.method == 'POST' && path == '/api/devices/pair/cancel') {
       final x = _owned(_body(r));
       if (x == null) return _err('not_found');
@@ -257,7 +263,8 @@ class FakeServer {
         } catch (_) {
           return _err('invalid_request');
         }
-        approvePairing(x.code, userId: userId, certSig: cert['certSig']!, bundle: b['bundle'] as String);
+        approvePairing(x.code,
+            userId: userId, certSig: cert['certSig']!, bundle: b['bundle'] as String, approverDeviceId: deviceId);
         return http.Response('', 204);
       }
     }
@@ -310,7 +317,7 @@ class FakeServer {
     return x != null && x.secret == b['secret'] ? x : null;
   }
 
-  http.Response _pairClaim(Map<String, Object?> b) {
+  Future<http.Response> _pairClaim(Map<String, Object?> b) async {
     if (failNextClaims > 0) {
       failNextClaims--;
       return _err('internal');
@@ -326,13 +333,17 @@ class FakeServer {
     final refresh = _token();
     if (x.claimedAt == null) {
       if (!x.approvedAt!.add(claimRetry).isAfter(t)) return _err('pairing_invalid');
-      x.claimedAt = t;
+      final approver = x.approvedByDevice == null ? null : devices[x.approvedByDevice];
+      if (approver != null && approver.revokedAt != null) return _err('pairing_invalid');
+      // Against the user's current identity key (an admin reset since the approval fails it).
       final cert = {
         'identityPub': users[x.userId]!.identityPub,
         'encPub': x.body['encPub']!,
         'signPub': x.body['signPub']!,
         'certSig': x.certSig!,
       };
+      if (!await verifyDeviceCert(DeviceCert.fromJson(cert))) return _err('pairing_invalid');
+      x.claimedAt = t;
       devices[x.deviceId] = FakeDevice(x.deviceId, x.userId!, x.body['deviceName']!, x.body['platform']!, cert, refresh, t);
     } else {
       final d = devices[x.deviceId]!;

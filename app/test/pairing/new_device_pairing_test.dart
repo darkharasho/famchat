@@ -82,8 +82,8 @@ void main() {
     server.dropNextClaimResponse = true;
     await approveByHand(server, s.code);
     final done = await settled() as PairDone;
-    expect(server.devices.length, 1);
-    expect(server.devices.values.single.refresh, done.device.session.refreshToken);
+    expect(server.devices.length, 2); // the approver's phone and the new device, once
+    expect(server.devices[done.device.session.deviceId]!.refresh, done.device.session.refreshToken);
   });
 
   test('network and server errors keep polling', () async {
@@ -109,6 +109,32 @@ void main() {
   test('a session the server expired ends the wait', () async {
     final s = await showing();
     server.pairSessionByCode(s.code.lookup)!.cancelledAt = clock;
+    expect(await settled(), isA<PairExpired>());
+  });
+
+  test('an approval from a device revoked before the claim ends the wait', () async {
+    final slow = NewDevicePairing(
+      api: ApiClient(client: server.client, base: testBase),
+      deviceName: 'Laptop',
+      platform: 'linux',
+      pollEvery: const Duration(milliseconds: 30),
+      now: () => clock,
+    );
+    await slow.start();
+    final s = slow.state as PairShowing;
+    final approver = await approveByHand(server, s.code);
+    server.revoke(approver.approverDeviceId); // before the first poll claims it
+    final end = await slow.states.firstWhere((x) => x is! PairShowing).timeout(const Duration(seconds: 5));
+    expect(end, isA<PairExpired>());
+    expect(server.devices.containsKey(server.pairSessionByCode(s.code.lookup)!.deviceId), isFalse);
+    await slow.dispose();
+  });
+
+  test('a claim after an identity reset is refused', () async {
+    final s = await showing();
+    final approver = await approveByHand(server, s.code);
+    final other = await newIdentityKey();
+    server.users[approver.userId] = FakeUser(approver.userId, 'Alice', false, b64url(await publicKeyOf(other)));
     expect(await settled(), isA<PairExpired>());
   });
 

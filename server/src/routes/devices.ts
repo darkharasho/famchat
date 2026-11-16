@@ -51,6 +51,13 @@ devices.delete("/:id", async (c) => {
          AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND revoked_at = ? AND user_id = ?)
        RETURNING id`,
     ).bind(userId, id, now, userId),
+    // Pairings this device approved but that weren't claimed yet die with it (a stolen phone
+    // approving the thief's laptop).
+    db.prepare(
+      `UPDATE pair_sessions SET cancelled_at = ?
+       WHERE approved_by_device = ? AND claimed_at IS NULL AND cancelled_at IS NULL
+         AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND revoked_at = ? AND user_id = ?)`,
+    ).bind(now, id, id, now, userId),
   ]);
   if (res.meta.changes !== 1) throw new ApiError("not_found");
   try {

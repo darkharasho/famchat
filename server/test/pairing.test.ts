@@ -1,8 +1,8 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { b64urlEncode } from "../src/lib/encoding";
-import { CLAIM_RETRY_MS, PAIR_TTL_MS } from "../src/routes/pairing";
-import { api, createDirect, type TestUser } from "./chat-helpers";
+import { CLAIM_RETRY_MS, ipKey, PAIR_TTL_MS } from "../src/routes/pairing";
+import { addDevice, api, createDirect, type TestUser } from "./chat-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 import { BASE, certMessage, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
 
@@ -108,6 +108,24 @@ describe("POST /api/devices/pair/start", () => {
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: "rate_limited" });
     expect((await start(startBody(k), "198.51.100.2")).status).toBe(201);
+  });
+});
+
+describe("ipKey", () => {
+  it("keys IPv6 by /64 and IPv4 as is", () => {
+    expect(ipKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:0db8:0001:0002:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:db8::5")).toBe("2001:db8:0:0::/64");
+    expect(ipKey("::1")).toBe("0:0:0:0::/64");
+    expect(ipKey("203.0.113.9")).toBe("203.0.113.9");
+    expect(ipKey(null)).toBeNull();
+  });
+
+  it("addresses in one IPv6 /64 share the start limit", async () => {
+    const k = await makeKeys();
+    for (let i = 0; i < 5; i++) expect((await start(startBody(k), `2001:db8:7:7::${i + 1}`)).status).toBe(201);
+    expect((await start(startBody(k), "2001:db8:7:7:ffff::9")).status).toBe(429);
+    expect((await start(startBody(k), "2001:db8:7:8::1")).status).toBe(201);
   });
 });
 
@@ -253,6 +271,36 @@ describe("pairing", () => {
   it("approval needs auth", async () => {
     const s = await startOk();
     const res = await SELF.fetch(`${BASE}/api/devices/pair/${s.code}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("revoking the approving device voids its unclaimed approval", async () => {
+    const alice = await insertUserWithDevice();
+    const laptop = await addDevice(alice.userId);
+    const s = await startOk();
+    // The approval comes from Alice's (stolen) laptop; Alice then revokes the laptop from her phone.
+    await env.DB.prepare(
+      `UPDATE pair_sessions SET user_id = ?, approved_by_device = ?, approved_at = ?, cert_sig = ?, bundle = ? WHERE id = ?`,
+    ).bind(alice.userId, laptop, Date.now(), await certFor(alice, s.keys), rand(200), s.sessionId).run();
+    expect((await api(alice.accessToken, "DELETE", `/devices/${laptop}`)).status).toBe(204);
+    const res = await claim(s.sessionId, s.secret);
+    expect(res.status).toBe(410);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM devices WHERE id = ?").bind(s.deviceId).first<number>("n");
+    expect(n).toBe(0);
+  });
+
+  it("a claim needs the approving device to still be live", async () => {
+    const alice = await insertUserWithDevice();
+    const s = await startOk();
+    await approve(alice, s);
+    // Revoked by some path that didn't cancel the session (e.g. the refresh-reuse rule).
+    await env.DB.prepare("UPDATE devices SET revoked_at = 1 WHERE id = ?").bind(alice.deviceId).run();
+    expect((await claim(s.sessionId, s.secret)).status).toBe(410);
+  });
+
+  it("approve needs auth", async () => {
+    const s = await startOk();
+    const res = await SELF.fetch(`${BASE}/api/devices/pair/${s.code}/approve`, jsonReq("POST", { deviceId: s.deviceId, certSig: rand(64), bundle: rand(200) }));
     expect(res.status).toBe(401);
   });
 

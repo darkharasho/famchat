@@ -90,7 +90,10 @@ which never leaves the two devices.
    approved claim creates N's device row (within 10 min of approval) and sends `device {userId,
    deviceId}` to the user and everyone sharing a chat with them. Claiming again with the same secret
    within 10 min returns new tokens for the same device (lost response). Wrong secret or unknown session
-   → 404; expired, cancelled or too late → 410 `pairing_invalid`.
+   → 404; expired, cancelled or too late → 410 `pairing_invalid`. A first claim also fails with 410 if
+   the approving device has been revoked since (revoking a device cancels the pairings it approved), or if
+   the user's identity key changed (admin reset). Starts are limited per client network (an IPv6 /64, or
+   one IPv4 address).
 6. `POST /devices/pair/cancel {sessionId, secret}` → 204 (N gave up).
 
 Bundle: `sealed = ephPubE(32) ‖ nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 with key
@@ -130,8 +133,9 @@ of whatever the server shows. Member devices also add wraps for N on the `device
 ### Keys
 - `GET /keys/wraps[?chatId=]` → `{wraps: Wrap[]}` addressed to your device, for chats you're in.
 - `PUT /keys/wraps {wraps}` → `{added}`. Missing-wrap repair: each wrap's `wrapperDeviceId` is your
-  device, its epoch exists, and its recipient is a live device of a current member. Existing wraps are
-  never replaced (first wrap wins).
+  device, its epoch exists, and its recipient is a live device of a current member. An existing wrap is
+  kept (first wrap wins) unless its wrapper's user left the chat or its wrapper device was revoked;
+  then yours replaces it.
 - `GET /keys/missing` → `{missing: [{chatId, epoch, deviceId}]}`: live member devices with no usable
   wrap for an epoch that **your** device holds a wrap for. A wrap made by a device of someone who left,
   or by a revoked device, isn't usable and may be replaced by `PUT /keys/wraps`.
@@ -140,6 +144,12 @@ of whatever the server shows. Member devices also add wraps for N on the `device
 Accept a wrap only if `wrapperDeviceId` is a **live** (not revoked) device whose cert verifies against
 its user's identity key, that user is a current member of the chat, and the wrap's signature verifies with that device's
 `signPub` over `"famchat-wrap-v1" ‖ str(chatId) ‖ u32(epoch) ‖ str(recipientDeviceId) ‖ str(wrapperDeviceId) ‖ sealed`.
+
+Wraps from a revoked wrapper are refused even if they were made before the revocation: the client
+can't tell when a wrap was signed, and a revoked device's sign key may be in someone else's hands
+(with the server's help they could otherwise hand out a chat key of their choosing). The server counts
+such wraps as missing, so any live member device holding the key re-wraps it. The cost: if every live
+device that held an epoch's key is gone, a device that hadn't opened its wrap yet loses that epoch.
 
 ## WebSocket
 

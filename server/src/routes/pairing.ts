@@ -30,7 +30,22 @@ export const CLAIM_RETRY_MS = 10 * 60 * 1000;
 const KEEP_MS = 60 * 60 * 1000;
 export const MAX_PER_IP = 5;
 const IP_WINDOW_MS = 10 * 60 * 1000;
-export const MAX_LIVE = 50;
+/** A storage guard only; the per-network limit is what stops abuse. */
+export const MAX_LIVE = 1000;
+
+/**
+ * The rate-limit key for a client address: an IPv6 address by its /64 (one subscriber usually has a
+ * whole /64), an IPv4 address as is.
+ */
+export function ipKey(ip: string | null): string | null {
+  if (!ip) return null;
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.toLowerCase().split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
 export const MAX_BUNDLE_BYTES = 256 * 1024;
 
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -63,6 +78,7 @@ type Session = {
   expires_at: number;
   user_id: string | null;
   approved_at: number | null;
+  approved_by_device: string | null;
   cert_sig: string | null;
   bundle: string | null;
   claimed_at: number | null;
@@ -83,7 +99,7 @@ pairing.post("/start", async (c) => {
 
   const db = c.env.DB;
   const now = Date.now();
-  const ip = c.req.header("cf-connecting-ip") ?? null;
+  const ip = ipKey(c.req.header("cf-connecting-ip") ?? null);
   const [, perIp, live] = await db.batch([
     db.prepare("DELETE FROM pair_sessions WHERE created_at < ?").bind(now - KEEP_MS),
     db.prepare("SELECT COUNT(*) AS n FROM pair_sessions WHERE client_ip = ? AND created_at > ?").bind(ip, now - IP_WINDOW_MS),
@@ -191,6 +207,10 @@ pairing.post("/claim", async (c) => {
   let created = false;
   if (s.claimed_at === null) {
     if (s.approved_at + CLAIM_RETRY_MS <= now) throw new ApiError("pairing_invalid");
+    // The approving device must still be live: a revoked (maybe stolen) device can't add devices.
+    const approver = await db.prepare("SELECT 1 FROM devices WHERE id = ? AND revoked_at IS NULL")
+      .bind(s.approved_by_device).first();
+    if (!approver) throw new ApiError("pairing_invalid");
     // The user's identity key may have changed since the approval (an admin reset).
     const identityPub = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(userId).first<string>("identity_pub");
     if (!identityPub || !(await verifyDeviceCert(identityPub, s.enc_pub, s.sign_pub, s.cert_sig!))) {

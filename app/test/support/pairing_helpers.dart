@@ -92,7 +92,7 @@ Future<StartedPairing> startPairing(FakeServer server, {String deviceName = 'Lap
 
 /// An approving device's side, done by hand: approves the session shown as [code] for a user
 /// created here with [identity], sealing [bundleFor]'s result with [secret] (default: the code's).
-Future<({String userId, SimpleKeyPair identity})> approveByHand(
+Future<({String userId, SimpleKeyPair identity, String approverDeviceId})> approveByHand(
   FakeServer server,
   PairCode code, {
   String name = 'Alice',
@@ -101,6 +101,7 @@ Future<({String userId, SimpleKeyPair identity})> approveByHand(
 }) async {
   final identity = await newIdentityKey();
   final userId = server.addUser(name, identityPub: b64url(await publicKeyOf(identity)));
+  final approverDeviceId = server.addDevice(userId, name: 'Phone', platform: 'android');
   final x = server.pairSessionByCode(code.lookup)!;
   final certSig = await signCertFor(
       identity: identity, encPub: b64urlDecode(x.body['encPub']!), signPub: b64urlDecode(x.body['signPub']!));
@@ -117,6 +118,7 @@ Future<({String userId, SimpleKeyPair identity})> approveByHand(
     secret: secret ?? code.secret,
     plaintext: bundle.encode(),
   );
-  server.approvePairing(code.lookup, userId: userId, certSig: b64url(certSig), bundle: b64url(sealed));
-  return (userId: userId, identity: identity);
+  server.approvePairing(code.lookup,
+      userId: userId, certSig: b64url(certSig), bundle: b64url(sealed), approverDeviceId: approverDeviceId);
+  return (userId: userId, identity: identity, approverDeviceId: approverDeviceId);
 }
