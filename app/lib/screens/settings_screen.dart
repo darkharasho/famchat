@@ -99,6 +99,13 @@ class SettingsScreen extends ConsumerWidget {
                 style: theme.textTheme.bodySmall,
               ),
             ),
+            const SizedBox(height: Space.xs),
+            Center(
+              child: TextButton(
+                onPressed: () => showLicensePage(context: context, applicationName: 'FamChat'),
+                child: const Text('Open-source licenses'),
+              ),
+            ),
           ]),
         ),
       ]),

@@ -16,6 +16,7 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // famchat.dev/join#<token>: the fragment is the invite, not a route, so use path URLs.
   usePathUrlStrategy();
+  registerFontLicenses();
   // just_audio has no Linux/Windows backend of its own; media_kit (libmpv) provides it.
   // If libmpv is missing, only audio playback is lost.
   final audioErr = initAudioBackend();

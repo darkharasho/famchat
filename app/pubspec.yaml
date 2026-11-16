@@ -88,6 +88,8 @@ dev_dependencies:
 flutter:
   assets:
     - assets/spike/
+    - assets/fonts/OFL-FamiljenGrotesk.txt
+    - assets/fonts/OFL-AtkinsonHyperlegibleNext.txt
 
   # Bundled, never fetched at runtime. Both are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
   fonts:

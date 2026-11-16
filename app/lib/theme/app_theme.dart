@@ -1,6 +1,8 @@
 // The one place FamChat's look is defined: colors, type, shapes and component defaults for the day
 // (light) and evening (dark) themes. See docs/superpowers/plans/2026-11-16-ui-design.md.
 import 'package:cupertino_ui/cupertino_ui.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:material_ui/material_ui.dart';
 
 import 'motion.dart';
@@ -12,6 +14,18 @@ const kDisplayFont = 'FamiljenGrotesk';
 
 /// Everything you read: messages, labels, buttons.
 const kBodyFont = 'AtkinsonHyperlegibleNext';
+
+/// Adds the bundled fonts' SIL Open Font License texts to the app's license page.
+void registerFontLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    for (final (family, file) in const [
+      ('Familjen Grotesk', 'assets/fonts/OFL-FamiljenGrotesk.txt'),
+      ('Atkinson Hyperlegible Next', 'assets/fonts/OFL-AtkinsonHyperlegibleNext.txt'),
+    ]) {
+      yield LicenseEntryWithLineBreaks([family], await rootBundle.loadString(file));
+    }
+  });
+}
 
 const _lightScheme = ColorScheme(
   brightness: Brightness.light,
