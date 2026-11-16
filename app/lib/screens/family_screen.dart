@@ -9,6 +9,9 @@ import '../admin/admin_providers.dart';
 import '../api/models.dart';
 import '../chat/wire.dart';
 import '../session/session_controller.dart';
+import '../theme/tokens.dart';
+import '../widgets/common.dart';
+import '../widgets/person_avatar.dart';
 import 'account_providers.dart';
 import 'sign_out.dart';
 
@@ -23,45 +26,56 @@ class FamilyScreen extends ConsumerWidget {
     final myId = session is SignedIn ? session.session.userId : null;
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: () => context.go('/')),
+        leading: BackButton(onPressed: () => context.go('/settings')),
         title: const Text('Family'),
         actions: [
-          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: () => ref.invalidate(familyProvider)),
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded), onPressed: () => ref.invalidate(familyProvider)),
         ],
       ),
       body: switch (family) {
         AsyncData(value: final users) => ListView(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.only(top: Space.sm, bottom: Space.xxl),
             children: [
-              if (me != null && !me.recoveryCodeSet) const _RecoveryCodeCard(),
-              if (users.where((u) => u.isAdmin).length < 2) const _SecondAdminCard(),
-              for (final u in users) _UserTile(user: u, mine: u.id == myId),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.person_add_alt_1_outlined),
-                title: const Text('Invite someone'),
-                onTap: () => context.go('/invite'),
+              ContentWidth(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  if (me != null && !me.recoveryCodeSet) const _RecoveryCodeCard(),
+                  if (users.where((u) => u.isAdmin).length < 2) const _SecondAdminCard(),
+                  SettingsGroup(
+                    title: '${users.length} ${users.length == 1 ? 'person' : 'people'}',
+                    children: [for (final u in users) _UserTile(user: u, mine: u.id == myId)],
+                  ),
+                  SettingsGroup(children: [
+                    ListTile(
+                      leading: const TileIcon(Icons.person_add_alt_rounded),
+                      title: const Text('Invite someone'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => context.go('/invite'),
+                    ),
+                    ListTile(
+                      leading: const TileIcon(Icons.photo_library_outlined),
+                      title: const Text('Media storage'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => context.go('/storage'),
+                    ),
+                    if (me != null && me.recoveryCodeSet)
+                      ListTile(
+                        key: const Key('new-recovery-code'),
+                        leading: const TileIcon(Icons.key_rounded),
+                        title: const Text('Make a new admin recovery code'),
+                        subtitle: const Text('The old code stops working.'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => context.go('/family/recovery-code'),
+                      ),
+                  ]),
+                ]),
               ),
-              ListTile(
-                leading: const Icon(Icons.storage_outlined),
-                title: const Text('Media storage'),
-                onTap: () => context.go('/storage'),
-              ),
-              if (me != null && me.recoveryCodeSet)
-                ListTile(
-                  key: const Key('new-recovery-code'),
-                  leading: const Icon(Icons.key_outlined),
-                  title: const Text('Make a new admin recovery code'),
-                  subtitle: const Text('The old code stops working.'),
-                  onTap: () => context.go('/family/recovery-code'),
-                ),
             ],
           ),
-        AsyncError() => Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text("Couldn't load the family."),
-              TextButton(onPressed: () => ref.invalidate(familyProvider), child: const Text('Retry')),
-            ]),
+        AsyncError() => EmptyState(
+            art: Icon(Icons.cloud_off_rounded, size: 48, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            title: "Couldn't load the family.",
+            body: 'Check your connection and try again.',
+            action: OutlinedButton(onPressed: () => ref.invalidate(familyProvider), child: const Text('Retry')),
           ),
         _ => const Center(child: CircularProgressIndicator()),
       },
@@ -75,26 +89,41 @@ class _RecoveryCodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final s = theme.colorScheme;
     return Card(
       key: const Key('recovery-code-card'),
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      color: theme.colorScheme.errorContainer,
+      margin: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.lg),
+      color: s.secondaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Save your admin recovery code', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
+        padding: const EdgeInsets.all(Space.xl),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: s.onSecondaryContainer),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.key_rounded, color: s.onSecondaryContainer),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: Text(
+                'Save your admin recovery code',
+                style: theme.textTheme.titleMedium?.copyWith(color: s.onSecondaryContainer),
+              ),
+            ),
+          ]),
+          const SizedBox(height: Space.sm),
           const Text(
             'If you lose every device and there is no other admin, this printed code is the only way '
             'back into your admin account.',
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Space.lg),
           FilledButton(
             key: const Key('open-recovery-code'),
+            style: FilledButton.styleFrom(backgroundColor: s.onSecondaryContainer, foregroundColor: s.secondaryContainer),
             onPressed: () => context.go('/family/recovery-code'),
             child: const Text('Save recovery code'),
           ),
-        ]),
+          ]),
+        ),
       ),
     );
   }
@@ -108,14 +137,14 @@ class _SecondAdminCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       key: const Key('second-admin-card'),
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      color: theme.colorScheme.secondaryContainer,
-      child: const Padding(
-        padding: EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+      child: Padding(
+        padding: const EdgeInsets.all(Space.xl),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Add a second admin'),
-          SizedBox(height: 4),
+          Text('Add a second admin', style: theme.textTheme.titleMedium),
+          const SizedBox(height: Space.sm),
           Text(
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             'If you lose every device, another admin can reset your account. Pick someone you trust '
             'below and choose "Make admin".',
           ),
@@ -141,9 +170,9 @@ class _UserTile extends ConsumerWidget {
     ];
     return ListTile(
       key: Key('family-user-${user.id}'),
-      leading: CircleAvatar(child: Text(user.name.isEmpty ? '?' : user.name.characters.first.toUpperCase())),
+      leading: PersonAvatar(label: user.name, colorKey: user.id),
       title: Text(user.name),
-      subtitle: Text(details.join(' · ')),
+      subtitle: Text(details.join(', ')),
       trailing: mine
           ? null
           : PopupMenuButton<String>(
@@ -234,7 +263,7 @@ class _ResetLinkDialog extends StatelessWidget {
     return AlertDialog(
       title: Text("$name's new sign-in link"),
       content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Card(child: Padding(padding: const EdgeInsets.all(12), child: SelectableText(link.url, key: const Key('reset-link')))),
+        Card(child: Padding(padding: const EdgeInsets.all(Space.lg), child: SelectableText(link.url, key: const Key('reset-link')))),
         const SizedBox(height: 8),
         Text(
           'Give this to $name yourself (in person or on a call). It works once and expires on $expires. '

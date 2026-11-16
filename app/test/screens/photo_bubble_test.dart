@@ -160,9 +160,9 @@ void main() {
       final chatId = await ChatSync(db: alice.db, api: alice.api, hub: alice.hub, me: alice.me).openDirect(bob.userId);
       await alice.media.upload(key: newUlid(), chatId: chatId, kind: 'photo', bytes: Uint8List(3 * 1024 * 1024));
     });
-    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
-    await tester.tap(find.text('Storage'));
+    await tester.tap(find.text('Media storage'));
     await settle(tester);
     expect(find.text('Media storage'), findsOneWidget);
     expect(find.text('3.0 MB of 8.0 GB used'), findsOneWidget);
@@ -173,11 +173,9 @@ void main() {
   chatTestWidgets("members don't see Storage", (tester) async {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);
-    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
-    expect(find.text('Storage'), findsNothing);
-    await tester.tapAt(const Offset(10, 700));
-    await settle(tester);
+    expect(find.text('Media storage'), findsNothing);
     go(tester, '/storage');
     await settle(tester);
     expect(find.text('Media storage'), findsNothing);

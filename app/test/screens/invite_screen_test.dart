@@ -19,7 +19,9 @@ void main() {
     });
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server, admin: true);
-    await tester.tap(find.byTooltip('Invite someone'));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Invite someone'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('invite-name-field')), 'Grandpa');
     await tester.tap(find.byKey(const Key('create-invite-button')));
@@ -37,7 +39,9 @@ void main() {
   testWidgets('non-admin has no invite action', (tester) async {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);
-    expect(find.byTooltip('Invite someone'), findsNothing);
+    appRouter(tester).go('/settings');
+    await tester.pumpAndSettle();
+    expect(find.text('Invite someone'), findsNothing);
     appRouter(tester).go('/invite');
     await tester.pumpAndSettle();
     expect(find.text('No chats yet'), findsOneWidget);
@@ -49,8 +53,8 @@ void main() {
     server.users.values.single.isAdmin = true;
     appRouter(tester).go('/devices');
     await tester.pumpAndSettle();
-    appRouter(tester).go('/');
+    appRouter(tester).go('/settings');
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Invite someone'), findsOneWidget);
+    expect(find.text('Invite someone'), findsOneWidget);
   });
 }

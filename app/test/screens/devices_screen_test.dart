@@ -18,7 +18,9 @@ void main() {
   String myUserId() => server.users.keys.single;
 
   Future<void> openDevices(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Devices'));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
   }
 
