@@ -1,6 +1,7 @@
 // HTTP calls to the FamChat API (server/src/routes). Authed calls retry once after a 401.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -95,6 +96,85 @@ class ApiClient {
   Future<Map<String, Object?>?> authedJson(String method, String path, {Object? body, Map<String, String>? query}) =>
       _authed((t) => _send(method, path, body: body, bearer: t, query: query));
 
+  /// Media transfers get longer than [timeout]: 30 s plus 1 s per 50 kB.
+  static Duration mediaTimeout(int bytes) => Duration(seconds: 30 + bytes ~/ 50000);
+
+  /// Download deadline when the size isn't known up front (blobs are at most 16 MiB).
+  static const downloadTimeout = Duration(minutes: 5);
+
+  /// Authed POST of raw bytes (`application/octet-stream`, `Content-Length` set), streamed in
+  /// 64 KiB chunks; [onProgress] gets the bytes the network has taken so far. Returns the JSON body.
+  Future<Map<String, Object?>?> authedUpload(
+    String path, {
+    Map<String, String>? query,
+    required Uint8List bytes,
+    void Function(int sent, int total)? onProgress,
+  }) =>
+      _authed((t) async {
+        final res = await _raw('POST', path, bearer: t, query: query, upload: bytes, onProgress: onProgress,
+            timeout: mediaTimeout(bytes.length));
+        return _json(res);
+      });
+
+  /// Authed GET of a raw body (media downloads).
+  Future<Uint8List> authedBytes(String path) => _authed((t) async {
+        final res = await _raw('GET', path, bearer: t, timeout: downloadTimeout);
+        return res.bodyBytes;
+      });
+
+  /// Sends a request whose body (if any) is raw bytes. Status ≥ 400 throws [ApiException].
+  Future<http.Response> _raw(
+    String method,
+    String path, {
+    required String bearer,
+    Map<String, String>? query,
+    Uint8List? upload,
+    void Function(int sent, int total)? onProgress,
+    required Duration timeout,
+  }) async {
+    final abort = Completer<void>();
+    final url = base.replace(path: '/api$path', queryParameters: query == null || query.isEmpty ? null : query);
+    final http.BaseRequest req = upload == null
+        ? http.AbortableRequest(method, url, abortTrigger: abort.future)
+        : _UploadRequest(method, url, upload, onProgress, abort.future);
+    req.headers['authorization'] = 'Bearer $bearer';
+    final http.Response res;
+    try {
+      res = await (() async => http.Response.fromStream(await client.send(req)))().timeout(timeout, onTimeout: () {
+        if (!abort.isCompleted) abort.complete();
+        throw TimeoutException('request timed out', timeout);
+      });
+    } on http.ClientException catch (e) {
+      throw NetworkException(e);
+    } on TimeoutException catch (e) {
+      throw NetworkException(e);
+    }
+    if (res.statusCode >= 400) throw ApiException(res.statusCode, _errorCode(res.body));
+    return res;
+  }
+
+  static String _errorCode(String body) {
+    try {
+      final j = jsonDecode(body);
+      if (j is Map && j['error'] is String) return j['error'] as String;
+    } on FormatException {
+      // not JSON
+    }
+    return 'unknown';
+  }
+
+  static Map<String, Object?>? _json(http.Response res) {
+    if (res.body.isEmpty) return null;
+    final Object? j;
+    try {
+      j = jsonDecode(res.body);
+    } on FormatException {
+      throw ApiException(res.statusCode, 'bad_response');
+    }
+    if (j is! Map<String, Object?>) throw ApiException(res.statusCode, 'bad_response');
+    return j;
+  }
+
   Future<T> _authed<T>(Future<T> Function(String accessToken) call) async {
     final tm = tokens;
     if (tm == null) throw const SignedOutException();
@@ -161,5 +241,36 @@ class ApiClient {
     if (json == null) return null;
     if (json is! Map<String, Object?>) throw ApiException(res.statusCode, 'bad_response');
     return json;
+  }
+}
+
+/// A raw-bytes body produced chunk by chunk, so progress follows what the client consumed
+/// (on the web the browser client buffers the whole body first, so progress jumps).
+class _UploadRequest extends http.BaseRequest with http.Abortable {
+  _UploadRequest(super.method, super.url, this.bytes, this.onProgress, this.abortTrigger) {
+    headers['content-type'] = 'application/octet-stream';
+    contentLength = bytes.length;
+  }
+
+  final Uint8List bytes;
+  final void Function(int sent, int total)? onProgress;
+
+  @override
+  final Future<void>? abortTrigger;
+
+  static const chunk = 64 * 1024;
+
+  @override
+  http.ByteStream finalize() {
+    super.finalize();
+    return http.ByteStream(_chunks());
+  }
+
+  Stream<List<int>> _chunks() async* {
+    for (var i = 0; i < bytes.length; i += chunk) {
+      final end = i + chunk < bytes.length ? i + chunk : bytes.length;
+      yield Uint8List.sublistView(bytes, i, end);
+      onProgress?.call(end, bytes.length);
+    }
   }
 }

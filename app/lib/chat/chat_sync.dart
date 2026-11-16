@@ -292,6 +292,7 @@ class ChatSync {
     return switch (p) {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
+      PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
@@ -444,6 +445,8 @@ class ChatSync {
   /// Encrypts [row] under the chat's current epoch (same id every time) and sends it.
   Future<void> _sendRow(MessageRow row) async {
     if (row.state != 'pending' || !hub.connected) return;
+    final gate = beforeSend;
+    if (gate != null && !await gate(row)) return; // e.g. its media is still uploading
     final ok = await keys.ensureCurrentEpoch(row.chatId);
     final chat = await db.chatById(row.chatId);
     if (chat == null) {
@@ -466,8 +469,18 @@ class ChatSync {
     }
   }
 
-  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId}) async {
-    final id = newUlid(_now());
+  /// Called before each outbox send; false keeps the row pending without sending it (the media
+  /// layer returns false until a message's blobs are uploaded, then calls [flushSoon]).
+  Future<bool> Function(MessageRow row)? beforeSend;
+
+  /// Queues an outbox flush (after work queued before it).
+  void flushSoon() => unawaited(_enqueue(_flushOutbox));
+
+  /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
+  Future<String> enqueueMessage(String chatId, Plaintext p, {String? id}) => _enqueueMessage(chatId, p, id: id);
+
+  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId, String? id}) async {
+    id ??= newUlid(_now());
     await db.insertMessageIfAbsent(MessageRow(
       id: id,
       chatId: chatId,

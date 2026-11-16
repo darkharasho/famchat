@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../crypto/encoding.dart';
+
 const maxTextLength = 4000;
 
 /// The trimmed text if it can be sent (1–4000 characters), else null.
@@ -45,6 +47,8 @@ sealed class Plaintext {
           throw const FormatException('bad reaction');
         }
         return ReactionBody(target, emoji);
+      case 'photo':
+        return PhotoBody._fromJson(j);
       default:
         return UnknownBody(kind, j);
     }
@@ -70,7 +74,91 @@ class ReactionBody extends Plaintext {
   Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'emoji': emoji};
 }
 
-/// A kind this version doesn't know (photos and voice before plans 7–8 land, or newer kinds).
+/// A photo: two encrypted blobs in R2 (the full JPEG and a thumbnail) under one fresh media [key]
+/// (`lib/crypto/media.dart`), each pinned by the SHA-256 of its ciphertext.
+class PhotoBody extends Plaintext {
+  const PhotoBody({
+    required this.mediaKey,
+    required this.thumbKey,
+    required this.key,
+    required this.sha256,
+    required this.thumbSha256,
+    required this.width,
+    required this.height,
+    required this.bytes,
+    this.mime = 'image/jpeg',
+  });
+
+  /// Media keys (`/api/media/:key`) of the full image and the thumbnail.
+  final String mediaKey, thumbKey;
+
+  /// The 32-byte media key, and SHA-256 of each encrypted blob.
+  final Uint8List key, sha256, thumbSha256;
+
+  /// Full image size in pixels, and its JPEG size in bytes.
+  final int width, height, bytes;
+  final String mime;
+
+  @override
+  String get kind => 'photo';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'mediaKey': mediaKey,
+        'thumbKey': thumbKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        'thumbSha256': b64url(thumbSha256),
+        'width': width,
+        'height': height,
+        'bytes': bytes,
+        'mime': mime,
+      };
+
+  factory PhotoBody._fromJson(Map<String, Object?> j) {
+    String id(String k) {
+      final v = j[k];
+      if (v is! String || v.isEmpty || v.length > 64) throw FormatException('bad $k');
+      return v;
+    }
+
+    Uint8List b32(String k) {
+      final v = j[k];
+      try {
+        if (v is String) {
+          final b = b64urlDecode(v);
+          if (b.length == 32) return b;
+        }
+      } on CryptoFailure {
+        // falls through
+      }
+      throw FormatException('bad $k');
+    }
+
+    int positive(String k, int max) {
+      final v = j[k];
+      if (v is! int || v < 1 || v > max) throw FormatException('bad $k');
+      return v;
+    }
+
+    final mime = j['mime'];
+    if (mime is! String || mime.isEmpty || mime.length > 64) throw const FormatException('bad mime');
+    return PhotoBody(
+      mediaKey: id('mediaKey'),
+      thumbKey: id('thumbKey'),
+      key: b32('key'),
+      sha256: b32('sha256'),
+      thumbSha256: b32('thumbSha256'),
+      width: positive('width', 100000),
+      height: positive('height', 100000),
+      bytes: positive('bytes', 1 << 30),
+      mime: mime,
+    );
+  }
+}
+
+/// A kind this version doesn't know (voice before plan 8 lands, or newer kinds).
 /// Keeps the whole body, so a later version can show the stored message.
 class UnknownBody extends Plaintext {
   const UnknownBody(this.kind, [this.raw = const {}]);
