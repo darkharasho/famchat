@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -7,6 +9,7 @@ import 'audio_init.dart';
 import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
+import 'voice/voice_io.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +19,8 @@ void main() {
   // If libmpv is missing, only audio playback is lost.
   final audioErr = initAudioBackend();
   if (audioErr != null) debugPrint('audio backend unavailable: $audioErr');
+  // Recordings and decrypted voice clips a crash or kill left behind.
+  unawaited(sweepVoiceFiles());
   final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
   runApp(ProviderScope(
     overrides: [initialInviteTokenProvider.overrideWithValue(invite)],

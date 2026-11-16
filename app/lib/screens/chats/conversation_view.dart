@@ -10,10 +10,15 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../media/photo.dart';
+import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/providers.dart';
+import '../../voice/providers.dart';
+import '../../voice/recording.dart';
+import '../../voice/waveform.dart';
 import 'chat_list.dart' show ChatAvatar;
 import 'message_bubble.dart';
+import 'record_bar.dart';
 
 /// One chat: header, messages, typing line and the composer.
 class ConversationView extends ConsumerStatefulWidget {
@@ -29,12 +34,83 @@ class ConversationView extends ConsumerStatefulWidget {
 class _ConversationViewState extends ConsumerState<ConversationView> {
   final _text = TextEditingController();
   final _focus = FocusNode();
+  late final VoiceRecording _recording;
+  late final ProviderContainer _container;
+
+  /// Where a recording goes, fixed when it starts: the clip still sends if the user leaves the chat
+  /// while the recorder is finishing (when `ref` can no longer be used).
+  MediaService? _voiceTarget;
+  bool _empty = true;
+  RecordingStatus _recStatus = RecordingStatus.idle;
+
+  @override
+  void initState() {
+    super.initState();
+    _recording = VoiceRecording(ref.read(voiceRecorderFactoryProvider), onAutoStop: _sendVoice);
+    _container = ProviderScope.containerOf(context, listen: false);
+    _recording.addListener(() {
+      if (_recording.status != _recStatus && mounted) setState(() => _recStatus = _recording.status);
+    });
+    _text.addListener(() {
+      final empty = _text.text.trim().isEmpty;
+      if (empty != _empty && mounted) setState(() => _empty = empty);
+    });
+  }
 
   @override
   void dispose() {
+    _recording.dispose(); // discards an unsent recording (one being finished still sends)
+    // No voice keeps playing without its bubble on screen (after this frame: providers cannot change
+    // while the tree is building).
+    final container = _container;
+    unawaited(Future(() async {
+      try {
+        await container.read(voicePlaybackProvider.notifier).stop();
+      } on StateError {
+        // the whole app went away
+      }
+    }));
     _text.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  Future<void> _startRecording() async {
+    unawaited(ref.read(voicePlaybackProvider.notifier).stop());
+    _voiceTarget = ref.read(mediaServiceProvider);
+    await _recording.start();
+    switch (_recording.status) {
+      case RecordingStatus.denied:
+        _snack("FamChat can't use the microphone. Allow microphone access in your device settings.");
+      case RecordingStatus.failed:
+        _snack("Couldn't start recording.");
+      default:
+        break;
+    }
+  }
+
+  Future<void> _finishRecording() async {
+    final clip = await _recording.finish();
+    if (clip == null) {
+      _snack("Couldn't record that voice message.");
+      return;
+    }
+    await _sendVoice(clip);
+  }
+
+  Future<void> _sendVoice(RecordedVoice clip) async {
+    final media = _voiceTarget;
+    if (media == null) {
+      _snack("Couldn't send that voice message.");
+      return;
+    }
+    try {
+      await media.sendVoice(widget.chatId, clip);
+    } on ArgumentError {
+      _snack("That voice message can't be sent.");
+    } catch (_) {
+      _snack("Couldn't send that voice message.");
+    }
   }
 
   void _markRead() {
@@ -117,6 +193,36 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   bool get _enterSends =>
       kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
 
+  /// Attach, the text field, and Send (or the mic while the field is empty and recording works here).
+  Widget _composer(bool canRecord) {
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      IconButton(tooltip: 'Attach photo', icon: const Icon(Icons.add_photo_alternate_outlined), onPressed: _attach),
+      Expanded(
+        child: CallbackShortcuts(
+          bindings: {
+            if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
+          },
+          child: TextField(
+            key: const Key('composer'),
+            controller: _text,
+            focusNode: _focus,
+            minLines: 1,
+            maxLines: 5,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            decoration: const InputDecoration(hintText: 'Message', border: OutlineInputBorder()),
+            onChanged: (_) => ref.read(chatSyncProvider)?.typing(widget.chatId),
+          ),
+        ),
+      ),
+      const SizedBox(width: 4),
+      if (_empty && canRecord)
+        IconButton.filled(tooltip: 'Record voice message', icon: const Icon(Icons.mic), onPressed: _startRecording)
+      else
+        IconButton.filled(tooltip: 'Send', icon: const Icon(Icons.send), onPressed: _send),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatId = widget.chatId;
@@ -129,6 +235,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final messages = ref.watch(messagesProvider(chatId)).value ?? const <MessageRow>[];
     ref.listen(messagesProvider(chatId), (_, _) => _markRead());
     final theme = Theme.of(context);
+    final canRecord = ref.watch(voiceRecordingSupportedProvider).value ?? false;
 
     if (chat == null) {
       return Scaffold(
@@ -238,29 +345,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 4, 8, 8),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              IconButton(tooltip: 'Attach photo', icon: const Icon(Icons.add_photo_alternate_outlined), onPressed: _attach),
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
-                  },
-                  child: TextField(
-                    key: const Key('composer'),
-                    controller: _text,
-                    focusNode: _focus,
-                    minLines: 1,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    keyboardType: TextInputType.multiline,
-                    decoration: const InputDecoration(hintText: 'Message', border: OutlineInputBorder()),
-                    onChanged: (_) => ref.read(chatSyncProvider)?.typing(chatId),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton.filled(tooltip: 'Send', icon: const Icon(Icons.send), onPressed: _send),
-            ]),
+            child: _recording.active
+                ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)
+                : _composer(canRecord),
           ),
         ),
       ]),

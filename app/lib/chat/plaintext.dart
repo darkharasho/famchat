@@ -51,6 +51,8 @@ sealed class Plaintext {
         return ReactionBody(target, emoji);
       case 'photo':
         return PhotoBody._fromJson(j);
+      case 'voice':
+        return VoiceBody._fromJson(j);
       default:
         return UnknownBody(kind, j);
     }
@@ -118,50 +120,123 @@ class PhotoBody extends Plaintext {
         'mime': mime,
       };
 
-  factory PhotoBody._fromJson(Map<String, Object?> j) {
-    String id(String k) {
-      final v = j[k];
-      // Media keys are ULIDs (they become URL path segments).
-      if (v is! String || !_ulid.hasMatch(v)) throw FormatException('bad $k');
-      return v;
-    }
+  factory PhotoBody._fromJson(Map<String, Object?> j) => PhotoBody(
+        mediaKey: _mediaId(j, 'mediaKey'),
+        thumbKey: _mediaId(j, 'thumbKey'),
+        key: _bytes32(j, 'key'),
+        sha256: _bytes32(j, 'sha256'),
+        thumbSha256: _bytes32(j, 'thumbSha256'),
+        width: _positive(j, 'width', 100000),
+        height: _positive(j, 'height', 100000),
+        bytes: _positive(j, 'bytes', 1 << 30),
+        mime: _mime(j),
+      );
+}
 
-    Uint8List b32(String k) {
-      final v = j[k];
+/// A voice clip: one encrypted AAC-LC `.m4a` blob in R2 under a fresh media [key], pinned by the
+/// SHA-256 of its ciphertext, with its length and a small waveform for the bubble.
+class VoiceBody extends Plaintext {
+  const VoiceBody({
+    required this.mediaKey,
+    required this.key,
+    required this.sha256,
+    required this.durationMs,
+    required this.waveform,
+    required this.bytes,
+    this.mime = 'audio/mp4',
+  });
+
+  /// Receivers accept clips up to this long; senders stop at 10 minutes.
+  static const maxDurationMs = 15 * 60 * 1000;
+
+  /// Most waveform peaks a receiver accepts (senders send 64).
+  static const maxWaveform = 128;
+
+  /// Media key (`/api/media/:key`) of the clip.
+  final String mediaKey;
+
+  /// The 32-byte media key, and SHA-256 of the encrypted blob.
+  final Uint8List key, sha256;
+  final int durationMs;
+
+  /// Peaks 0–255, oldest first.
+  final List<int> waveform;
+
+  /// Size of the `.m4a` in bytes.
+  final int bytes;
+  final String mime;
+
+  @override
+  String get kind => 'voice';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'mediaKey': mediaKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        'durationMs': durationMs,
+        'waveform': b64url(Uint8List.fromList(waveform)),
+        'bytes': bytes,
+        'mime': mime,
+      };
+
+  factory VoiceBody._fromJson(Map<String, Object?> j) {
+    final w = j['waveform'];
+    Uint8List? wave;
+    if (w is String) {
       try {
-        if (v is String) {
-          final b = b64urlDecode(v);
-          if (b.length == 32) return b;
-        }
+        wave = w.isEmpty ? Uint8List(0) : b64urlDecode(w);
       } on CryptoFailure {
-        // falls through
+        wave = null;
       }
-      throw FormatException('bad $k');
     }
-
-    int positive(String k, int max) {
-      final v = j[k];
-      if (v is! int || v < 1 || v > max) throw FormatException('bad $k');
-      return v;
-    }
-
-    final mime = j['mime'];
-    if (mime is! String || mime.isEmpty || mime.length > 64) throw const FormatException('bad mime');
-    return PhotoBody(
-      mediaKey: id('mediaKey'),
-      thumbKey: id('thumbKey'),
-      key: b32('key'),
-      sha256: b32('sha256'),
-      thumbSha256: b32('thumbSha256'),
-      width: positive('width', 100000),
-      height: positive('height', 100000),
-      bytes: positive('bytes', 1 << 30),
-      mime: mime,
+    if (wave == null || wave.length > maxWaveform) throw const FormatException('bad waveform');
+    return VoiceBody(
+      mediaKey: _mediaId(j, 'mediaKey'),
+      key: _bytes32(j, 'key'),
+      sha256: _bytes32(j, 'sha256'),
+      durationMs: _positive(j, 'durationMs', maxDurationMs),
+      waveform: List.unmodifiable(wave),
+      bytes: _positive(j, 'bytes', 1 << 30),
+      mime: _mime(j),
     );
   }
 }
 
-/// A kind this version doesn't know (voice before plan 8 lands, or newer kinds).
+String _mediaId(Map<String, Object?> j, String k) {
+  final v = j[k];
+  // Media keys are ULIDs (they become URL path segments).
+  if (v is! String || !_ulid.hasMatch(v)) throw FormatException('bad $k');
+  return v;
+}
+
+Uint8List _bytes32(Map<String, Object?> j, String k) {
+  final v = j[k];
+  try {
+    if (v is String) {
+      final b = b64urlDecode(v);
+      if (b.length == 32) return b;
+    }
+  } on CryptoFailure {
+    // falls through
+  }
+  throw FormatException('bad $k');
+}
+
+int _positive(Map<String, Object?> j, String k, int max) {
+  final v = j[k];
+  if (v is! int || v < 1 || v > max) throw FormatException('bad $k');
+  return v;
+}
+
+String _mime(Map<String, Object?> j) {
+  final mime = j['mime'];
+  if (mime is! String || mime.isEmpty || mime.length > 64) throw const FormatException('bad mime');
+  return mime;
+}
+
+/// A kind this version doesn't know (a newer version's).
 /// Keeps the whole body, so a later version can show the stored message.
 class UnknownBody extends Plaintext {
   const UnknownBody(this.kind, [this.raw = const {}]);

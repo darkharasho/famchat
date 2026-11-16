@@ -273,6 +273,9 @@ class ChatDb extends _$ChatDb {
   Future<List<MessageRow>> undecryptable() =>
       (select(localMessages)..where((m) => m.kind.equals('undecryptable'))).get();
 
+  /// Messages stored with a kind an older version didn't know.
+  Future<List<MessageRow>> unknownKind() => (select(localMessages)..where((m) => m.kind.equals('unknown'))).get();
+
   /// Newest stored seq in a chat.
   Future<int?> maxSeq(String chatId) async {
     final q = selectOnly(localMessages)

@@ -454,4 +454,39 @@ void main() {
     await bob2.sync.idle;
     expect(backend.calls.where((c) => c == 'GET /keys/wraps').length, lessThanOrEqualTo(3));
   });
+
+  test('messages an older version stored as unknown are shown once this version knows the kind', () async {
+    final d = await backend.addUser('Alice');
+    MessageRow unknown(String id, Map<String, Object?> body) => MessageRow(
+          id: id,
+          chatId: 'C',
+          seq: 1,
+          senderUserId: 'U',
+          senderDeviceId: 'D',
+          kind: 'unknown',
+          body: jsonEncode(body),
+          targetId: null,
+          envelope: null,
+          createdAt: 1,
+          state: 'sent',
+        );
+    final voice = {
+      'kind': 'voice',
+      'mediaKey': '01JC0000000000000000000000',
+      'key': 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
+      'sha256': 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI',
+      'durationMs': 1200,
+      'waveform': '',
+      'bytes': 100,
+      'mime': 'audio/mp4',
+    };
+    await d.db.bindDevice(d.deviceId);
+    await d.db.insertMessageIfAbsent(unknown('M1', voice));
+    await d.db.insertMessageIfAbsent(unknown('M2', {'kind': 'sticker', 'id': 7}));
+    await d.db.insertMessageIfAbsent(unknown('M3', {...voice, 'durationMs': -1}));
+    await start(d);
+    expect((await d.db.messageById('M1'))!.kind, 'voice');
+    expect((await d.db.messageById('M2'))!.kind, 'unknown');
+    expect((await d.db.messageById('M3'))!.kind, 'invalid');
+  });
 }

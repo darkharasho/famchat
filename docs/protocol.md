@@ -59,7 +59,17 @@ Plaintext inside an envelope is UTF-8 JSON:
  "width", "height", "bytes", "mime":"image/jpeg"}   full image size in px; bytes = JPEG size
 ```
 
-Plan 8 adds `voice`; clients keep unknown kinds (whole body) and show them as unsupported.
+A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
+
+```
+{"kind":"voice", "mediaKey",                  media key of the clip
+ "key", "sha256",                             b64url 32-byte media key; SHA-256 of the encrypted blob
+ "durationMs",                                1..900000 accepted (senders stop at 600000, 10 minutes)
+ "waveform",                                  b64url of 0–128 peak bytes (0–255), oldest first; senders send 64
+ "bytes", "mime":"audio/mp4"}                 size of the .m4a
+```
+
+Clients keep unknown kinds (whole body) and show them as unsupported.
 
 ### Media blobs
 Each blob is `nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 under the message's media key with
