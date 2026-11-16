@@ -3,8 +3,10 @@ import type { AppEnv } from "./env";
 import { ApiError, errorResponse } from "./lib/errors";
 import { admin } from "./routes/admin";
 import { auth } from "./routes/auth";
+import { chats } from "./routes/chats";
 import { devices } from "./routes/devices";
 import { me } from "./routes/me";
+import { users } from "./routes/users";
 
 export const app = new Hono<AppEnv>().basePath("/api");
 
@@ -13,6 +15,8 @@ app.route("/admin", admin);
 app.route("/auth", auth);
 app.route("/devices", devices);
 app.route("/me", me);
+app.route("/users", users);
+app.route("/chats", chats);
 
 app.notFound(() => errorResponse("not_found"));
 app.onError((err) => {
