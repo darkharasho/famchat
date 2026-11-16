@@ -6,6 +6,7 @@ import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/reactions.dart';
 import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/pairing/bundle.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_chat_backend.dart';
@@ -280,6 +281,66 @@ void main() {
     await alice.sync.addMembers(chatId, [carol.d.userId]);
     await until(() async => (await carol.texts(chatId)).length == 2, reason: 'carol reads history');
     expect(await carol.texts(chatId), ['one', 'two']);
+  });
+
+  test('device event repairs wraps right away', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await until(() async => await bob.d.db.key(chatId, 1) != null);
+    final callsBefore = backend.calls.length;
+    final laptop = await backend.pairDevice(alice.d.userId); // not started: only online members can repair
+    await until(() async => backend.hasWrap(chatId, 1, laptop.deviceId), reason: 'a member adds the wrap');
+    expect(backend.calls.sublist(callsBefore), contains('PUT /keys/wraps'));
+    await laptop.dispose();
+  });
+
+  test('revoking a device rotates and the revoked device gets no new key', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final laptop = await start(await backend.addDevice(alice.d.userId));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await until(() async => await laptop.d.db.key(chatId, 1) != null);
+    backend.revoke(laptop.d.deviceId);
+    await until(() async => backend.chatDto(chatId).epochReady, reason: 'a member creates epoch 2');
+    expect(backend.chatDto(chatId).currentEpoch, 2);
+    expect(backend.hasWrap(chatId, 2, laptop.d.deviceId), isFalse);
+    await bob.sync.sendText(chatId, 'after revoke');
+    await until(() async => (await alice.texts(chatId)).contains('after revoke'));
+    expect(backend.storedMessages(chatId).last.envelope['epoch'], 2);
+  });
+
+  test('paired device reads history from the handover', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final carol = await start(await backend.addUser('Carol'));
+    final direct = await alice.sync.openDirect(bob.d.userId);
+    final group = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    await alice.sync.sendText(direct, 'one');
+    await until(() async => await bob.d.db.key(group, 1) != null);
+    await bob.sync.sendText(group, 'two');
+    await until(() async => (await alice.texts(group)).contains('two'), reason: 'alice gets two');
+    await carol.sync.leave(group); // epoch 2 in the group
+    await until(() async => backend.chatDto(group).epochReady, reason: 'epoch 2');
+    await alice.sync.sendText(group, 'three');
+    await until(() async => backend.storedMessages(group).length == 2, reason: 'three stored');
+
+    // Bob is offline: only the handover can give the new device its keys at first.
+    await bob.sync.stop();
+    final laptopDevice = await backend.pairDevice(alice.d.userId, notify: false);
+    final bundle = await buildHandover(
+      db: alice.d.db,
+      userId: alice.d.userId,
+      deviceId: laptopDevice.deviceId,
+      identity: backend.identityOf(alice.d.userId),
+      encPub: await laptopDevice.me.keys.encPub(),
+      signPub: await laptopDevice.me.keys.signPub(),
+    );
+    await installHandover(laptopDevice.db, bundle);
+    alice.d.hub.drop(); // and Alice's phone too
+    final laptop = await start(laptopDevice);
+    expect(await laptop.texts(direct), ['one']);
+    expect(await laptop.texts(group), ['two', 'three']);
   });
 
   test('openDirect twice returns the same chat, from either side', () async {

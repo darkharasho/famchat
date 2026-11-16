@@ -125,6 +125,28 @@ class FakeChatBackend {
     return TestDevice(this, me, FakeChatApi(this, userId, d.id), hub);
   }
 
+  /// A device added by pairing (server/src/routes/pairing.ts claim): its user and everyone sharing a
+  /// chat with them get a `device` event unless [notify] is false.
+  Future<TestDevice> pairDevice(String userId, {bool notify = true}) async {
+    final d = await addDevice(userId);
+    if (notify) _notify(_sharing(userId), {'type': 'device', 'userId': userId, 'deviceId': d.deviceId});
+    return d;
+  }
+
+  /// `DELETE /devices/:id` (server/src/routes/devices.ts): revokes, closes its socket, moves every chat
+  /// of its user to a new epoch, and sends `chat` and `device` events.
+  void revoke(String deviceId) {
+    final d = _devices[deviceId]!;
+    if (d.revoked) return;
+    d.revoked = true;
+    _hubs[deviceId]?.drop();
+    for (final c in _chats.values.where((c) => c.members.containsKey(d.userId))) {
+      c.currentEpoch++;
+      _notify(c.members.keys, {'type': 'chat', 'chatId': c.id});
+    }
+    _notify(_sharing(d.userId), {'type': 'device', 'userId': d.userId, 'deviceId': deviceId, 'revoked': true});
+  }
+
   /// The user's identity key pair (a device that holds it, for pairing tests).
   SimpleKeyPair identityOf(String userId) => _users[userId]!.identity;
 
@@ -179,10 +201,18 @@ class FakeChatBackend {
 
   // --- helpers mirroring the server ---
 
+  /// A usable wrap's wrapper is a live device of a current member (server/src/routes/keys.ts).
   bool _wrapperIsMember(ChatKeyWrap w) {
     final wrapper = _devices[w.wrapperDeviceId];
-    return wrapper != null && (_chats[w.chatId]?.members.containsKey(wrapper.userId) ?? false);
+    return wrapper != null && !wrapper.revoked && (_chats[w.chatId]?.members.containsKey(wrapper.userId) ?? false);
   }
+
+  /// The user and everyone sharing a chat with them (server/src/lib/family.ts).
+  Set<String> _sharing(String userId) => {
+        userId,
+        for (final c in _chats.values)
+          if (c.members.containsKey(userId)) ...c.members.keys,
+      };
 
   bool _hasUsableWrap(String chatId, int epoch, String deviceId) {
     final w = _wraps['$chatId|$epoch|$deviceId'];

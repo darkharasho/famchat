@@ -150,6 +150,32 @@ void main() {
     expect(await alice.keys.repairMissing(), 0);
   });
 
+  test('wrap from a revoked device is not accepted', () async {
+    final id = await group();
+    final laptop = Peer(await backend.addDevice(alice.d.userId));
+    await laptop.dir.refresh();
+    await laptop.syncChats();
+    // Alice's laptop (once legit) wraps for Bob's new tablet, then is revoked.
+    final tablet = Peer(await backend.addDevice(bob.d.userId));
+    await tablet.dir.refresh();
+    await tablet.syncChats();
+    final key = (await alice.keys.key(id, 1))!;
+    await laptop.d.db.putKey(id, 1, key);
+    await laptop.dir.refresh();
+    final w = (await laptop.keys.wrapKey(chatId: id, epoch: 1, key: key, devices: await laptop.dir.liveDevices([bob.d.userId])))
+        .firstWhere((w) => w.recipientDeviceId == tablet.d.deviceId);
+    backend.injectWrap(w);
+    backend.revoke(laptop.d.deviceId);
+    await tablet.dir.refresh();
+    expect(await tablet.keys.fetch(), 0);
+    expect(await tablet.keys.key(id, 1), isNull);
+    // The server lists the tablet as missing again, so a live member device repairs it.
+    expect(await alice.keys.repairMissing(), 1);
+    expect(await tablet.keys.fetch(), 1);
+    await laptop.d.dispose();
+    await tablet.d.dispose();
+  });
+
   test('wrapsForNewDevices covers every held epoch', () async {
     final id = await group(withCarol: false);
     await alice.d.db.putKey(id, 2, newChatKey());
