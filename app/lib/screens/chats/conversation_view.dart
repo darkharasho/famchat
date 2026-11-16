@@ -56,6 +56,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _recording.addListener(() {
       if (_recording.status != _recStatus && mounted) setState(() => _recStatus = _recording.status);
     });
+    // Desktop and web: type straight away. Phones wait for a tap (focus would raise the keyboard).
+    if (_enterSends) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
       if (empty != _empty && mounted) setState(() => _empty = empty);
@@ -218,7 +224,6 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             key: const Key('composer'),
             controller: _text,
             focusNode: _focus,
-            autofocus: _enterSends, // desktop and web: type straight away; phones wait for a tap
             minLines: 1,
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
@@ -348,9 +353,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             ),
         };
 
-    return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => context.go('/')},
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: tokens.chatBackdrop,
         appBar: AppBar(
           automaticallyImplyLeading: false,
@@ -473,7 +476,6 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             ),
           ]);
         }),
-      ),
     );
   }
 }

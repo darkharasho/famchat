@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/providers.dart';
+import '../../theme/tokens.dart';
+import '../../widgets/common.dart';
+import '../../widgets/person_avatar.dart';
 import '../sign_out.dart' show apiErrorMessage;
 
 /// Pick one person for a 1:1, or several (plus a title) for a group.
@@ -94,49 +97,58 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
           onPressed: () => context.canPop() ? context.pop() : context.go(addTo == null ? '/' : '/chats/$addTo/info'),
         ),
       ),
-      body: Column(children: [
-        if (group)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: TextField(
-              key: const Key('group-title'),
-              controller: _title,
-              maxLength: 60,
-              decoration: const InputDecoration(labelText: 'Group name'),
-              onChanged: (_) => _titleEdited = true,
+      body: SafeArea(
+        top: false,
+        child: ContentWidth(
+          child: Column(children: [
+            if (group)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+                child: TextField(
+                  key: const Key('group-title'),
+                  controller: _title,
+                  maxLength: 60,
+                  decoration: const InputDecoration(labelText: 'Group name'),
+                  onChanged: (_) => _titleEdited = true,
+                ),
+              ),
+            Expanded(
+              child: users.isEmpty
+                  ? EmptyState(
+                      art: Icon(Icons.diversity_3_rounded, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      title: 'No one else here yet',
+                      body: 'Once someone in the family joins, you can chat with them here.',
+                    )
+                  : ListView(padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs), children: [
+                      for (final u in users)
+                        CheckboxListTile(
+                          value: _picked.contains(u.id),
+                          onChanged: _busy ? null : (_) => _toggle(u.id, names),
+                          title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          secondary: PersonAvatar(label: u.name, colorKey: u.id),
+                        ),
+                    ]),
             ),
-          ),
-        Expanded(
-          child: users.isEmpty
-              ? const Center(child: Text('No one else here yet'))
-              : ListView(children: [
-                  for (final u in users)
-                    CheckboxListTile(
-                      value: _picked.contains(u.id),
-                      onChanged: _busy ? null : (_) => _toggle(u.id, names),
-                      title: Text(u.name),
-                      secondary: CircleAvatar(child: Text(u.name.characters.first.toUpperCase())),
-                    ),
-                ]),
-        ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _picked.isEmpty || _busy ? null : _create,
-              child: _busy
-                  ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(addTo != null ? 'Add' : (group ? 'Create group' : 'Chat')),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.sm),
+                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.lg),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _picked.isEmpty || _busy ? null : _create,
+                  child: _busy
+                      ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text(addTo != null ? 'Add' : (group ? 'Create group' : 'Chat')),
+                ),
+              ),
             ),
-          ),
+          ]),
         ),
-      ]),
+      ),
     );
   }
 }

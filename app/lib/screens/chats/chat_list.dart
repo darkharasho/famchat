@@ -7,6 +7,10 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../session/session_controller.dart';
+import '../../theme/tokens.dart';
+import '../../widgets/brand_mark.dart';
+import '../../widgets/common.dart';
+import '../../widgets/person_avatar.dart';
 
 /// Chats by latest activity, with unread counts and presence.
 class ChatList extends ConsumerWidget {
@@ -25,27 +29,19 @@ class ChatList extends ConsumerWidget {
     if (items.isEmpty) {
       final session = ref.watch(sessionProvider);
       final name = session is SignedIn ? session.session.name : null;
-      final theme = Theme.of(context);
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(name == null ? 'Hi' : 'Hi, $name', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 12),
-            Icon(Icons.forum_outlined, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text('No chats yet', style: theme.textTheme.bodyLarge),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: () => context.go('/new'),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('New chat'),
-            ),
-          ]),
+      return EmptyState(
+        art: const BrandMark(size: 72),
+        title: name == null ? 'Hi' : 'Hi, $name',
+        body: 'No chats yet',
+        action: FilledButton.icon(
+          onPressed: () => context.go('/new'),
+          icon: const Icon(Icons.add_comment_outlined),
+          label: const Text('New chat'),
         ),
       );
     }
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: Space.xs),
       itemCount: items.length,
       itemBuilder: (context, i) => _ChatTile(
         item: items[i],
@@ -70,77 +66,106 @@ class _ChatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    final t = FamTokens.of(context);
     final title = chatTitle(item.chat, item.members, users, me);
     final other = otherMember(item.chat, item.members, me);
+    final group = item.chat.kind == 'group';
+    final unread = item.unread > 0;
     final changed = item.members.any((m) {
       final u = users[m.userId];
       return m.userId != me && u != null && u.identityPub != u.trustedIdentityPub;
     });
-    return ListTile(
-      selected: selected,
-      leading: ChatAvatar(
-        label: title,
-        group: item.chat.kind == 'group',
-        online: other != null && online.contains(other),
-      ),
-      title: Row(children: [
-        Flexible(child: Text(title, overflow: TextOverflow.ellipsis)),
-        if (changed) ...[
-          const SizedBox(width: 4),
-          Icon(Icons.gpp_maybe_outlined, size: 16, color: theme.colorScheme.error, semanticLabel: 'Security key changed'),
-        ],
-      ]),
-      subtitle: Text(preview(item.last, users, me), maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(shortTime(DateTime.fromMillisecondsSinceEpoch(item.activity)), style: theme.textTheme.labelSmall),
-          if (item.unread > 0) ...[
-            const SizedBox(height: 4),
-            Badge(label: Text('${item.unread}')),
-          ],
-        ],
-      ),
-      onTap: () => context.go('/chats/${item.chat.id}'),
-    );
-  }
-}
-
-/// A round avatar with the name's initial (or a group icon) and an optional presence dot.
-class ChatAvatar extends StatelessWidget {
-  const ChatAvatar({super.key, required this.label, this.group = false, this.online = false, this.radius = 20});
-
-  final String label;
-  final bool group, online;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final initial = label.trim().isEmpty ? '?' : label.trim().characters.first.toUpperCase();
-    return Stack(clipBehavior: Clip.none, children: [
-      CircleAvatar(
-        radius: radius,
-        backgroundColor: group ? scheme.tertiaryContainer : scheme.primaryContainer,
-        child: group ? const Icon(Icons.group_outlined) : Text(initial),
-      ),
-      if (online)
-        Positioned(
-          right: -1,
-          bottom: -1,
-          child: Container(
-            key: const Key('presence-dot'),
-            width: radius * 0.6,
-            height: radius * 0.6,
-            decoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-              border: Border.all(color: scheme.surface, width: 2),
+    final tileColor = selected ? theme.listTileTheme.selectedTileColor : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
+      child: Material(
+        color: tileColor ?? Colors.transparent,
+        borderRadius: BorderRadius.circular(Radii.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Radii.md),
+          onTap: () => context.go('/chats/${item.chat.id}'),
+          child: Semantics(
+            selected: selected,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 10),
+              child: Row(children: [
+                PersonAvatar(
+                  label: title,
+                  colorKey: group ? item.chat.id : (other ?? item.chat.id),
+                  group: group,
+                  online: other != null && online.contains(other),
+                  radius: 26,
+                  ringColor: tileColor == null ? s.surface : Color.alphaBlend(tileColor, s.surface),
+                ),
+                const SizedBox(width: Space.md),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+                      Expanded(
+                        child: Row(children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: unread ? FontWeight.w700 : FontWeight.w600),
+                            ),
+                          ),
+                          if (changed) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.gpp_maybe_outlined, size: 16, color: s.error, semanticLabel: 'Security key changed'),
+                          ],
+                        ]),
+                      ),
+                      const SizedBox(width: Space.sm),
+                      Text(
+                        shortTime(DateTime.fromMillisecondsSinceEpoch(item.activity)),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: unread ? s.onSurface : s.onSurfaceVariant,
+                          fontWeight: unread ? FontWeight.w700 : null,
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      Expanded(
+                        child: Text(
+                          preview(item.last, users, me),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: unread ? s.onSurface : s.onSurfaceVariant,
+                            fontWeight: unread ? FontWeight.w500 : null,
+                          ),
+                        ),
+                      ),
+                      if (unread) ...[
+                        const SizedBox(width: Space.sm),
+                        Container(
+                          constraints: const BoxConstraints(minWidth: 22),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(color: t.badge, borderRadius: BorderRadius.circular(99)),
+                          child: Semantics(
+                            label: '${item.unread} unread',
+                            excludeSemantics: true,
+                            child: Text(
+                              '${item.unread}',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.labelSmall?.copyWith(color: t.onBadge, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ]),
+                  ]),
+                ),
+              ]),
             ),
           ),
         ),
-    ]);
+      ),
+    );
   }
 }
 
