@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import type { AppEnv } from "./env";
+import type { AppEnv, Env } from "./env";
+import type { PushJob } from "./hub";
+import { handlePushBatch } from "./push/consumer";
 import { ApiError, errorResponse } from "./lib/errors";
 import { admin } from "./routes/admin";
 import { auth } from "./routes/auth";
@@ -36,4 +38,7 @@ app.onError((err) => {
 
 export { FamilyHub } from "./hub";
 
-export default app;
+export default {
+  fetch: app.fetch,
+  queue: (batch, env) => handlePushBatch(batch, env),
+} satisfies ExportedHandler<Env, PushJob>;

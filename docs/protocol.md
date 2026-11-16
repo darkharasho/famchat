@@ -95,6 +95,22 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   The first member device to react creates the new epoch (`POST /chats/:id/epochs`) without the
   revoked device, exactly as after a leave.
 
+### Push (plan 9)
+- `PUT /devices/me/push {token: string | null}` → 204: this device's FCM token (1–4096 chars), or null to
+  stop pushes. The token is removed from any other device row that had it. Revoking a device or signing
+  out clears it. Android, iOS and web register one; desktop apps don't (they notify from the socket).
+- `POST /devices/me/push/test` → `{configured, error?, devices: [{id, name, result}]}`: sends "FamChat" /
+  "Test notification" to the caller's own devices that have a token, right away. `result` is `ok`,
+  `stale` (token cleared), `retry`, `auth` or `error`. `configured: false` means the Worker has no
+  `FCM_SERVICE_ACCOUNT` secret, so push is off.
+- A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
+  name, body "New message". Group: title = group title, body "New message from <sender>". Never message
+  content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
+- Who gets one: every device of the other members that has a token and **no open socket** when the
+  message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
+  answered no ping for 90 s are closed first (code 4002).
+  Mobile apps close their socket when sent to the background.
+
 ### Pairing a new device (plan 6)
 A new device N signs in by being approved from a signed-in device E of the same user. The server only
 relays: it can't read the bundle, and can't swap N's keys or forge a bundle without the secret `S`,
@@ -301,6 +317,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone): `GET /users` and check it |
 | close code 4001 | this device was revoked |
+| close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 
 ### `send` rules
 - `envelope.v == 1`, `nonce`/`ct`/`sig` base64url, JSON ≤ 64 KiB, `envelope.epoch == currentEpoch` and
@@ -318,8 +335,8 @@ On every (re)connect: `GET /users`, `GET /chats`, `GET /keys/wraps`, then per ch
 add wraps you can, then resend the outbox.
 
 ### Hooks for later plans
-- Push (plan 9): `FamilyHub.push.notify({chatId, senderUserId, messageId, userIds})` is called for members
-  with no open socket after each new message; it's a no-op until plan 9 replaces it with a Queue producer.
+- Push (plan 9, done): `FamilyHub.push.notify(job)` puts a job on the `famchat-push` queue; the Worker's
+  `queue()` handler (`src/push/consumer.ts`) sends it through FCM. See "Push" above.
 - Admin reset (plan 10) reuses plan 6: revoking the user's devices rotates every chat, and the
   `device` event plus missing-wrap repair restores history to the new device ("Account resets").
 

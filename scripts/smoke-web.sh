@@ -24,6 +24,8 @@ run_all() {
   local failed=0
   check "web app"            /                 200 text/html        flutter_bootstrap.js "${nav[@]}" || failed=1
   check "SPA fallback"       /join?code=x      200 text/html        flutter_bootstrap.js "${nav[@]}" || failed=1
+  # The push service worker must be the file, not the SPA fallback's index.html.
+  check "push worker"        /firebase-messaging-sw.js 200 "" famchatFirebaseConfig                || failed=1
   check "API health"         /api/health       200 application/json '"ok":true'                      || failed=1
   check "API 404 stays JSON" /api/does-not-exist 404 application/json not_found  "${nav[@]}"         || failed=1
   return $failed

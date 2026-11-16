@@ -26,6 +26,13 @@
   "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "FamilyHub" }] },
   "migrations": [{ "tag": "v1-hub", "new_sqlite_classes": ["FamilyHub"] }],
   // Encrypted photos, thumbnails and voice clips (ciphertext only). See src/lib/media.ts for the quota.
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "famchat-media" }]
-  // Secrets (wrangler secret put): TOKEN_SECRET, BOOTSTRAP_SECRET
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "famchat-media" }],
+  // Push: FamilyHub queues one job per message for members with no open socket; this Worker's
+  // queue() handler sends it through FCM (src/push/). Devices that failed are re-queued on their own.
+  "queues": {
+    "producers": [{ "binding": "PUSH_QUEUE", "queue": "famchat-push" }],
+    "consumers": [{ "queue": "famchat-push", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3 }]
+  }
+  // Secrets (wrangler secret put): TOKEN_SECRET, BOOTSTRAP_SECRET, and optionally FCM_SERVICE_ACCOUNT
+  // (without it push is off; scripts/setup-firebase.sh sets it).
 }

@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../chat/providers.dart';
 import '../../media/providers.dart';
+import '../../push/providers.dart';
 import '../../session/session_controller.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/brand_mark.dart';
@@ -35,6 +36,7 @@ class ChatsShell extends ConsumerWidget {
     ref.watch(meProvider); // keeps the stored name and admin flag current
     ref.watch(chatSyncProvider); // starts the chat engine
     ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
+    ref.watch(notificationsProvider); // push registration, desktop notifications
     final id = chatId;
     // Cmd on Apple platforms (where Ctrl+K and Ctrl+N edit text), Ctrl elsewhere.
     final apple = {TargetPlatform.macOS, TargetPlatform.iOS}.contains(defaultTargetPlatform);
@@ -102,6 +104,16 @@ class _ListPane extends ConsumerWidget {
         ],
       ),
       body: Column(children: [
+        if (ref.watch(notifyOfferProvider))
+          NoticeCard(
+            key: const Key('notify-offer'),
+            icon: Icons.notifications_outlined,
+            text: 'Get notified about new messages while FamChat is in the background.',
+            actions: [
+              TextButton(onPressed: () => ref.read(notifyOfferProvider.notifier).dismiss(), child: const Text('Not now')),
+              TextButton(onPressed: () => ref.read(notifyOfferProvider.notifier).enable(), child: const Text('Turn on')),
+            ],
+          ),
         // Admin setup: the recovery code is the last resort if every admin device is lost.
         if (admin && ref.watch(meProvider).value?.recoveryCodeSet == false)
           NoticeCard(

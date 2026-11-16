@@ -217,4 +217,44 @@ void main() {
       expect(h.tickets, 0);
     });
   });
+
+  test('stop then start during a pending connect leaves exactly one socket', () {
+    fakeAsync((async) {
+      final gates = <Completer<String>>[];
+      final sockets = <FakeSocket>[];
+      final hub = HubConnection(
+        ticket: () {
+          final c = Completer<String>();
+          gates.add(c);
+          return c.future;
+        },
+        apiBase: Uri.parse('https://famchat.dev'),
+        connect: (uri) {
+          final s = FakeSocket(uri);
+          sockets.add(s);
+          return s;
+        },
+        random: MidRandom(),
+      );
+      final states = <bool>[];
+      hub.connection.listen(states.add);
+      hub.start();
+      async.flushMicrotasks();
+      hub.stop(); // the app was paused while the ticket was on its way
+      hub.start(); // and resumed
+      async.flushMicrotasks();
+      expect(gates, hasLength(2));
+      gates[1].complete('T2');
+      async.flushMicrotasks();
+      gates[0].complete('T1'); // the first attempt finishes late
+      async.flushMicrotasks();
+      expect(sockets.where((s) => !s.closed).map((s) => s.uri.queryParameters['ticket']), ['T2']);
+      expect(states, [true]);
+      expect(hub.connected, isTrue);
+      async.elapse(const Duration(seconds: 30));
+      expect(sockets.where((s) => !s.closed), hasLength(1));
+      hub.stop();
+      async.flushMicrotasks();
+    });
+  });
 }

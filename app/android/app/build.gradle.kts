@@ -6,10 +6,15 @@ plugins {
 
 android {
     namespace = "dev.famchat.app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_local_notifications 23 (and the androidx.core it pulls in) needs SDK 37 to compile
+    // against; targetSdk stays Flutter's default.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications (desktop notifications) needs desugaring even though FamChat
+        // only uses it on macOS, Windows and Linux.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -58,4 +63,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

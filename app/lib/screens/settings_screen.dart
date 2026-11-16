@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../dev_tools.dart';
+import '../push/notification_settings.dart';
 import '../session/session_controller.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
@@ -63,6 +64,7 @@ class SettingsScreen extends ConsumerWidget {
               row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/devices',
                   key: const Key('settings-devices')),
             ]),
+            const NotificationSettingsGroup(),
             if (admin)
               SettingsGroup(title: 'Family', children: [
                 row(Icons.diversity_3_rounded, 'Family members', 'Admins, account resets, recovery code', '/family',

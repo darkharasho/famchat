@@ -7,12 +7,16 @@ import { isUlid } from "./lib/chatdb";
 import { evictOldest } from "./lib/media";
 import { messageOut } from "./lib/messages";
 
-/** A message for members with no open socket. Plan 9 turns this into a Queue job for FCM. */
+/** A message for members with no open socket: a job on the push queue (src/push/consumer.ts). */
 export interface PushJob {
   chatId: string;
   senderUserId: string;
   messageId: string;
   userIds: string[];
+  /** A retry: only these devices (the rest already got it). */
+  deviceIds?: string[];
+  /** 0 for the first try. */
+  attempt?: number;
 }
 
 export interface PushHook {
@@ -21,7 +25,24 @@ export interface PushHook {
 
 export const noPush: PushHook = { notify: async () => {} };
 
-type Att = { userId: string; deviceId: string };
+/** Puts jobs on the push queue; without the binding (local dev without queues) push is off. */
+export function queuePush(env: Pick<Env, "PUSH_QUEUE">): PushHook {
+  return {
+    notify: async (job) => {
+      if (env.PUSH_QUEUE) await env.PUSH_QUEUE.send(job);
+    },
+  };
+}
+
+/**
+ * A socket that answered no ping (clients ping every 25 s) for this long is half-open: a phone that
+ * lost its network without closing. It is closed so its device counts as offline and gets pushes.
+ * Not 60 s: Chrome throttles timers in long-hidden tabs to about once a minute.
+ */
+export const STALE_SOCKET_MS = 90_000;
+
+/** [at]: when the socket connected (Unix ms). */
+type Att = { userId: string; deviceId: string; at: number };
 type Incoming = Record<string, unknown>;
 
 export const MAX_ENVELOPE_BYTES = 64 * 1024;
@@ -32,8 +53,11 @@ export function hubStub(env: Env) {
 }
 
 export class FamilyHub extends DurableObject<Env> {
-  /** Replaced in plan 9 (and in tests). */
-  push: PushHook = noPush;
+  /** Replaced in tests. */
+  push: PushHook;
+
+  /** The clock for stale-socket pruning; replaced in tests. */
+  now: () => number = Date.now;
 
   /** Sends run one at a time, so seqs are handed out and fanned out in order. */
   private sends: Promise<void> = Promise.resolve();
@@ -43,6 +67,7 @@ export class FamilyHub extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.push = queuePush(env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
   }
 
@@ -53,10 +78,11 @@ export class FamilyHub extends DurableObject<Env> {
     if (!userId || !deviceId || req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("bad request", { status: 400 });
     }
+    this.prune();
     const [client, server] = Object.values(new WebSocketPair());
     const wasOnline = this.sockets(userId).length > 0;
     this.ctx.acceptWebSocket(server, [`u:${userId}`, `d:${deviceId}`]);
-    server.serializeAttachment({ userId, deviceId } satisfies Att);
+    server.serializeAttachment({ userId, deviceId, at: this.now() } satisfies Att);
     server.send(JSON.stringify({ type: "hello", online: this.onlineUserIds() }));
     if (!wasOnline) this.sendAll({ type: "presence", userId, online: true }, server);
     return new Response(null, { status: 101, webSocket: client });
@@ -139,6 +165,24 @@ export class FamilyHub extends DurableObject<Env> {
 
   // --- internals ---
 
+  /** Closes half-open sockets (see [STALE_SOCKET_MS]), except [keep], which just spoke. */
+  private prune(keep?: WebSocket): void {
+    const cutoff = this.now() - STALE_SOCKET_MS;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === keep) continue;
+      const att = ws.deserializeAttachment() as Att | null;
+      if (!att) continue;
+      const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+      if (Math.max(pinged, att.at ?? 0) >= cutoff) continue;
+      try {
+        ws.close(4002, "timeout");
+      } catch {
+        /* already closed */
+      }
+      this.goneOffline(ws);
+    }
+  }
+
   private sockets(userId: string, exclude?: WebSocket): WebSocket[] {
     return this.ctx.getWebSockets(`u:${userId}`).filter(
       (ws) => ws !== exclude && ws.readyState === WebSocket.READY_STATE_OPEN,
@@ -170,6 +214,7 @@ export class FamilyHub extends DurableObject<Env> {
     const id = m.id;
     const chatId = m.chatId;
     const env = m.envelope;
+    this.prune(ws);
     if (!isUlid(id) || typeof chatId !== "string" || !validEnvelope(env)) {
       return send(ws, { type: "error", id: typeof id === "string" ? id : undefined, error: "invalid_request" });
     }
@@ -208,19 +253,36 @@ export class FamilyHub extends DurableObject<Env> {
         envelope: JSON.stringify(env), created_at: now,
       }),
     });
-    const offline: string[] = [];
+    const others: string[] = [];
     for (const u of await this.memberIds(chatId)) {
-      const socks = this.sockets(u, ws);
-      for (const s of socks) trySend(s, msg);
-      if (u !== att.userId && this.sockets(u).length === 0) offline.push(u);
+      for (const s of this.sockets(u, ws)) trySend(s, msg);
+      if (u !== att.userId) others.push(u);
     }
-    if (offline.length) {
-      try {
-        await this.push.notify({ chatId, senderUserId: att.userId, messageId: id, userIds: offline });
-      } catch (e) {
-        console.error("push hook failed", e);
-      }
-    }
+    // Not awaited: the next send shouldn't wait for the push lookup and the queue.
+    this.pushOffline({ chatId, senderUserId: att.userId, messageId: id }, others).catch((e) =>
+      console.error("push hook failed", e),
+    );
+  }
+
+  /**
+   * Pushes go per device: every device of [userIds] with a push token and no open socket. A phone is
+   * pushed even while the same person's desktop app is connected (it may be at home, unwatched).
+   */
+  private async pushOffline(msg: Omit<PushJob, "userIds">, userIds: string[]): Promise<void> {
+    if (userIds.length === 0) return;
+    const { results } = await this.env.DB.prepare(
+      `SELECT id, user_id FROM devices WHERE user_id IN (${userIds.map(() => "?").join(",")})
+       AND revoked_at IS NULL AND push_token IS NOT NULL ORDER BY id`,
+    ).bind(...userIds).all<{ id: string; user_id: string }>();
+    const targets = results.filter((d) =>
+      this.ctx.getWebSockets(`d:${d.id}`).every((s) => s.readyState !== WebSocket.READY_STATE_OPEN),
+    );
+    if (targets.length === 0) return;
+    await this.push.notify({
+      ...msg,
+      userIds: [...new Set(targets.map((d) => d.user_id))],
+      deviceIds: targets.map((d) => d.id),
+    });
   }
 
   private async handleTyping(att: Att, m: Incoming): Promise<void> {
