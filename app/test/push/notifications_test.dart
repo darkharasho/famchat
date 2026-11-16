@@ -5,7 +5,7 @@ import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/push/firebase_options.dart';
-import 'package:famchat/push/notification_settings.dart' show pushTestSummary;
+import 'package:famchat/push/notification_settings.dart' show pushTestSummary, runNotificationTest;
 import 'package:famchat/push/local_notifier.dart';
 import 'package:famchat/push/notifications.dart';
 import 'package:famchat/push/push_messaging.dart';
@@ -74,13 +74,15 @@ class Harness {
 Future<void> settle() => Future<void>.delayed(Duration.zero);
 
 class FakeNotifier implements LocalNotifier {
+  FakeNotifier({this.allowed = true});
+  final bool allowed;
   final shown = <(int, String, String, String)>[];
   @override
   bool get needsPermission => false;
   @override
   Future<void> init(void Function(String route) onTap) async {}
   @override
-  Future<bool> requestPermission() async => true;
+  Future<bool> requestPermission() async => allowed;
   @override
   Future<void> show({required int id, required String title, required String body, required String route}) async =>
       shown.add((id, title, body, route));
@@ -268,5 +270,55 @@ void main() {
       'Sent to 1 of 2 devices. Not delivered: iPad.',
     );
     expect(pushTestSummary({'configured': true, 'error': 'oauth_failed', 'devices': []}), "The server couldn't reach Firebase.");
+  });
+
+  test("pushTestSummary says when this device didn't register, even if another device got the push", () {
+    // iOS 1.0.3: the phone had no APNs token, the test went to a web tab, and the phone said "Sent to 1 of 1 device."
+    final ok = {
+      'configured': true,
+      'devices': [
+        {'id': 'a', 'name': 'Chrome', 'result': 'ok'},
+      ],
+    };
+    expect(pushTestSummary(ok), 'Sent to 1 of 1 device.');
+    expect(pushTestSummary(ok, thisDevice: false), startsWith("This device isn't registered for notifications"));
+    expect(pushTestSummary(ok, thisDevice: false), endsWith('Sent to 1 of 1 device.'));
+    expect(pushTestSummary({'configured': false}, thisDevice: false), "Push isn't set up on the server yet.");
+  });
+
+  group('runNotificationTest', () {
+    test('push devices register first and pass whether that worked to the summary', () async {
+      final h = Harness();
+      h.messaging.token = null; // iOS without an APNs token
+      var asked = 0;
+      final text = await runNotificationTest(
+        push: h.controller,
+        local: null,
+        sendServerTest: () async {
+          asked++;
+          return {'configured': true, 'devices': []};
+        },
+      );
+      expect(asked, 1);
+      expect(text, startsWith("This device isn't registered for notifications"));
+    });
+
+    test('desktop apps (no push) show a local test notification', () async {
+      final notifier = FakeNotifier();
+      final text = await runNotificationTest(
+        push: null,
+        local: notifier,
+        sendServerTest: () async => fail('desktop has no push'),
+      );
+      expect(notifier.shown.map((s) => (s.$2, s.$3)), [('FamChat', 'Test notification')]);
+      expect(text, 'Sent a test notification to this device.');
+    });
+
+    test("desktop apps say so when notifications can't show", () async {
+      final notifier = FakeNotifier(allowed: false);
+      final text = await runNotificationTest(push: null, local: notifier, sendServerTest: () async => null);
+      expect(notifier.shown, isEmpty);
+      expect(text, startsWith("This device can't show notifications"));
+    });
   });
 }
