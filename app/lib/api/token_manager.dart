@@ -56,11 +56,13 @@ class TokenManager {
   Future<String> _refresh() => _inflight ??= _doRefresh().whenComplete(() => _inflight = null);
 
   Future<String> _doRefresh() async {
-    final refreshToken = await readRefreshToken();
-    if (refreshToken == null) {
+    final first = await readRefreshToken();
+    if (first == null) {
       _access = null;
       throw const SignedOutException();
     }
+    var refreshToken = first;
+    var rereadAfter401 = false;
     for (var attempt = 0;; attempt++) {
       Object error;
       try {
@@ -70,6 +72,14 @@ class TokenManager {
         return pair.accessToken;
       } on ApiException catch (e) {
         if (e.status == 401) {
+          // Another tab may have rotated the shared token after we read it: try that once.
+          final latest = rereadAfter401 ? null : await readRefreshToken();
+          rereadAfter401 = true;
+          if (latest != null && latest != refreshToken) {
+            refreshToken = latest;
+            attempt--;
+            continue;
+          }
           _access = null;
           await onRevoked();
           throw const SignedOutException();

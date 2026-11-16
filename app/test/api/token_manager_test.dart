@@ -14,6 +14,9 @@ class Harness {
   final FakeServer server;
   DateTime clock = DateTime(2026, 11, 16, 12);
   String? stored;
+
+  /// Values handed out by readRefreshToken before it falls back to [stored].
+  final readQueue = <String>[];
   final saved = <String>[];
   int revokedCalls = 0;
   late ApiClient api;
@@ -27,7 +30,7 @@ class Harness {
     h.api = ApiClient(client: server.client, base: Uri.parse('https://famchat.dev'));
     h.tokens = TokenManager(
       refreshCall: h.api.refresh,
-      readRefreshToken: () async => h.stored,
+      readRefreshToken: () async => h.readQueue.isNotEmpty ? h.readQueue.removeAt(0) : h.stored,
       saveRefreshToken: (t) async {
         h.saved.add(t);
         h.stored = t;
@@ -148,6 +151,18 @@ void main() {
     h.stored = other.refreshToken;
     h.server.expireAccessTokens();
     await h.api.me();
+    expect(h.revokedCalls, 0);
+  });
+
+  test('a 401 for a token another tab already replaced retries with the stored one', () async {
+    final h = await Harness.signedIn();
+    final t0 = h.stored!;
+    // Another tab rotated twice (t0 -> t1 -> t2), so t0 is outside the grace window.
+    final t1 = (await h.api.refresh(t0)).refreshToken;
+    h.stored = (await h.api.refresh(t1)).refreshToken;
+    h.readQueue.add(t0); // this tab read the token before the other tab's write landed
+    h.server.expireAccessTokens();
+    expect((await h.api.me()).name, 'Mom');
     expect(h.revokedCalls, 0);
   });
 }
