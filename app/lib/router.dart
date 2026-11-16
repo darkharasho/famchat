@@ -15,15 +15,36 @@ import 'screens/spikes_screen.dart';
 import 'screens/storage_screen.dart';
 import 'session/session_controller.dart';
 
-/// Where [location] must go for session state [s], or null to stay.
-String? sessionRedirect(SessionState s, String location) {
+export 'push/chat_route.dart' show chatRoute;
+
+/// A location the loading screen swallowed (a web deep link, a notification tap at launch), to go
+/// to once the session is ready instead of home.
+class PendingLocation {
+  String? value;
+}
+
+final pendingLocationProvider = Provider<PendingLocation>((ref) => PendingLocation());
+
+const _signInPages = {'/join', '/pair', '/loading'};
+
+/// Where [location] must go for session state [s], or null to stay. With [pending], a location
+/// sent to the loading screen is remembered and returned to once signed in.
+String? sessionRedirect(SessionState s, String location, {PendingLocation? pending}) {
   switch (s) {
     case SessionLoading() || SessionUnavailable():
-      return location == '/loading' ? null : '/loading';
+      if (location == '/loading') return null;
+      if (pending != null) pending.value = _signInPages.contains(location) || location == '/' ? null : location;
+      return '/loading';
     case SignedOut():
+      pending?.value = null;
       return location == '/join' || location == '/pair' || location == '/spikes' ? null : '/join';
     case SignedIn(:final session):
-      if (location == '/join' || location == '/pair' || location == '/loading') return '/';
+      if (_signInPages.contains(location)) {
+        final back = pending?.value;
+        pending?.value = null;
+        if (back == null) return '/';
+        return sessionRedirect(s, back) ?? back;
+      }
       if ((location == '/invite' || location == '/storage') && !session.isAdmin) return '/';
       return null;
   }
@@ -31,10 +52,11 @@ String? sessionRedirect(SessionState s, String location) {
 
 final routerProvider = Provider<GoRouter>((ref) {
   final changes = ValueNotifier<SessionState>(ref.read(sessionProvider));
+  final pending = ref.read(pendingLocationProvider);
   ref.listen(sessionProvider, (_, next) => changes.value = next);
   final router = GoRouter(
     refreshListenable: changes,
-    redirect: (context, state) => sessionRedirect(ref.read(sessionProvider), state.uri.path),
+    redirect: (context, state) => sessionRedirect(ref.read(sessionProvider), state.uri.path, pending: pending),
     routes: [
       GoRoute(path: '/loading', builder: (context, state) => const LoadingScreen()),
       GoRoute(path: '/join', builder: (context, state) => const JoinScreen()),

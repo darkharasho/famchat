@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../chat/providers.dart';
 import '../../media/providers.dart';
+import '../../push/providers.dart';
 import '../../session/session_controller.dart';
 import '../account_providers.dart';
 import '../sign_out.dart';
@@ -25,6 +26,7 @@ class ChatsShell extends ConsumerWidget {
     ref.watch(meProvider); // keeps the stored name and admin flag current
     ref.watch(chatSyncProvider); // starts the chat engine
     ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
+    ref.watch(notificationsProvider); // push registration, desktop notifications
     return LayoutBuilder(builder: (context, c) {
       final wide = c.maxWidth >= twoPaneWidth;
       if (!wide) {
@@ -82,7 +84,18 @@ class _ListPane extends ConsumerWidget {
           ),
         ],
       ),
-      body: ChatList(selectedId: selectedId),
+      body: Column(children: [
+        if (ref.watch(notifyOfferProvider))
+          MaterialBanner(
+            leading: const Icon(Icons.notifications_outlined),
+            content: const Text('Get notified about new messages while FamChat is in the background.'),
+            actions: [
+              TextButton(onPressed: () => ref.read(notifyOfferProvider.notifier).dismiss(), child: const Text('Not now')),
+              FilledButton(onPressed: () => ref.read(notifyOfferProvider.notifier).enable(), child: const Text('Turn on')),
+            ],
+          ),
+        Expanded(child: ChatList(selectedId: selectedId)),
+      ]),
     );
   }
 }

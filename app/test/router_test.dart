@@ -46,4 +46,36 @@ void main() {
     expect(sessionRedirect(user, '/invite'), '/');
     expect(sessionRedirect(admin, '/invite'), isNull);
   });
+
+  test('a signed-in location swallowed by loading is restored after sign-in', () {
+    final pending = PendingLocation();
+    expect(sessionRedirect(const SessionLoading(), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV', pending: pending), '/loading');
+    expect(pending.value, '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    // The loading screen itself doesn't overwrite it.
+    expect(sessionRedirect(const SessionLoading(), '/loading', pending: pending), isNull);
+    expect(sessionRedirect(SignedIn(session()), '/loading', pending: pending), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    expect(pending.value, isNull);
+    expect(sessionRedirect(SignedIn(session()), '/loading', pending: pending), '/');
+  });
+
+  test('a pending location is dropped when signed out, and admin pages stay admin-only', () {
+    final pending = PendingLocation();
+    sessionRedirect(const SessionLoading(), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV', pending: pending);
+    expect(sessionRedirect(const SignedOut(), '/loading', pending: pending), '/join');
+    expect(pending.value, isNull);
+    sessionRedirect(const SessionLoading(), '/invite', pending: pending);
+    expect(sessionRedirect(SignedIn(session()), '/loading', pending: pending), '/');
+    sessionRedirect(const SessionLoading(), '/invite', pending: pending);
+    expect(sessionRedirect(SignedIn(session(admin: true)), '/loading', pending: pending), '/invite');
+    // Sign-in pages are never remembered.
+    sessionRedirect(const SessionLoading(), '/join', pending: pending);
+    expect(pending.value, isNull);
+  });
+
+  test('chatRoute accepts only chat ids', () {
+    expect(chatRoute('01ARZ3NDEKTSV4RRFFQ69G5FAV'), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    expect(chatRoute(null), isNull);
+    expect(chatRoute('../devices'), isNull);
+    expect(chatRoute('01arz3ndektsv4rrffq69g5fav'), isNull);
+  });
 }

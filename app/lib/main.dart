@@ -6,12 +6,14 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'audio_init.dart';
+import 'push/providers.dart';
+import 'push/push_messaging.dart';
 import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 import 'voice/voice_io.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // famchat.dev/join#<token>: the fragment is the invite, not a route, so use path URLs.
   usePathUrlStrategy();
@@ -22,8 +24,13 @@ void main() {
   // Recordings and decrypted voice clips a crash or kill left behind.
   unawaited(sweepVoiceFiles());
   final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
+  // FCM on Android, iOS and the web once Firebase is configured; otherwise null and push is off.
+  final push = await initPush();
   runApp(ProviderScope(
-    overrides: [initialInviteTokenProvider.overrideWithValue(invite)],
+    overrides: [
+      initialInviteTokenProvider.overrideWithValue(invite),
+      pushMessagingProvider.overrideWithValue(push),
+    ],
     child: const FamChatApp(),
   ));
 }
@@ -38,6 +45,7 @@ class FamChatApp extends ConsumerWidget {
       theme: ThemeData(colorSchemeSeed: Colors.indigo),
       darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
       routerConfig: ref.watch(routerProvider),
+      scaffoldMessengerKey: ref.watch(rootMessengerKeyProvider),
     );
   }
 }
