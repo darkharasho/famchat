@@ -97,3 +97,48 @@ describe("POST /api/auth/invite/redeem", () => {
     expect(res.status).toBe(400);
   });
 });
+
+import { redeemNewDevice } from "./helpers";
+
+const refresh = (body: unknown) => SELF.fetch(`${BASE}/api/auth/refresh`, jsonReq("POST", body));
+
+describe("POST /api/auth/refresh", () => {
+  it("returns a new pair and rotates the hash", async () => {
+    const d = await redeemNewDevice({ admin: true });
+    const res = await refresh({ refreshToken: d.refreshToken });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ accessToken: string; refreshToken: string }>();
+    expect(body.refreshToken).not.toBe(d.refreshToken);
+    expect(await verifyAccessToken(env, body.accessToken)).toEqual({ sub: d.userId, dev: d.deviceId, adm: true });
+    const hash = await env.DB.prepare("SELECT refresh_hash FROM devices WHERE id = ?").bind(d.deviceId).first<string>("refresh_hash");
+    expect(hash).toBe(await sha256Hex(body.refreshToken));
+  });
+
+  it("updates last_seen", async () => {
+    const d = await redeemNewDevice();
+    await env.DB.prepare("UPDATE devices SET last_seen = 0 WHERE id = ?").bind(d.deviceId).run();
+    await refresh({ refreshToken: d.refreshToken });
+    const seen = await env.DB.prepare("SELECT last_seen FROM devices WHERE id = ?").bind(d.deviceId).first<number>("last_seen");
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it("old refresh token rejected", async () => {
+    const d = await redeemNewDevice();
+    const first = await (await refresh({ refreshToken: d.refreshToken })).json<{ refreshToken: string }>();
+    const reused = await refresh({ refreshToken: d.refreshToken });
+    expect(reused.status).toBe(401);
+    expect(await reused.json()).toEqual({ error: "unauthorized" });
+    expect((await refresh({ refreshToken: first.refreshToken })).status).toBe(200);
+  });
+
+  it("revoked device -> 401", async () => {
+    const d = await redeemNewDevice();
+    await env.DB.prepare("UPDATE devices SET revoked_at = 1 WHERE id = ?").bind(d.deviceId).run();
+    expect((await refresh({ refreshToken: d.refreshToken })).status).toBe(401);
+  });
+
+  it("unknown token -> 401; missing body -> 400", async () => {
+    expect((await refresh({ refreshToken: "nope" })).status).toBe(401);
+    expect((await refresh({})).status).toBe(400);
+  });
+});

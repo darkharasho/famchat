@@ -52,3 +52,18 @@ auth.post("/invite/redeem", async (c) => {
   const accessToken = await signAccessToken(c.env, { sub: userId, dev: deviceId, adm: isAdmin });
   return c.json({ userId, deviceId, isAdmin, accessToken, refreshToken }, 201);
 });
+
+auth.post("/refresh", async (c) => {
+  const old = str((await readJson(c)).refreshToken);
+  const next = randomToken();
+  const row = await c.env.DB.prepare(
+    `UPDATE devices SET refresh_hash = ?, last_seen = ?
+     WHERE refresh_hash = ? AND revoked_at IS NULL
+     RETURNING id, user_id, (SELECT is_admin FROM users WHERE users.id = devices.user_id) AS is_admin`,
+  )
+    .bind(await sha256Hex(next), Date.now(), await sha256Hex(old))
+    .first<{ id: string; user_id: string; is_admin: number }>();
+  if (!row) throw new ApiError("unauthorized");
+  const accessToken = await signAccessToken(c.env, { sub: row.user_id, dev: row.id, adm: row.is_admin === 1 });
+  return c.json({ accessToken, refreshToken: next });
+});
