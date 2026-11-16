@@ -12,6 +12,17 @@ import { notify } from "../notify";
 export const chats = new Hono<AppEnv>();
 chats.use(requireAuth);
 
+/**
+ * How many of [userIds] are live users on the caller's side: the family, or (for a reviewer) the
+ * reviewer accounts. The two never share a chat (docs/protocol.md "Reviewer accounts").
+ */
+async function sameSide(db: D1Database, userIds: string[], reviewer: boolean): Promise<number> {
+  if (userIds.length === 0) return 0;
+  return (await db.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND reviewer = ? AND id IN (${userIds.map(() => "?").join(",")})`,
+  ).bind(reviewer ? 1 : 0, ...userIds).first<number>("n")) ?? 0;
+}
+
 chats.get("/", async (c) => c.json({ chats: await chatsOf(c.env.DB, c.get("userId")) }));
 
 chats.get("/:id", async (c) => c.json({ chat: await requireMemberChat(c.env.DB, c.req.param("id"), c.get("userId")) }));
@@ -36,9 +47,8 @@ chats.post("/", async (c) => {
     directKey = [me, body.userId].sort().join(":");
   } else if (body.kind === "group") {
     title = name(body.title, 60);
-    if (!Array.isArray(body.userIds) || body.userIds.length === 0 || body.userIds.length > 100) {
-      throw new ApiError("invalid_request");
-    }
+    // No others is a chat with only yourself ("Note to self"), which lets a lone reviewer try the app.
+    if (!Array.isArray(body.userIds) || body.userIds.length > 100) throw new ApiError("invalid_request");
     if (!body.userIds.every((u) => typeof u === "string" && u !== me)) throw new ApiError("invalid_request");
     others = [...new Set(body.userIds as string[])];
   } else {
@@ -55,10 +65,7 @@ chats.post("/", async (c) => {
     const dup = await db.prepare("SELECT id FROM chats WHERE direct_key = ?").bind(directKey).first<{ id: string }>();
     if (dup) return c.json({ chat: await chatOut(db, dup.id), created: false }, 200);
   }
-  const known = await db.prepare(
-    `SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND id IN (${others.map(() => "?").join(",")})`,
-  ).bind(...others).first<number>("n");
-  if (known !== others.length) throw new ApiError("invalid_request");
+  if ((await sameSide(db, others, c.get("reviewer"))) !== others.length) throw new ApiError("invalid_request");
 
   const members = [me, ...others];
   checkCoverage(wraps, { chatId: id, epoch: 1, wrapper: device, deviceIds: await liveDeviceIds(db, members) });
@@ -103,9 +110,7 @@ chats.post("/:id/members", async (c) => {
   if (!body.userIds.every((u) => typeof u === "string")) throw new ApiError("invalid_request");
   const added = [...new Set(body.userIds as string[])];
   if (added.some((u) => chat.members.some((m) => m.userId === u))) throw new ApiError("invalid_request");
-  const known = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND id IN (${added.map(() => "?").join(",")})`)
-    .bind(...added).first<number>("n");
-  if (known !== added.length) throw new ApiError("invalid_request");
+  if ((await sameSide(db, added, c.get("reviewer"))) !== added.length) throw new ApiError("invalid_request");
   if (!chat.epochReady) throw new ApiError("stale_epoch");
 
   const wraps = parseWraps(body.wraps);

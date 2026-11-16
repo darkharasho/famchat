@@ -10,12 +10,15 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 class FakeUser {
-  FakeUser(this.id, this.name, this.isAdmin, this.identityPub);
+  FakeUser(this.id, this.name, this.isAdmin, this.identityPub, {this.reviewer = false});
   final String id;
   String identityPub;
   String name;
   bool isAdmin;
   bool deleted = false;
+
+  /// A reviewer account: only other reviewers see it, and it sees only them.
+  final bool reviewer;
   String? recoveryPub, recoverySig;
   Map<String, Object?>? adminProof;
 
@@ -34,12 +37,16 @@ class FakeDevice {
 }
 
 class FakeInvite {
-  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset});
+  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset, this.reviewer = false});
   final String name;
   final bool admin;
   DateTime expiresAt;
   String? usedBy;
   DateTime? usedAt;
+
+  /// A reviewer invite: reusable (usedBy stays null) until [revoked].
+  final bool reviewer;
+  bool revoked = false;
 
   /// A reset invite: signs [userId] in again; [reset] is its directory record.
   final String? userId;
@@ -113,10 +120,20 @@ class FakeServer {
   static const claimRetry = Duration(minutes: 10);
 
   /// Adds a user with [identityPub] (base64url) and no device, as if they joined elsewhere.
-  String addUser(String name, {required String identityPub, bool admin = false}) {
+  String addUser(String name, {required String identityPub, bool admin = false, bool reviewer = false}) {
     final id = _id('U');
-    users[id] = FakeUser(id, name, admin, identityPub);
+    users[id] = FakeUser(id, name, admin, identityPub, reviewer: reviewer);
     return id;
+  }
+
+  /// A reviewer invite (server/src/routes/admin.ts POST /admin/reviewer-invite); revokes earlier ones.
+  String addReviewerInvite() {
+    for (final i in invites.values.where((i) => i.reviewer)) {
+      i.revoked = true;
+    }
+    final token = _token();
+    invites[token] = FakeInvite('Reviewer', false, DateTime(9999), reviewer: true);
+    return token;
   }
 
   FakePairSession? pairSessionByCode(String code) => pairSessions.values.where((x) => x.code == code).firstOrNull;
@@ -265,12 +282,14 @@ class FakeServer {
         'name': u.name,
         'isAdmin': u.isAdmin,
         'recoveryCodeSet': u.recoveryPub != null,
+        'reviewer': u.reviewer,
       });
     }
     if (r.method == 'GET' && path == '/api/users') {
+      final side = users[userId]!.reviewer;
       return _json({
         'users': [
-          for (final u in users.values)
+          for (final u in users.values.where((u) => u.reviewer == side))
             {
               'id': u.id,
               'name': u.name,
@@ -298,7 +317,7 @@ class FakeServer {
     if (r.method == 'DELETE' && path == '/api/me') {
       if (_body(r)['confirm'] != 'delete') return _err('invalid_request');
       final u = users[userId]!;
-      final others = users.values.where((o) => o.id != userId && !o.deleted);
+      final others = users.values.where((o) => o.id != userId && !o.deleted && !o.reviewer);
       if (u.isAdmin && others.isNotEmpty && !others.any((o) => o.isAdmin)) return _err('last_admin');
       deleteUser(userId);
       return http.Response('', 204);
@@ -433,6 +452,26 @@ class FakeServer {
       if (d == null || d.userId != userId || d.revokedAt != null) return _err('not_found');
       revoke(d.id);
       return http.Response('', 204);
+    }
+    if (path == '/api/admin/reviewer-invite' || path == '/api/admin/reviewers') {
+      final u = users[userId]!;
+      if (!u.isAdmin || u.reviewer) return _err('forbidden');
+      String url(String token) => 'https://famchat.dev/join#review.$token';
+      if (r.method == 'POST') return _json({'inviteToken': '', 'inviteUrl': url(addReviewerInvite()), 'createdAt': 0}, 201);
+      if (r.method == 'DELETE') {
+        for (final i in invites.values.where((i) => i.reviewer)) {
+          i.revoked = true;
+        }
+        return http.Response('', 204);
+      }
+      final active = invites.entries.where((e) => e.value.reviewer && !e.value.revoked).lastOrNull;
+      return _json({
+        'invite': active == null ? null : {'inviteUrl': url(active.key), 'createdAt': 0},
+        'users': [
+          for (final x in users.values.where((x) => x.reviewer && !x.deleted))
+            {'id': x.id, 'name': x.name, 'createdAt': 0, 'devices': liveDevices(x.id).length},
+        ],
+      });
     }
     if (r.method == 'POST' && path == '/api/admin/invites') {
       if (c['adm'] != true) return _err('forbidden');
@@ -701,6 +740,15 @@ class FakeServer {
         ..usedBy = u.id
         ..usedAt = t;
       return _redeemed(u.id, deviceId, refresh);
+    }
+    if (inv != null && inv.reviewer) {
+      if (inv.revoked) return _err('invite_invalid');
+      final name = (b['name'] as String?)?.trim() ?? '';
+      if (name.isEmpty || name.length > 40) return _err('invalid_request');
+      final userId = _id('U'), deviceId = _id('D');
+      users[userId] = FakeUser(userId, name, false, cert['identityPub']!, reviewer: true);
+      devices[deviceId] = FakeDevice(deviceId, userId, deviceName, b['platform'] as String, cert, refresh, t);
+      return _redeemed(userId, deviceId, refresh);
     }
     if (inv != null && inv.usedBy == null && inv.expiresAt.isAfter(t)) {
       final userId = _id('U'), deviceId = _id('D');

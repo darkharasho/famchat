@@ -13,14 +13,18 @@ users.use(requireAuth);
  */
 users.get("/", async (c) => {
   const db = c.env.DB;
+  // Reviewer accounts and the family never see each other (docs/protocol.md "Reviewer accounts").
+  const side = c.get("reviewer") ? 1 : 0;
+  const mine = "SELECT id FROM users WHERE reviewer = ?";
   const [u, d, r] = await db.batch([
     db.prepare(
-      "SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig, deleted_at FROM users ORDER BY created_at",
-    ),
+      "SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig, deleted_at FROM users WHERE reviewer = ? ORDER BY created_at",
+    ).bind(side),
     db.prepare(
-      "SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices ORDER BY created_at",
-    ),
-    db.prepare("SELECT * FROM resets ORDER BY created_at, id"),
+      `SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices
+       WHERE user_id IN (${mine}) ORDER BY created_at`,
+    ).bind(side),
+    db.prepare(`SELECT * FROM resets WHERE user_id IN (${mine}) ORDER BY created_at, id`).bind(side),
   ]);
   // Each user's signed resets: their identity key history, which clients verify themselves.
   const resets = new Map<string, object[]>();

@@ -17,6 +17,8 @@ export interface AppVars {
   userId: string;
   deviceId: string;
   isAdmin: boolean;
+  /** The caller is a reviewer account (docs/protocol.md "Reviewer accounts"). */
+  reviewer: boolean;
 }
 
 export type AppEnv = { Bindings: Env; Variables: AppVars };

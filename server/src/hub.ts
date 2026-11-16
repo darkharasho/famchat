@@ -41,8 +41,11 @@ export function queuePush(env: Pick<Env, "PUSH_QUEUE">): PushHook {
  */
 export const STALE_SOCKET_MS = 90_000;
 
-/** [at]: when the socket connected (Unix ms). */
-type Att = { userId: string; deviceId: string; at: number };
+/**
+ * [at]: when the socket connected (Unix ms). [rv]: a reviewer account's socket; presence never
+ * crosses between reviewers and the family (missing on sockets from before reviewers: family).
+ */
+type Att = { userId: string; deviceId: string; at: number; rv?: boolean };
 type Incoming = Record<string, unknown>;
 
 export const MAX_ENVELOPE_BYTES = 64 * 1024;
@@ -75,6 +78,7 @@ export class FamilyHub extends DurableObject<Env> {
   async fetch(req: Request): Promise<Response> {
     const userId = req.headers.get("x-famchat-user");
     const deviceId = req.headers.get("x-famchat-device");
+    const rv = req.headers.get("x-famchat-side") === "reviewer";
     if (!userId || !deviceId || req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("bad request", { status: 400 });
     }
@@ -82,9 +86,9 @@ export class FamilyHub extends DurableObject<Env> {
     const [client, server] = Object.values(new WebSocketPair());
     const wasOnline = this.sockets(userId).length > 0;
     this.ctx.acceptWebSocket(server, [`u:${userId}`, `d:${deviceId}`]);
-    server.serializeAttachment({ userId, deviceId, at: this.now() } satisfies Att);
-    server.send(JSON.stringify({ type: "hello", online: this.onlineUserIds() }));
-    if (!wasOnline) this.sendAll({ type: "presence", userId, online: true }, server);
+    server.serializeAttachment({ userId, deviceId, at: this.now(), rv } satisfies Att);
+    server.send(JSON.stringify({ type: "hello", online: this.onlineUserIds(undefined, rv) }));
+    if (!wasOnline) this.sendAll({ type: "presence", userId, online: true }, rv, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -153,12 +157,13 @@ export class FamilyHub extends DurableObject<Env> {
     return (await run).length;
   }
 
-  onlineUserIds(exclude?: WebSocket): string[] {
+  /** Who is online on one side: the family, or ([reviewer]) the reviewer accounts. */
+  onlineUserIds(exclude?: WebSocket, reviewer = false): string[] {
     const ids = new Set<string>();
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === exclude || ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
       const att = ws.deserializeAttachment() as Att | null;
-      if (att) ids.add(att.userId);
+      if (att && !!att.rv === reviewer) ids.add(att.userId);
     }
     return [...ids];
   }
@@ -189,9 +194,14 @@ export class FamilyHub extends DurableObject<Env> {
     );
   }
 
-  private sendAll(event: Record<string, unknown>, exclude?: WebSocket): void {
+  /** Sends [event] to every socket on one side (family, or [reviewer] accounts). */
+  private sendAll(event: Record<string, unknown>, reviewer: boolean, exclude?: WebSocket): void {
     const text = JSON.stringify(event);
-    for (const ws of this.ctx.getWebSockets()) if (ws !== exclude) trySend(ws, text);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      const att = ws.deserializeAttachment() as Att | null;
+      if (att && !!att.rv === reviewer) trySend(ws, text);
+    }
   }
 
   private goneOffline(ws: WebSocket): void {
@@ -200,7 +210,7 @@ export class FamilyHub extends DurableObject<Env> {
     // Only once per socket: a revoked socket is seen here and again in webSocketClose.
     ws.serializeAttachment(null);
     if (this.sockets(att.userId, ws).length === 0) {
-      this.sendAll({ type: "presence", userId: att.userId, online: false }, ws);
+      this.sendAll({ type: "presence", userId: att.userId, online: false }, !!att.rv, ws);
     }
   }
 

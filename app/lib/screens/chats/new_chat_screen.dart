@@ -76,6 +76,23 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
     }
   }
 
+  Future<void> _noteToSelf() async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final id = await sync.createGroup('Note to self', const []);
+      if (mounted) context.go('/chats/$id');
+    } catch (e) {
+      if (mounted) setState(() => _error = apiErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final me = ref.watch(myUserIdProvider);
@@ -117,7 +134,18 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
                   ? EmptyState(
                       art: Icon(Icons.diversity_3_rounded, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       title: 'No one else here yet',
-                      body: 'Once someone in the family joins, you can chat with them here.',
+                      body: 'Once someone in the family joins, you can chat with them here. '
+                          'Until then, try FamChat in a chat with just you.',
+                      // A chat with only yourself: how a lone reviewer (docs/protocol.md
+                      // "Reviewer accounts") tries text, photos and voice messages.
+                      action: addTo == null
+                          ? FilledButton.tonalIcon(
+                              key: const Key('note-to-self'),
+                              onPressed: _busy ? null : _noteToSelf,
+                              icon: const Icon(Icons.edit_note_rounded),
+                              label: const Text('Note to self'),
+                            )
+                          : null,
                     )
                   : ListView(padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs), children: [
                       for (final u in users)

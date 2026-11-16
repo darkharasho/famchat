@@ -111,6 +111,9 @@ String chatTitle(ChatRow chat, List<MemberRow> members, Map<String, UserRow> use
   return users[other?.userId]?.name ?? 'Chat';
 }
 
+/// How many are in a group: "Only you" for a chat with just yourself (a note to self).
+String membersLabel(int n) => n <= 1 ? 'Only you' : '$n members';
+
 /// For a 1:1, the other member's id.
 String? otherMember(ChatRow chat, List<MemberRow> members, String? me) =>
     chat.kind == 'direct' ? members.where((m) => m.userId != me).firstOrNull?.userId : null;

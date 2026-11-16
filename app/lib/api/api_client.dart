@@ -35,6 +35,7 @@ class ApiClient {
     required String platform,
     required DeviceCert cert,
     String? resetClaimSig,
+    String? name,
   }) async {
     final j = await _send('POST', '/auth/invite/redeem', body: {
       'token': token,
@@ -42,6 +43,8 @@ class ApiClient {
       'platform': platform,
       ...cert.toJson(),
       'resetClaimSig': ?resetClaimSig,
+      // A reviewer link: the reviewer's display name (a normal invite already carries one).
+      'name': ?name,
     });
     return _parse(201, () => _redeemResult(j!));
   }
@@ -122,6 +125,7 @@ class ApiClient {
               name: j['name'] as String,
               isAdmin: j['isAdmin'] as bool,
               recoveryCodeSet: j['recoveryCodeSet'] == true,
+              reviewer: j['reviewer'] == true,
             ));
       });
 
@@ -151,6 +155,34 @@ class ApiClient {
               expiresAt: DateTime.fromMillisecondsSinceEpoch(j['expiresAt'] as int),
             ));
       });
+
+  // --- reviewer accounts (docs/protocol.md "Reviewer accounts") ---
+
+  /// Admin: the reviewer invite link (if any) and the reviewer accounts.
+  Future<Reviewers> reviewers() => _authed((t) async {
+        final j = await _send('GET', '/admin/reviewers', bearer: t);
+        return _parse(200, () => Reviewers(
+              inviteUrl: (j!['invite'] as Map<String, Object?>?)?['inviteUrl'] as String?,
+              users: [
+                for (final u in (j['users'] as List).cast<Map<String, Object?>>())
+                  ReviewerAccount(
+                    id: u['id'] as String,
+                    name: u['name'] as String,
+                    createdAt: DateTime.fromMillisecondsSinceEpoch(u['createdAt'] as int),
+                    devices: u['devices'] as int,
+                  ),
+              ],
+            ));
+      });
+
+  /// Admin: makes a new reusable reviewer invite (revoking any earlier one); returns its link.
+  Future<String> createReviewerInvite() => _authed((t) async {
+        final j = await _send('POST', '/admin/reviewer-invite', bearer: t);
+        return _parse(201, () => j!['inviteUrl'] as String);
+      });
+
+  /// Admin: revokes the reviewer invite. Reviewer accounts made with it stay.
+  Future<void> revokeReviewerInvite() => _authed((t) => _send('DELETE', '/admin/reviewer-invite', bearer: t));
 
   // --- pairing (docs/protocol.md "Pairing a new device") ---
 

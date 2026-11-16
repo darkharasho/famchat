@@ -104,7 +104,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     : context.go('/new?with=${otherMember(chat, members, me) ?? ''}'),
               ),
             ]),
-            SettingsGroup(title: '${members.length} members', children: [
+            SettingsGroup(title: membersLabel(members.length), children: [
               for (final m in sorted)
                 ListTile(
                   leading: PersonAvatar(

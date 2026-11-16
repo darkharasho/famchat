@@ -153,8 +153,9 @@ class SessionController extends Notifier<SessionState> {
   }
 
   /// Generates keys, redeems [token] and stores the session. Throws [ApiException] or
-  /// [NetworkException]; calling again with the same token reuses the same keys.
-  Future<void> join({required String token, required String deviceName}) async {
+  /// [NetworkException]; calling again with the same token reuses the same keys. [displayName] is
+  /// required for a reviewer link (the reviewer names themselves) and ignored otherwise.
+  Future<void> join({required String token, required String deviceName, String? displayName}) async {
     var p = _pending;
     if (p == null || p.token != token) {
       final identity = await newIdentityKey();
@@ -176,6 +177,7 @@ class SessionController extends Notifier<SessionState> {
       platform: serverPlatform(),
       cert: p.cert,
       resetClaimSig: claimSig,
+      name: invite.reviewer ? displayName?.trim() : null,
     );
     await _signIn(await _session(r, deviceName.trim(), p.identity, p.device), r.accessToken);
   }

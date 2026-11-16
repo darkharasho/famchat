@@ -79,7 +79,7 @@ describe("POST /api/chats", () => {
     expect(res.status).toBe(409);
   });
 
-  it("group needs a title and other users", async () => {
+  it("group needs a title and valid other users (none is a chat with yourself)", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();
     const id = newId();
@@ -88,7 +88,6 @@ describe("POST /api/chats", () => {
       { id, kind: "group", title: "  ", userIds: [b.userId], wraps },
       { id, kind: "group", userIds: [b.userId], wraps },
       { id, kind: "group", title: "x".repeat(61), userIds: [b.userId], wraps },
-      { id, kind: "group", title: "T", userIds: [], wraps: wrapsFor(id, 1, a.deviceId, [a.deviceId]) },
       { id, kind: "group", title: "T", userIds: [a.userId], wraps: wrapsFor(id, 1, a.deviceId, [a.deviceId]) },
       { id: "not-a-ulid", kind: "group", title: "T", userIds: [b.userId], wraps },
       { id, kind: "party", title: "T", userIds: [b.userId], wraps },

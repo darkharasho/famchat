@@ -21,6 +21,8 @@ me.get("/", async (c) => {
     isAdmin: row.is_admin === 1,
     // An admin recovery key is registered (the printed code was saved).
     recoveryCodeSet: row.has_recovery === 1,
+    // A reviewer account (docs/protocol.md "Reviewer accounts").
+    reviewer: c.get("reviewer"),
   });
 });
 

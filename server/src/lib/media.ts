@@ -9,6 +9,8 @@ const GiB = 1024 * MiB;
 
 export const MEDIA_CAP = 8 * GiB;
 export const MEDIA_TARGET = 7.5 * GiB;
+/** All reviewer accounts' live media together (docs/protocol.md "Reviewer accounts"). */
+export const REVIEWER_MEDIA_CAP = 256 * 1024 * 1024;
 
 /** Largest ciphertext per kind. Voice: 10 minutes of ~48 kbps AAC is about 3.6 MB (the client checks duration). */
 export const KIND_LIMITS: ReadonlyMap<string, number> = new Map([

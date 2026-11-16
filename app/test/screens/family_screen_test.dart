@@ -127,6 +127,71 @@ void main() {
     expect(find.byKey(const Key('recovery-code-card')), findsOneWidget);
   });
 
+  Future<void> scrollTo(WidgetTester tester, Finder f) async {
+    await tester.scrollUntilVisible(f, 200, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('reviewer invite: create, copy, revoke', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+      return null;
+    });
+    await openFamily(tester);
+    await scrollTo(tester, find.byKey(const Key('create-reviewer-invite')));
+    expect(find.byKey(const Key('reviewer-link')), findsNothing);
+    await tester.tap(find.byKey(const Key('create-reviewer-invite')));
+    await tester.pumpAndSettle();
+    final url = tester.widget<SelectableText>(find.byKey(const Key('reviewer-link'))).data!;
+    expect(url, startsWith('https://famchat.dev/join#review.'));
+    final invite = parseInviteToken(url)!;
+    expect(isReviewerInvite(invite), isTrue);
+    expect(server.invites[splitInvite(invite).token]!.reviewer, isTrue);
+    await tester.ensureVisible(find.byKey(const Key('copy-reviewer-link')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('copy-reviewer-link')));
+    await tester.pumpAndSettle();
+    expect(copied, url);
+
+    // Still there after leaving and coming back.
+    appRouter(tester).go('/settings');
+    await tester.pumpAndSettle();
+    appRouter(tester).go('/family');
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.byKey(const Key('reviewer-link')));
+    expect(tester.widget<SelectableText>(find.byKey(const Key('reviewer-link'))).data, url);
+
+    await tester.ensureVisible(find.byKey(const Key('revoke-reviewer-invite')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('revoke-reviewer-invite')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-revoke-reviewer')));
+    await tester.pumpAndSettle();
+    expect(server.invites[splitInvite(invite).token]!.revoked, isTrue);
+    expect(find.byKey(const Key('reviewer-link')), findsNothing);
+    expect(find.byKey(const Key('create-reviewer-invite')), findsOneWidget);
+  });
+
+  testWidgets('reviewer accounts are listed apart from the family and can be removed', (tester) async {
+    final revKey = await tester.runAsync(() async => b64url(await publicKeyOf(await newIdentityKey())));
+    final revId = server.addUser('Play Reviewer', identityPub: revKey!, reviewer: true);
+    server.addDevice(revId, name: 'Pixel');
+    await openFamily(tester);
+    expect(find.text('2 people'), findsOneWidget, reason: 'the family count leaves reviewers out');
+    expect(find.byKey(Key('family-user-$revId')), findsNothing);
+    await scrollTo(tester, find.byKey(Key('reviewer-user-$revId')));
+    expect(find.text('Reviewer accounts'), findsOneWidget);
+    expect(find.text('Play Reviewer'), findsOneWidget);
+    await tester.tap(find.byKey(Key('remove-reviewer-$revId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-remove')));
+    await tester.pumpAndSettle();
+    expect(server.users[revId]!.deleted, isTrue);
+    expect(find.byKey(Key('reviewer-user-$revId')), findsNothing);
+    expect(find.text('Play Reviewer was removed'), findsOneWidget);
+  });
+
   testWidgets('members have no family screen', (tester) async {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);

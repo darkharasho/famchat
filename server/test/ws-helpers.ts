@@ -26,6 +26,9 @@ export async function socket(u: TestUser) {
   const inbox: Record<string, unknown>[] = [];
   ws.addEventListener("message", (e) => inbox.push(JSON.parse(e.data as string)));
   return {
+    send(m: unknown) {
+      ws.send(JSON.stringify(m));
+    },
     async next(type: string) {
       for (let i = 0; i < 100; i++) {
         const j = inbox.findIndex((m) => m.type === type);

@@ -136,8 +136,10 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
   return true;
 }
 
-/** Every family member refreshes the directory and checks the reset. */
+/** Every family member refreshes the directory and checks the reset. Reviewer accounts never hear. */
 export async function notifyReset(env: Env, userId: string, resetId: string): Promise<void> {
-  const { results } = await env.DB.prepare("SELECT id FROM users").all<{ id: string }>();
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM users WHERE reviewer = (SELECT reviewer FROM users WHERE id = ?)",
+  ).bind(userId).all<{ id: string }>();
   await notify(env, results.map((u) => u.id), { type: "reset", userId, resetId });
 }

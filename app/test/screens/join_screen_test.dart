@@ -35,6 +35,37 @@ void main() {
     expect(kv.values, isNotEmpty);
   });
 
+  testWidgets('a reviewer link asks for your name and makes a reviewer account', (tester) async {
+    await pumpApp(tester, server: server, kv: kv);
+    expect(find.byKey(const Key('display-name-field')), findsNothing);
+    final token = server.addReviewerInvite();
+    await tester.enterText(find.byKey(const Key('invite-field')), 'https://famchat.dev/join#review.$token');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('display-name-field')), findsOneWidget);
+    await tapJoin(tester);
+    expect(find.text('Enter your name (up to 40 characters).'), findsOneWidget);
+    expect(server.requestCount, 0);
+    await tester.enterText(find.byKey(const Key('display-name-field')), ' Play Reviewer ');
+    await tapJoin(tester);
+    expect(find.text('No chats yet'), findsOneWidget);
+    final u = server.users.values.single;
+    expect((u.name, u.reviewer, u.isAdmin), ('Play Reviewer', true, false));
+    // Reusable: the invite still works.
+    expect(server.invites[token]!.usedBy, isNull);
+  });
+
+  testWidgets('a revoked reviewer link says so', (tester) async {
+    await pumpApp(tester, server: server, kv: kv);
+    final token = server.addReviewerInvite();
+    server.invites[token]!.revoked = true;
+    await tester.enterText(find.byKey(const Key('invite-field')), 'review.$token');
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('display-name-field')), 'Reviewer');
+    await tapJoin(tester);
+    expect(find.text('This invite has expired or was already used. Ask for a new one.'), findsOneWidget);
+    expect(server.users, isEmpty);
+  });
+
   testWidgets('device name defaults from the platform', (tester) async {
     await pumpApp(tester, server: server, kv: kv);
     expect(find.text('Android phone'), findsOneWidget);
