@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PROJECT = os.environ.get("FIREBASE_PROJECT", "famchat")
+PROJECT = os.environ.get("FIREBASE_PROJECT", "famchat-da329")
 BUNDLE_ID = "dev.famchat.app"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIREBASE = shlex.split(os.environ.get("FIREBASE", "npx -y firebase-tools"))
