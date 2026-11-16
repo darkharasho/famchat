@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/emoji/shortcodes.dart';
 import '../../chat/plaintext.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
@@ -192,16 +193,22 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (showTime) metaRow,
       ]);
     } else {
+      final text = _text;
+      final emojiOnly = special ? null : emojiOnlyCount(text);
+      // One to three emoji alone are the message: show them big.
+      final big = emojiOnly != null && emojiOnly <= 3 ? (emojiOnly == 1 ? 40.0 : 32.0) : null;
       content = Wrap(
         alignment: WrapAlignment.end,
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: Space.sm,
         children: [
           Text(
-            _text,
+            text,
             style: theme.textTheme.bodyLarge?.copyWith(
               color: special ? meta : fg,
               fontStyle: special ? FontStyle.italic : null,
+              fontSize: big,
+              height: big != null ? 1.2 : null,
             ),
           ),
           if (showTime) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
