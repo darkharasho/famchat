@@ -30,7 +30,9 @@ void main() {
   Future<void> openAdd(WidgetTester tester, {List<Override> extra = const []}) async {
     await pumpApp(tester, server: server, kv: kv, extra: extra.isEmpty ? [qrScannerProvider.overrideWithValue(null)] : extra);
     await signInDirectly(tester, server, name: 'Alice');
-    await tester.tap(find.byTooltip('Devices'));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('add-device')));
     await tester.pumpAndSettle();

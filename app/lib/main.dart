@@ -9,12 +9,14 @@ import 'audio_init.dart';
 import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
+import 'theme/app_theme.dart';
 import 'voice/voice_io.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // famchat.dev/join#<token>: the fragment is the invite, not a route, so use path URLs.
   usePathUrlStrategy();
+  registerFontLicenses();
   // just_audio has no Linux/Windows backend of its own; media_kit (libmpv) provides it.
   // If libmpv is missing, only audio playback is lost.
   final audioErr = initAudioBackend();
@@ -28,6 +30,9 @@ void main() {
   ));
 }
 
+final _light = buildTheme(Brightness.light);
+final _dark = buildTheme(Brightness.dark);
+
 class FamChatApp extends ConsumerWidget {
   const FamChatApp({super.key});
 
@@ -35,8 +40,9 @@ class FamChatApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       title: 'FamChat',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo),
-      darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
+      debugShowCheckedModeBanner: false,
+      theme: _light,
+      darkTheme: _dark,
       routerConfig: ref.watch(routerProvider),
     );
   }

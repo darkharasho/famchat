@@ -9,6 +9,8 @@ import '../pairing/new_device_pairing.dart';
 import '../pairing/pairing_providers.dart';
 import '../platform_info.dart';
 import '../session/session_controller.dart';
+import '../theme/tokens.dart';
+import '../widgets/onboarding_frame.dart';
 
 /// "Sign in with another device": this device shows a QR code and a typeable code; a device where
 /// the user is signed in approves it and hands over the keys and history.
@@ -90,18 +92,10 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        leading: BackButton(onPressed: _cancel),
-        title: const Text('Sign in with another device'),
-      ),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
+    return OnboardingFrame(
+      onBack: _cancel,
+      title: 'Sign in with another device',
+      child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: switch (_state) {
                   PairIdle() || PairCancelled() => _intro(theme),
@@ -116,9 +110,22 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                       const SizedBox(height: 24),
                       Center(
                         child: Container(
-                          color: Colors.white,
-                          padding: const EdgeInsets.all(12),
-                          child: QrImageView(key: const Key('pair-qr'), data: qr, size: 220),
+                          decoration: BoxDecoration(
+                            color: Colors.white, // QR codes scan best dark on light, in either theme
+                            borderRadius: BorderRadius.circular(Radii.lg),
+                            border: Border.all(color: theme.colorScheme.outlineVariant),
+                          ),
+                          padding: const EdgeInsets.all(Space.lg),
+                          child: QrImageView(
+                            key: const Key('pair-qr'),
+                            data: qr,
+                            size: 220,
+                            eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF2E2550)),
+                            dataModuleStyle: const QrDataModuleStyle(
+                              dataModuleShape: QrDataModuleShape.square,
+                              color: Color(0xFF2E2550),
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),
@@ -126,10 +133,17 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                         code.display,
                         key: const Key('pair-code'),
                         textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineSmall?.copyWith(fontFamily: 'monospace', letterSpacing: 2),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          letterSpacing: 2,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
                       const SizedBox(height: 8),
-                      Text('Expires in ${_remaining(expiresAt)}', textAlign: TextAlign.center),
+                      Text(
+                        'Expires in ${_remaining(expiresAt)}',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      ),
                       const SizedBox(height: 16),
                       const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -154,21 +168,14 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                       FilledButton(key: const Key('pair-restart'), onPressed: _start, child: const Text('Try again')),
                     ],
                 },
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
 
   List<Widget> _intro(ThemeData theme) => [
-        Icon(Icons.devices_rounded, size: 56, color: theme.colorScheme.primary),
-        const SizedBox(height: 16),
         Text(
           'Already use FamChat on another phone or computer? Approve this device from there, '
           'and it gets your chats and their history.',
-          textAlign: TextAlign.center,
           style: theme.textTheme.bodyLarge,
         ),
         const SizedBox(height: 24),
@@ -179,7 +186,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
           decoration: const InputDecoration(
             labelText: 'Name for this device',
             helperText: 'Shown on the device that approves it.',
-            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.smartphone_rounded),
           ),
           onSubmitted: (_) => _start(),
         ),

@@ -29,6 +29,8 @@ void main() {
   }
 
   Future<void> menu(WidgetTester tester, String userId, String item) async {
+    await tester.ensureVisible(find.byKey(Key('family-menu-$userId')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('family-menu-$userId')));
     await tester.pumpAndSettle();
     await tester.tap(find.text(item).last);
@@ -38,7 +40,7 @@ void main() {
   testWidgets('lists the family with admins and devices', (tester) async {
     await openFamily(tester);
     expect(find.text('Michael'), findsOneWidget);
-    expect(find.text('You · Admin · 1 device'), findsOneWidget);
+    expect(find.text('You, Admin, 1 device'), findsOneWidget);
     expect(find.text('Mom'), findsOneWidget);
     expect(find.text('1 device'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Media storage'), 200);
@@ -82,7 +84,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(server.users[momId]!.isAdmin, isTrue);
     expect(find.byKey(const Key('second-admin-card')), findsNothing);
-    expect(find.text('Admin · 1 device'), findsOneWidget);
+    expect(find.text('Admin, 1 device'), findsOneWidget);
   });
 
   testWidgets('recovery code is shown once with copy and a print view', (tester) async {

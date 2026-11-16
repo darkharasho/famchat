@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../crypto/device_cert.dart';
@@ -59,7 +60,11 @@ class _SpikesScreenState extends State<SpikesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Platform spikes')),
+      appBar: AppBar(
+        // Signed out, the router sends /settings on to /join.
+        leading: BackButton(onPressed: () => context.go('/settings')),
+        title: const Text('Platform spikes'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

@@ -7,6 +7,7 @@ import '../api/models.dart';
 import '../crypto/reset.dart';
 import '../platform_info.dart';
 import '../session/session_controller.dart';
+import '../widgets/onboarding_frame.dart';
 
 class RecoverScreen extends ConsumerStatefulWidget {
   const RecoverScreen({super.key});
@@ -67,18 +68,14 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(leading: BackButton(onPressed: () => context.go('/join')), title: const Text('Recover admin account')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return OnboardingFrame(
+      onBack: () => context.go('/join'),
+      title: 'Recover admin account',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text(
                 'Type the admin recovery code you printed. Your old devices will be signed out, and your '
                 'chats come back from the rest of the family. The code works once.',
-                style: theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyLarge,
               ),
               const SizedBox(height: 24),
               TextField(
@@ -88,10 +85,11 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                 autocorrect: false,
                 enableSuggestions: false,
                 textCapitalization: TextCapitalization.characters,
+                style: const TextStyle(letterSpacing: 1.2, fontFeatures: [FontFeature.tabularFigures()]),
                 decoration: const InputDecoration(
                   labelText: 'Recovery code',
                   hintText: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX',
-                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.key_rounded),
                 ),
                 onSubmitted: (_) => _recover(),
               ),
@@ -101,7 +99,10 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                 controller: _deviceName,
                 enabled: !_busy,
                 maxLength: 60,
-                decoration: const InputDecoration(labelText: 'Name for this device', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'Name for this device',
+                  prefixIcon: Icon(Icons.smartphone_rounded),
+                ),
                 onSubmitted: (_) => _recover(),
               ),
               if (_error != null) ...[
@@ -117,9 +118,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                     : const Text('Recover'),
               ),
             ]),
-          ),
-        ),
-      ),
     );
   }
 }

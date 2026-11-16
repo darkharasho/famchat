@@ -17,6 +17,8 @@ void main() {
   });
 
   Future<void> tapJoin(WidgetTester tester) async {
+    await tester.ensureVisible(find.byKey(const Key('join-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('join-button')));
     await tester.pumpAndSettle();
   }
@@ -95,7 +97,11 @@ void main() {
   testWidgets('storage failure offers to start over', (tester) async {
     final broken = _BrokenKv()..values[SessionStore.key] = 'unreadable';
     await pumpApp(tester, server: server, kv: broken);
+    await tester.ensureVisible(find.text('Start over'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start over'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Start over'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Start over'));
     await tester.pumpAndSettle();
