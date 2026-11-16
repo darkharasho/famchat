@@ -35,7 +35,10 @@ reference; this document says what clients may rely on.
 ## Shapes
 
 ```
-User      = {id, name, isAdmin, identityPub, devices: Device[]}
+User      = {id, name, isAdmin, identityPub, devices: Device[], resets: Reset[]}
+Reset     = {id, signerUserId, signerKind: "admin"|"recovery", signerPub, recoverySig: string|null,
+             oldIdentityPub, claimPub, createdAt, sig, newIdentityPub: string|null,
+             claimSig: string|null, completedAt: number|null}            ("Account resets")
 Device    = {id, name, platform, encPub, signPub, certSig, revoked}
 Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
              lastSeq, lastMessageAt: number|null, createdAt, members: Member[]}
@@ -71,7 +74,10 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 
 ### Auth and devices (plans 1 and 4)
 - `POST /auth/invite/redeem`, `POST /auth/refresh`, `GET /me`, `GET /devices`, `POST /admin/invites`,
-  `POST /admin/bootstrap`.
+  `POST /admin/bootstrap`. Redeeming a reset link also needs `resetClaimSig` ("Account resets").
+- `GET /me` → `{userId, deviceId, name, isAdmin, recoveryCodeSet}`; `recoveryCodeSet` says an admin
+  recovery key is registered.
+- Admin routes check `users.is_admin` in the database, so a promotion counts at once.
 - `DELETE /devices/:id` → 204 (your own live device, else 404). Closes that device's WebSocket (code
   4001) and, in the same transaction, moves **every chat of your user** to `currentEpoch + 1` with
   `epochReady: false`; members get `chat {chatId}` per chat and `device {userId, deviceId, revoked: true}`.
@@ -125,6 +131,66 @@ of whatever the server shows. Member devices also add wraps for N on the `device
 ### Directory
 - `GET /users` → `{users: User[]}`: every family member and every device, revoked ones included
   (`revoked: true`) so old signatures still verify. Wrap only for devices with `revoked: false`.
+  `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
+  accept only through resets they verify ("Account resets").
+
+### Account resets (plan 10)
+An admin resets a user who lost every device. The admin can't read their messages: the new device
+gets the history from other members' devices, and every member sees the reset.
+
+Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big-endian u32, high first):
+- statement `"famchat-reset-v1" ‖ str(resetId) ‖ str(userId) ‖ str(signerUserId) ‖ str(signerKind) ‖ oldIdentityPub ‖ claimPub ‖ u64(createdAt)`
+- claim `"famchat-reset-claim-v1" ‖ claimPub ‖ newIdentityPub`, signed by the claim key
+- recovery key registration `"famchat-recovery-key-v1" ‖ str(userId) ‖ recoveryPub`, signed by the identity key
+
+1. The admin's device makes `resetId` (ULID), a one-time Ed25519 **claim key**, and signs the statement
+   (kind `admin`, `oldIdentityPub` = the user's identity key from `/users`) with its identity key.
+   `POST /admin/users/:id/reset {resetId, oldIdentityPub, claimPub, createdAt, sig}` (admin) →
+   `201 {resetId, inviteToken, inviteUrl, expiresAt}`. The server checks the signature against the
+   caller's identity key (400), `|createdAt − now| ≤ 10 min` (400), that `oldIdentityPub` is the
+   user's key now (409 `conflict`: refresh `/users`), and that the target isn't the caller (400). In
+   one transaction it records the reset, revokes every device of the user (sockets closed with 4001),
+   moves each of their chats to `currentEpoch + 1` (`epochReady: false`), cancels their unclaimed
+   pairings, retires their older unused reset links and makes a one-time invite bound to the user.
+   Members get `chat` and `device {revoked: true}` events; everyone gets `reset {userId, resetId}`.
+2. The admin gives the user the link `inviteUrl + "." + b64url(claimKeySeed)`, i.e.
+   `/join#<token>.<seed>`. The seed is in the fragment and never reaches the server.
+3. The new device makes a new identity key and redeems the token with
+   `resetClaimSig` = claim signature over its new identity key. The server checks it against the
+   reset's `claimPub` (400 if missing or wrong), then sets the user's identity key, adds the device to
+   the **same user**, and completes the reset (`newIdentityPub`, `claimSig`, `completedAt`). Sharing
+   users get `device {userId, deviceId}`; everyone gets `reset` again. A lost response is retried
+   with the same keys like any redeem.
+4. Other members' devices verify (client rule):
+   - the statement under `signerPub`; kind `admin`: the signer is another user marked admin whose
+     `signerPub` this device trusts (current, acknowledged, or learned from a verified reset); kind
+     `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`, a key this device trusts;
+   - if `oldIdentityPub` is the trusted key: show "Mom's account was reset by Michael" in every chat
+     shared with the user; if the reset is completed and its claim verifies, trust `newIdentityPub`
+     automatically (no manual key-change banner) and add wraps of every held epoch for the new device;
+   - if `newIdentityPub` is a known key: `oldIdentityPub` becomes known too (history; no banner);
+   - devices certified only by a retired `oldIdentityPub` count as revoked.
+   An identity change no verified reset explains keeps the manual "security key changed" banner.
+
+Second admin: `POST /admin/users/:id/admin` (admin) → 204 (404 unknown user). Not signed: the
+directory's `isAdmin` decides whose resets count.
+
+Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
+as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
+`HKDF-SHA256(UTF-8(code), salt = "", info = "famchat-recovery-seed-v1")`, and registers
+`POST /admin/recovery-key {recoveryPub, sig}` (admin; `sig` = identity key over the registration) →
+204, replacing any earlier key. Only the public key is stored, so the server can't use the code.
+To recover without any device: `POST /auth/recover/lookup {recoveryPub}` → `{userId, identityPub}`
+(401 if no admin has that key), then `POST /auth/recover {recoveryPub, resetId, oldIdentityPub,
+claimPub, createdAt, sig, claimSig, identityPub, encPub, signPub, certSig, deviceName, platform}`
+→ `201 {userId, deviceId, isAdmin, accessToken, refreshToken}`: a statement of kind `recovery`
+signed by the recovery key plus a claim over the new identity key. Same transaction as a reset, plus
+the new identity key and device, and the recovery key is cleared (single use; 401 afterwards). The
+reset row keeps `recoverySig` so clients can verify it later. A retry with the same body within
+10 minutes reissues tokens.
+
+Every reset, recovery, promotion, recovery-key change, join, pairing and revocation writes an
+`events` row (audit log; not exposed by the API yet).
 
 ### Chats
 - `GET /chats` → `{chats: Chat[]}` (yours, newest activity first). `GET /chats/:id` → `{chat}`.
@@ -212,6 +278,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
+| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone): `GET /users` and check it |
 | close code 4001 | this device was revoked |
 
 ### `send` rules
@@ -232,11 +299,12 @@ add wraps you can, then resend the outbox.
 ### Hooks for later plans
 - Push (plan 9): `FamilyHub.push.notify({chatId, senderUserId, messageId, userIds})` is called for members
   with no open socket after each new message; it's a no-op until plan 9 replaces it with a Queue producer.
-- Admin reset (plan 10) can reuse plan 6: revoking the user's devices already rotates every chat, and
-  the `device` event plus missing-wrap repair restores history to the new device.
+- Admin reset (plan 10) reuses plan 6: revoking the user's devices rotates every chat, and the
+  `device` event plus missing-wrap repair restores history to the new device ("Account resets").
 
 ## Signed and derived byte strings
 Every signature, MAC and key derivation starts with its own domain string, and no domain string is a
 prefix of another: `famchat-device-cert-v1`, `famchat-wrap-v1`, `famchat-envelope-v1`,
 `famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info),
-`famchat-media-v1` (media AEAD associated data).
+`famchat-media-v1` (media AEAD associated data), `famchat-reset-v1`, `famchat-reset-claim-v1`,
+`famchat-recovery-key-v1` (signatures), `famchat-recovery-seed-v1` (HKDF info).

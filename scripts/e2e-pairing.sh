@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end test of device pairing and key rotation against a local Worker.
+# End-to-end test of device pairing, key rotation and admin reset against a local Worker.
 #
 # Starts `wrangler dev` on a fresh, throwaway local D1 (migrations applied), then runs
 # app/test_e2e/ with the Dart chat engine against it: two users chat, the first pairs a new
-# device that reads the history, then revokes it and the chat moves to a new key.
+# device that reads the history, then revokes it and the chat moves to a new key; then the admin
+# resets the second user, whose new device gets the history from the first.
 #
 # Usage: scripts/e2e-pairing.sh            (needs node/npm deps in server/ and flutter on PATH
 #                                          or at ~/development/flutter/bin)
