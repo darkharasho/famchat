@@ -48,11 +48,12 @@ auth.post("/invite/redeem", async (c) => {
 
   const tokenHash = await sha256Hex(token);
   const db = c.env.DB;
-  const invite = await db.prepare("SELECT user_id, reset_id FROM invites WHERE token_hash = ?")
-    .bind(tokenHash).first<{ user_id: string | null; reset_id: string | null }>();
+  const invite = await db.prepare("SELECT user_id, reset_id, reviewer FROM invites WHERE token_hash = ?")
+    .bind(tokenHash).first<{ user_id: string | null; reset_id: string | null; reviewer: number }>();
   if (invite?.user_id && invite.reset_id) {
     return redeemReset(c.env, body, tokenHash, invite.user_id, invite.reset_id, k).then((r) => c.json(r, 201));
   }
+  if (invite?.reviewer === 1) return c.json(await redeemReviewer(c.env, body, tokenHash, k), 201);
 
   const userId = newId();
   const deviceId = newId();
@@ -63,8 +64,8 @@ auth.post("/invite/redeem", async (c) => {
   const [claim] = await db.batch([
     db.prepare(
       `UPDATE invites SET used_by = ?, used_at = ?
-       WHERE token_hash = ? AND used_by IS NULL AND expires_at > ? AND user_id IS NULL
-         AND (created_by IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL))`,
+       WHERE token_hash = ? AND used_by IS NULL AND expires_at > ? AND user_id IS NULL AND reviewer = 0
+         AND (created_by IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL AND reviewer = 0))`,
     ).bind(userId, now, tokenHash, now),
     db.prepare(
       `INSERT INTO users (id, name, is_admin, identity_pub, created_at)
@@ -84,8 +85,47 @@ auth.post("/invite/redeem", async (c) => {
   const isAdmin =
     (await db.prepare("SELECT is_admin FROM users WHERE id = ?").bind(userId).first<number>("is_admin")) === 1;
   const accessToken = await signAccessToken(c.env, { sub: userId, dev: deviceId, adm: isAdmin });
-  return c.json({ userId, deviceId, isAdmin, accessToken, refreshToken }, 201);
+  return c.json({ userId, deviceId, isAdmin, reviewer: false, accessToken, refreshToken }, 201);
 });
+
+/**
+ * A reviewer invite (docs/protocol.md "Reviewer accounts") makes a new reviewer account each time
+ * it is redeemed, named by the reviewer, until an admin revokes it. Nobody is told: the family
+ * never sees reviewer accounts.
+ */
+async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash: string, k: Keys) {
+  const db = env.DB;
+  const displayName = name(body.name, 40);
+  const now = Date.now();
+  // A retry whose 201 was lost: the same keys made a reviewer account just now.
+  const prior = await db.prepare(
+    `SELECT d.id AS device_id, u.id AS user_id FROM users u JOIN devices d ON d.user_id = u.id
+     WHERE u.reviewer = 1 AND u.deleted_at IS NULL AND u.identity_pub = ? AND u.created_at >= ?
+       AND d.enc_pub = ? AND d.sign_pub = ? AND d.cert_sig = ? AND d.revoked_at IS NULL`,
+  ).bind(k.identityPub, now - REDEEM_RETRY_MS, k.encPub, k.signPub, k.certSig)
+    .first<{ device_id: string; user_id: string }>();
+  if (prior) return { ...(await reissue(env, prior.user_id, prior.device_id, false, now)), reviewer: true };
+
+  const userId = newId();
+  const deviceId = newId();
+  const refreshToken = randomToken();
+  const live = "EXISTS (SELECT 1 FROM invites WHERE token_hash = ? AND reviewer = 1 AND revoked_at IS NULL AND expires_at > ?)";
+  const [user] = await db.batch([
+    db.prepare(`INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer) SELECT ?, ?, 0, ?, ?, 1 WHERE ${live}`)
+      .bind(userId, displayName, k.identityPub, now, tokenHash, now),
+    db.prepare(
+      `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, refresh_hash, created_at, last_seen)
+       SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ?`,
+    ).bind(deviceId, k.deviceName, k.platform, k.encPub, k.signPub, k.certSig, await sha256Hex(refreshToken), now, now, userId),
+    eventStmt(db, { kind: "user_joined", userId, actorId: userId, payload: { deviceId, reviewer: true }, at: now }, {
+      sql: "EXISTS (SELECT 1 FROM users WHERE id = ?)",
+      binds: [userId],
+    }),
+  ]);
+  if (user.meta.changes !== 1) throw new ApiError("invite_invalid");
+  const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: false });
+  return { userId, deviceId, isAdmin: false, reviewer: true, accessToken, refreshToken };
+}
 
 /** A client whose 201 was lost may retry with the same invite and the same keys. */
 async function retryRedeem(env: Env, tokenHash: string, k: Keys, now: number) {
@@ -108,7 +148,7 @@ async function reissue(env: Env, userId: string, deviceId: string, isAdmin: bool
     .bind(await sha256Hex(refreshToken), now, deviceId)
     .run();
   const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: isAdmin });
-  return { userId, deviceId, isAdmin, accessToken, refreshToken };
+  return { userId, deviceId, isAdmin, reviewer: false, accessToken, refreshToken };
 }
 
 /**
@@ -151,7 +191,7 @@ async function redeemReset(env: Env, body: Record<string, unknown>, tokenHash: s
   await notify(env, await sharingUserIds(db, userId), { type: "device", userId, deviceId });
   await notifyReset(env, userId, resetId);
   const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: isAdmin });
-  return { userId, deviceId, isAdmin, accessToken, refreshToken };
+  return { userId, deviceId, isAdmin, reviewer: false, accessToken, refreshToken };
 }
 
 /**

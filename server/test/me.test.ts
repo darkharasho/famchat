@@ -12,7 +12,7 @@ describe("GET /api/me", () => {
     const u = await insertUserWithDevice({ admin: true, name: "Mom" });
     const res = await me(u.accessToken);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ userId: u.userId, deviceId: u.deviceId, name: "Mom", isAdmin: true, recoveryCodeSet: false });
+    expect(await res.json()).toEqual({ userId: u.userId, deviceId: u.deviceId, name: "Mom", isAdmin: true, recoveryCodeSet: false, reviewer: false });
   });
 
   it("reads isAdmin from the database, not the token", async () => {

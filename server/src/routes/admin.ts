@@ -24,8 +24,20 @@ export function inviteUrl(env: Env, token: string): string {
 }
 
 /**
- * Bootstrap invites (createdBy = null) are only inserted while no user exists (or every user has
- * deleted their account), in the same statement.
+ * A reviewer invite's link carries a `review.` marker, so the app asks the reviewer for a display
+ * name (a normal invite already has the name the admin gave it). Tokens are at least 20 characters,
+ * so the marker can't be mistaken for one.
+ */
+export function reviewerInviteUrl(env: Env, token: string): string {
+  return `${env.APP_ORIGIN}/join#review.${token}`;
+}
+
+/** Reviewer invites never expire on their own (only by revocation): year 9999. */
+export const NEVER = 253_402_300_799_999;
+
+/**
+ * Bootstrap invites (createdBy = null) are only inserted while no family member exists (or every
+ * one has deleted their account), in the same statement. Reviewer accounts don't count.
  */
 async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
   const token = randomToken();
@@ -33,7 +45,8 @@ async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, cr
   const expiresAt = now + INVITE_TTL_MS;
   const res = await env.DB.prepare(
     `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
-     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL)`,
+     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL
+       OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL AND reviewer = 0)`,
   )
     .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
@@ -55,6 +68,54 @@ admin.post("/bootstrap", async (c) => {
 admin.post("/invites", requireAuth, requireAdmin, async (c) => {
   const inviteName = name((await readJson(c)).name, 40);
   return c.json(await createInvite(c.env, inviteName, false, c.get("userId")), 201);
+});
+
+/** The active reviewer invite: not revoked and not expired (its creator's deletion expires it). */
+const ACTIVE_REVIEWER_INVITE = "reviewer = 1 AND revoked_at IS NULL AND expires_at > ?";
+
+/**
+ * Creates the reviewer invite (docs/protocol.md "Reviewer accounts"): reusable, never expiring,
+ * revocable. At most one is active, so an earlier one is revoked in the same transaction.
+ */
+admin.post("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
+  const token = randomToken();
+  const now = Date.now();
+  await db.batch([
+    db.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now),
+    db.prepare(
+      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, reviewer, token)
+       VALUES (?, 'Reviewer', 0, ?, ?, ?, 1, ?)`,
+    ).bind(await sha256Hex(token), c.get("userId"), now, NEVER, token),
+  ]);
+  return c.json({ inviteToken: token, inviteUrl: reviewerInviteUrl(c.env, token), createdAt: now }, 201);
+});
+
+/** Revokes the reviewer invite: redeeming it fails from now on. Reviewer accounts stay. */
+admin.delete("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+  const now = Date.now();
+  await c.env.DB.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now).run();
+  return c.body(null, 204);
+});
+
+/** The active reviewer invite's link (or null) and the reviewer accounts, which GET /users never lists for the family. */
+admin.get("/reviewers", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
+  const now = Date.now();
+  const [inv, users] = await db.batch([
+    db.prepare(`SELECT token, created_at FROM invites WHERE ${ACTIVE_REVIEWER_INVITE} ORDER BY created_at DESC LIMIT 1`).bind(now),
+    db.prepare(
+      `SELECT u.id, u.name, u.created_at,
+         (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices
+       FROM users u WHERE u.reviewer = 1 AND u.deleted_at IS NULL ORDER BY u.created_at, u.id`,
+    ),
+  ]);
+  const i = inv.results[0] as { token: string; created_at: number } | undefined;
+  type U = { id: string; name: string; created_at: number; devices: number };
+  return c.json({
+    invite: i ? { inviteUrl: reviewerInviteUrl(c.env, i.token), createdAt: i.created_at } : null,
+    users: (users.results as U[]).map((u) => ({ id: u.id, name: u.name, createdAt: u.created_at, devices: u.devices })),
+  });
 });
 
 /** Media storage: live bytes against the cap, and how many objects are live or expired. */
@@ -91,7 +152,9 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   if (userId === adminId) throw new ApiError("invalid_request");
 
   const [target, signer] = await Promise.all([
-    db.prepare("SELECT name, identity_pub FROM users WHERE id = ? AND deleted_at IS NULL").bind(userId).first<{ name: string; identity_pub: string }>(),
+    // Reviewer accounts aren't reset: an admin removes them instead.
+    db.prepare("SELECT name, identity_pub FROM users WHERE id = ? AND deleted_at IS NULL AND reviewer = 0").bind(userId)
+      .first<{ name: string; identity_pub: string }>(),
     db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
   ]);
   if (!target) throw new ApiError("not_found");
@@ -127,7 +190,7 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
   if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
   const res = await db.prepare(
-    "UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL",
+    "UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL AND reviewer = 0",
   )
     .bind(by, signer, sig, userId).run();
   if (res.meta.changes !== 1) throw new ApiError("not_found");

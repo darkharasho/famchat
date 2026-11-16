@@ -13,21 +13,27 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const claims = token ? await verifyAccessToken(c.env, token) : null;
   if (!claims) throw new ApiError("unauthorized");
   const live = await c.env.DB.prepare(
-    "SELECT 1 FROM devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+    "SELECT u.reviewer FROM devices d JOIN users u ON u.id = d.user_id WHERE d.id = ? AND d.user_id = ? AND d.revoked_at IS NULL",
   )
     .bind(claims.dev, claims.sub)
-    .first();
+    .first<{ reviewer: number }>();
   if (!live) throw new ApiError("unauthorized");
   c.set("userId", claims.sub);
   c.set("deviceId", claims.dev);
   c.set("isAdmin", claims.adm);
+  // A reviewer account (docs/protocol.md "Reviewer accounts") sees only other reviewers.
+  c.set("reviewer", live.reviewer === 1);
   await next();
 });
 
-/** Admin status comes from the database, so a promotion counts at once (not after a refresh). */
+/**
+ * Admin status comes from the database, so a promotion counts at once (not after a refresh).
+ * A reviewer account is never an admin, whatever its row says.
+ */
 export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
-  const isAdmin = await c.env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(c.get("userId")).first<number>("is_admin");
-  if (isAdmin !== 1) throw new ApiError("forbidden");
+  const row = await c.env.DB.prepare("SELECT is_admin, reviewer FROM users WHERE id = ?").bind(c.get("userId"))
+    .first<{ is_admin: number; reviewer: number }>();
+  if (row?.is_admin !== 1 || row.reviewer !== 0) throw new ApiError("forbidden");
   c.set("isAdmin", true);
   await next();
 });

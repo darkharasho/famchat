@@ -74,15 +74,15 @@ export async function resetDb(): Promise<void> {
 }
 
 /** Inserts a user + device row directly and returns an access token for it. */
-export async function insertUserWithDevice(opts: { admin?: boolean; name?: string } = {}) {
+export async function insertUserWithDevice(opts: { admin?: boolean; name?: string; reviewer?: boolean } = {}) {
   const keys = await makeKeys();
   const userId = newId();
   const deviceId = newId();
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO users (id, name, is_admin, identity_pub, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).bind(userId, opts.name ?? "Test", opts.admin ? 1 : 0, keys.identityPub, now),
+      "INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(userId, opts.name ?? "Test", opts.admin ? 1 : 0, keys.identityPub, now, opts.reviewer ? 1 : 0),
     env.DB.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, created_at, last_seen)
        VALUES (?, ?, 'Phone', 'android', ?, ?, ?, ?, ?)`,

@@ -4,7 +4,7 @@ import type { AppEnv } from "../env";
 import { hubStub } from "../hub";
 import { isMember, isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
-import { KIND_LIMITS, MEDIA_CAP, mediaUsage } from "../lib/media";
+import { KIND_LIMITS, MEDIA_CAP, mediaUsage, REVIEWER_MEDIA_CAP } from "../lib/media";
 import { requireAuth } from "../middleware/auth";
 
 export const media = new Hono<AppEnv>();
@@ -37,6 +37,14 @@ media.post("/", async (c) => {
   const deviceId = c.get("deviceId");
   if (!(await isMember(db, chatId, userId))) throw new ApiError("not_found");
   if (length > limit) throw new ApiError("too_large");
+  // Reviewer accounts share a small budget, so their uploads can never push the family's media
+  // past the cap (which evicts the oldest family photos).
+  if (c.get("reviewer")) {
+    const used = await db.prepare(
+      "SELECT COALESCE(SUM(bytes), 0) AS n FROM media WHERE expired_at IS NULL AND uploader_id IN (SELECT id FROM users WHERE reviewer = 1)",
+    ).first<number>("n");
+    if ((used ?? 0) + length > REVIEWER_MEDIA_CAP) throw new ApiError("too_large");
+  }
 
   const body = c.req.raw.body;
   if (!body) throw new ApiError("invalid_request");

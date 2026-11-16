@@ -37,14 +37,15 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const guard = "EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ?)";
   const gb = [userId, now];
   const stmts: D1PreparedStatement[] = [
-    // The last admin can't go while someone else is still here: the family would have no admin.
+    // The last admin can't go while someone else in the family is still here: it would have no
+    // admin. Reviewer accounts don't count (they can never be admins).
     db.prepare(
       `UPDATE users SET deleted_at = ?, name = ?, is_admin = 0, recovery_pub = NULL, recovery_sig = NULL,
          admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL
        WHERE id = ? AND deleted_at IS NULL AND (
-         is_admin = 0
-         OR EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.is_admin = 1 AND o.deleted_at IS NULL)
-         OR NOT EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.deleted_at IS NULL))`,
+         is_admin = 0 OR reviewer = 1
+         OR EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.is_admin = 1 AND o.reviewer = 0 AND o.deleted_at IS NULL)
+         OR NOT EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.reviewer = 0 AND o.deleted_at IS NULL))`,
     ).bind(now, DELETED_USER_NAME, userId, userId, userId),
     db.prepare(
       `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
@@ -122,7 +123,10 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const byChat = new Map<string, string[]>();
   for (const m of media) if (m.expired_at === null) byChat.set(m.chat_id, [...(byChat.get(m.chat_id) ?? []), m.key]);
   for (const [chatId, ks] of byChat) await notify(env, await memberIds(db, chatId), { type: "media_expired", chatId, keys: ks });
-  const { results: everyone } = await db.prepare("SELECT id FROM users WHERE deleted_at IS NULL").all<{ id: string }>();
+  // Everyone on the deleted user's side: the family, or the other reviewer accounts.
+  const { results: everyone } = await db.prepare(
+    "SELECT id FROM users WHERE deleted_at IS NULL AND reviewer = (SELECT reviewer FROM users WHERE id = ?)",
+  ).bind(userId).all<{ id: string }>();
   await notify(env, everyone.map((u) => u.id), { type: "account_deleted", userId });
 
   return { revokedDevices: revoked, chats, messages: results[msgIdx].meta.changes, media: keys };
