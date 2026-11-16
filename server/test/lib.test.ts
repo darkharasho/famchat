@@ -6,6 +6,7 @@ import { randomToken, sha256Hex, signAccessToken, verifyAccessToken } from "../s
 import { verifyDeviceCert } from "../src/lib/devicecert";
 import { ApiError } from "../src/lib/errors";
 import { certMessage, makeKeys } from "./helpers";
+import dartCert from "./fixtures/dart-device-cert.json";
 
 describe("b64url", () => {
   it("round-trips", () => {
@@ -78,6 +79,16 @@ describe("tokens", () => {
 });
 
 describe("verifyDeviceCert", () => {
+  it("accepts Dart-generated cert", async () => {
+    const c = dartCert;
+    expect(await verifyDeviceCert(c.identityPub, c.encPub, c.signPub, c.certSig)).toBe(true);
+  });
+
+  it("rejects Dart cert with swapped keys", async () => {
+    const c = dartCert;
+    expect(await verifyDeviceCert(c.identityPub, c.signPub, c.encPub, c.certSig)).toBe(false);
+  });
+
   it("valid cert verifies", async () => {
     const k = await makeKeys();
     expect(await verifyDeviceCert(k.identityPub, k.encPub, k.signPub, k.certSig)).toBe(true);
