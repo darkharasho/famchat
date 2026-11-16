@@ -7,7 +7,8 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/plaintext.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
-import 'chat_list.dart' show shortTime;
+import '../../theme/app_theme.dart';
+import 'chat_list.dart' show clockTime;
 import 'photo_view.dart';
 import 'voice_bubble.dart';
 
@@ -166,8 +167,12 @@ class _MessageBubbleState extends State<MessageBubble> {
     final metaRow = Row(mainAxisSize: MainAxisSize.min, children: [
       if (showTime)
         Text(
-          shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
-          style: theme.textTheme.labelSmall?.copyWith(color: meta, fontFeatures: const [FontFeature.tabularFigures()]),
+          clockTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontFamily: kDisplayFont, // plain zeros in times
+            color: meta,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       if (pending) ...[
         const SizedBox(width: 4),

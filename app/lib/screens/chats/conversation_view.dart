@@ -292,7 +292,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     if (chat == null) {
       return Scaffold(
-        appBar: AppBar(automaticallyImplyLeading: widget.showBack),
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: widget.showBack ? BackButton(onPressed: () => context.go('/')) : null,
+        ),
         body: EmptyState(
           art: Icon(Icons.forum_outlined, size: 48, color: theme.colorScheme.onSurfaceVariant),
           title: 'This chat is no longer available.',

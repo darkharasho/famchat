@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../session/session_controller.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/brand_mark.dart';
 import '../../widgets/common.dart';
@@ -122,8 +123,10 @@ class _ChatTile extends StatelessWidget {
                       Text(
                         shortTime(DateTime.fromMillisecondsSinceEpoch(item.activity)),
                         style: theme.textTheme.labelSmall?.copyWith(
+                          fontFamily: kDisplayFont, // plain zeros in times
+                          fontSize: 13,
                           color: unread ? s.onSurface : s.onSurfaceVariant,
-                          fontWeight: unread ? FontWeight.w700 : null,
+                          fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
                         ),
                       ),
                     ]),
@@ -182,6 +185,9 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me) {
     _ => 'Unsupported message',
   };
 }
+
+/// "14:05".
+String clockTime(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// "14:05" today, "Mon" this week, else "3/14".
 String shortTime(DateTime t, [DateTime? now]) {

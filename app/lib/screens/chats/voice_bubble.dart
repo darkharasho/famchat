@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/plaintext.dart';
 import '../../media/media_service.dart';
 import '../../media/providers.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../voice/providers.dart';
 
@@ -114,7 +115,7 @@ class VoiceBubble extends ConsumerWidget {
           style: Theme.of(context)
               .textTheme
               .labelMedium
-              ?.copyWith(color: meta, fontFeatures: const [FontFeature.tabularFigures()]),
+              ?.copyWith(fontFamily: kDisplayFont, color: meta, fontFeatures: const [FontFeature.tabularFigures()]),
         ),
       ]),
     );

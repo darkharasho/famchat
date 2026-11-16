@@ -6,15 +6,22 @@ import '../theme/app_theme.dart';
 import '../theme/palette.dart';
 
 class BrandMark extends StatelessWidget {
-  const BrandMark({super.key, this.size = 40});
+  const BrandMark({super.key, this.size = 40, this.rim});
 
   final double size;
+
+  /// A faint rim around the tile; by default only on the evening theme, where the dusk tile
+  /// would otherwise sink into the background.
+  final bool? rim;
 
   @override
   Widget build(BuildContext context) => Semantics(
         label: 'FamChat',
         image: true,
-        child: CustomPaint(size: Size.square(size), painter: const _MarkPainter()),
+        child: CustomPaint(
+          size: Size.square(size),
+          painter: _MarkPainter(rim: rim ?? Theme.of(context).brightness == Brightness.dark),
+        ),
       );
 }
 
@@ -49,7 +56,9 @@ class Wordmark extends StatelessWidget {
 }
 
 class _MarkPainter extends CustomPainter {
-  const _MarkPainter();
+  const _MarkPainter({this.rim = false});
+
+  final bool rim;
 
   static final _house = Path()
     ..moveTo(512, 212)
@@ -74,6 +83,15 @@ class _MarkPainter extends CustomPainter {
       RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 1024, 1024), const Radius.circular(232)),
       Paint()..color = Palette.dusk,
     );
+    if (rim) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(const Rect.fromLTWH(16, 16, 992, 992), const Radius.circular(220)),
+        Paint()
+          ..color = const Color(0x40FFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 32,
+      );
+    }
     canvas
       ..translate(512, 512)
       ..scale(0.78)
@@ -101,5 +119,5 @@ class _MarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MarkPainter oldDelegate) => false;
+  bool shouldRepaint(_MarkPainter oldDelegate) => oldDelegate.rim != rim;
 }

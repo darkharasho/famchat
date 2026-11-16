@@ -25,7 +25,7 @@ class OnboardingFrame extends StatelessWidget {
       crossAxisAlignment: wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        BrandMark(size: wide ? 88 : 64),
+        BrandMark(size: wide ? 88 : 64, rim: false),
         SizedBox(height: wide ? Space.xxl : Space.xl),
         Semantics(
           header: true,

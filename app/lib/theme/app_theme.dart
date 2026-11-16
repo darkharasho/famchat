@@ -297,6 +297,5 @@ ThemeData buildTheme(Brightness brightness) {
       textStyle: text.bodyLarge,
     ),
     checkboxTheme: CheckboxThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.xs))),
-    iconTheme: IconThemeData(color: s.onSurfaceVariant),
   );
 }

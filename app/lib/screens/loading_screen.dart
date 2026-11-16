@@ -20,7 +20,7 @@ class LoadingScreen extends ConsumerWidget {
         backgroundColor: Palette.dusk,
         body: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            BrandMark(size: 72),
+            BrandMark(size: 72, rim: false),
             SizedBox(height: Space.xxl),
             SizedBox.square(
               dimension: 24,

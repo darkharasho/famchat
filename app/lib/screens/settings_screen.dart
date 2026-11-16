@@ -60,16 +60,16 @@ class SettingsScreen extends ConsumerWidget {
               ]),
             ),
             SettingsGroup(title: 'You', children: [
-              row(Icons.devices_rounded, 'Devices', 'Phones and computers signed in as you', '/devices',
+              row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/devices',
                   key: const Key('settings-devices')),
             ]),
             if (admin)
               SettingsGroup(title: 'Family', children: [
-                row(Icons.diversity_3_rounded, 'Family', 'Admins, account resets and the recovery code', '/family',
+                row(Icons.diversity_3_rounded, 'Family members', 'Admins, account resets, recovery code', '/family',
                     key: const Key('settings-family')),
-                row(Icons.person_add_alt_rounded, 'Invite someone', 'A one-time link for a new family member', '/invite',
+                row(Icons.person_add_alt_rounded, 'Invite someone', 'A one-time link to join', '/invite',
                     key: const Key('settings-invite')),
-                row(Icons.photo_library_outlined, 'Media storage', 'How much room photos and voice messages use',
+                row(Icons.photo_library_outlined, 'Media storage', 'Space used by photos and voice',
                     '/storage',
                     key: const Key('settings-storage')),
               ]),
