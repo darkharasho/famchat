@@ -3,6 +3,8 @@
 // background web tabs. Text follows the server's rule: who and where, never what.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../chat/db/chat_db.dart';
 import 'chat_route.dart';
 import 'local_notifier.dart';
@@ -70,7 +72,9 @@ class PushController {
       if (token == null || _stopped) return false;
       await _register(token);
       return true;
-    } catch (_) {
+    } catch (e) {
+      // iOS without the aps-environment entitlement ends here (no APNs token, so no FCM token).
+      debugPrint('push registration failed: $e');
       return false;
     }
   }

@@ -1,23 +1,28 @@
 // The Settings page's "Notifications" group: turn them on (web, where the browser only asks after a
-// click) and send a test push to your own devices (once push is set up).
+// click) and send a test notification: a push to your own devices (once push is set up), or on
+// desktop apps, which have no push, a notification shown right here.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../screens/sign_out.dart' show apiErrorMessage;
 import '../session/session_controller.dart';
 import '../widgets/common.dart';
+import 'local_notifier.dart';
+import 'notifications.dart';
 import 'providers.dart';
 import 'push_messaging.dart';
 
 class NotificationSettingsGroup extends ConsumerWidget {
   const NotificationSettingsGroup({super.key});
 
-  Future<void> _testPush(BuildContext context, WidgetRef ref) async {
+  Future<void> _test(BuildContext context, WidgetRef ref) async {
     String text;
     try {
-      // Register this device's token first (permission may have been granted since start).
-      await ref.read(pushControllerProvider)?.enable();
-      text = pushTestSummary(await ref.read(apiClientProvider).authedJson('POST', '/devices/me/push/test'));
+      text = await runNotificationTest(
+        push: ref.read(pushControllerProvider),
+        local: ref.read(localNotifierProvider),
+        sendServerTest: () => ref.read(apiClientProvider).authedJson('POST', '/devices/me/push/test'),
+      );
     } catch (e) {
       text = apiErrorMessage(e);
     }
@@ -28,7 +33,8 @@ class NotificationSettingsGroup extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final offer = ref.watch(notifyOfferProvider);
     final push = ref.watch(pushMessagingProvider) != null;
-    if (!offer && !push) return const SizedBox.shrink();
+    final local = ref.watch(localNotifierProvider) != null;
+    if (!offer && !push && !local) return const SizedBox.shrink();
     return SettingsGroup(title: 'Notifications', children: [
       if (offer)
         ListTile(
@@ -38,26 +44,50 @@ class NotificationSettingsGroup extends ConsumerWidget {
           subtitle: const Text('For new messages while FamChat is in the background'),
           onTap: () => ref.read(notifyOfferProvider.notifier).enable(),
         ),
-      if (push)
+      if (push || local)
         ListTile(
           key: const Key('settings-test-push'),
           leading: const TileIcon(Icons.notifications_active_outlined),
           title: const Text('Send a test notification'),
-          subtitle: const Text('To your devices that allow notifications'),
-          onTap: () => _testPush(context, ref),
+          subtitle: Text(push ? 'To your devices that allow notifications' : 'On this device'),
+          onTap: () => _test(context, ref),
         ),
     ]);
   }
 }
 
-/// One line about the answer of `POST /devices/me/push/test`.
-String pushTestSummary(Map<String, Object?>? body) {
+/// Sends a test notification and says how it went. With push (phones, web), this device registers
+/// first and the server pushes to all of the user's registered devices; without (desktop apps),
+/// the app shows one itself.
+Future<String> runNotificationTest({
+  required PushController? push,
+  required LocalNotifier? local,
+  required Future<Map<String, Object?>?> Function() sendServerTest,
+}) async {
+  if (push != null) {
+    // Register this device's token first (permission may have been granted since start).
+    final registered = await push.enable();
+    return pushTestSummary(await sendServerTest(), thisDevice: registered);
+  }
+  if (local == null || !await local.requestPermission()) {
+    return "This device can't show notifications. Check that they're allowed for FamChat.";
+  }
+  await local.show(id: 0, title: 'FamChat', body: 'Test notification', route: '/chats');
+  return 'Sent a test notification to this device.';
+}
+
+/// One line about the answer of `POST /devices/me/push/test`. [thisDevice]: whether the device
+/// asking got a push token; when it didn't, the push can only have gone to other devices.
+String pushTestSummary(Map<String, Object?>? body, {bool thisDevice = true}) {
   if (body == null || body['configured'] != true) return "Push isn't set up on the server yet.";
-  if (body['error'] != null) return "The server couldn't reach Firebase.";
+  final notHere = thisDevice
+      ? ''
+      : "This device isn't registered for notifications. Check that they're allowed for FamChat. ";
+  if (body['error'] != null) return "${notHere}The server couldn't reach Firebase.";
   final devices = (body['devices'] as List? ?? const []).cast<Map<String, Object?>>();
-  if (devices.isEmpty) return 'None of your devices has notifications turned on.';
+  if (devices.isEmpty) return thisDevice ? 'None of your devices has notifications turned on.' : notHere.trim();
   final ok = devices.where((d) => d['result'] == 'ok').length;
   final failed = [for (final d in devices) if (d['result'] != 'ok') d['name'] ?? 'a device'];
   final sent = 'Sent to $ok of ${devices.length} device${devices.length == 1 ? '' : 's'}.';
-  return failed.isEmpty ? sent : '$sent Not delivered: ${failed.join(', ')}.';
+  return notHere + (failed.isEmpty ? sent : '$sent Not delivered: ${failed.join(', ')}.');
 }
