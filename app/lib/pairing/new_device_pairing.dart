@@ -90,6 +90,8 @@ class NewDevicePairing {
   PairState _state = const PairIdle();
   bool _stopped = false;
   PairStartResult? _session;
+  Timer? _timer;
+  Completer<void>? _sleeping;
 
   Stream<PairState> get states => _states.stream;
   PairState get state => _state;
@@ -119,7 +121,7 @@ class NewDevicePairing {
         platform: platform,
       );
     } catch (e) {
-      _set(PairFailed(startErrorMessage(e)));
+      if (!_stopped) _set(PairFailed(startErrorMessage(e)));
       return;
     }
     _session = s;
@@ -139,7 +141,7 @@ class NewDevicePairing {
   Future<void> _poll(PairStartResult s, PairCode code, SimpleKeyPair eph, DeviceKeys keys) async {
     final expiresAt = (_state as PairShowing).expiresAt;
     while (!_stopped) {
-      await Future<void>.delayed(pollEvery);
+      await _sleep();
       if (_stopped) return;
       final PairClaim claim;
       try {
@@ -164,6 +166,21 @@ class NewDevicePairing {
           return _finish(result, bundle, code, eph, keys);
       }
     }
+  }
+
+  /// A cancellable wait, so a stopped pairing leaves no timer behind.
+  Future<void> _sleep() {
+    final c = _sleeping = Completer<void>();
+    _timer = Timer(pollEvery, () {
+      if (!c.isCompleted) c.complete();
+    });
+    return c.future;
+  }
+
+  void _wake() {
+    _timer?.cancel();
+    final c = _sleeping;
+    if (c != null && !c.isCompleted) c.complete();
   }
 
   Future<void> _expire({required bool cancel}) async {
@@ -213,6 +230,7 @@ class NewDevicePairing {
     if (_state is PairDone || _state is PairFinishing) return;
     final wasActive = !_stopped;
     _stopped = true;
+    _wake();
     if (wasActive) {
       _set(const PairCancelled());
       await _cancelOnServer();
@@ -221,6 +239,7 @@ class NewDevicePairing {
 
   Future<void> dispose() async {
     _stopped = true;
+    _wake();
     await _states.close();
   }
 }

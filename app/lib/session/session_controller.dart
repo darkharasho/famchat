@@ -158,7 +158,7 @@ class SessionController extends Notifier<SessionState> {
       cert: p.cert,
     );
     final seeds = await p.device.toStorage();
-    final session = StoredSession(
+    await _signIn(StoredSession(
       userId: r.userId,
       deviceId: r.deviceId,
       deviceName: deviceName.trim(),
@@ -168,17 +168,21 @@ class SessionController extends Notifier<SessionState> {
       identitySeed: b64url(await seedOf(p.identity)),
       encSeed: seeds['encSeed']!,
       signSeed: seeds['signSeed']!,
-    );
-    await _serial(() async {
-      await _store.save(session).timeout(_timeout);
-      _pending = null;
-      _unsaved = false;
-      api.tokens!
-        ..reset() // a refresh left over from an earlier session must not save into this one
-        ..setAccessToken(r.accessToken);
-      state = SignedIn(session);
-    });
+    ), r.accessToken);
   }
+
+  /// Saves [session] (from a join or a pairing) and signs in with [accessToken].
+  Future<void> adoptSession(StoredSession session, String accessToken) => _signIn(session, accessToken);
+
+  Future<void> _signIn(StoredSession session, String accessToken) => _serial(() async {
+        await _store.save(session).timeout(_timeout);
+        _pending = null;
+        _unsaved = false;
+        ref.read(apiClientProvider).tokens!
+          ..reset() // a refresh left over from an earlier session must not save into this one
+          ..setAccessToken(accessToken);
+        state = SignedIn(session);
+      });
 
   /// Keeps the stored name and admin flag in step with `GET /api/me`.
   Future<void> updateProfile(Me me) => _serial(() async {

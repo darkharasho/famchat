@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
 import 'screens/chats/chats_shell.dart';
 import 'screens/chats/group_info_screen.dart';
@@ -9,6 +10,7 @@ import 'screens/chats/new_chat_screen.dart';
 import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
+import 'screens/pair_screen.dart';
 import 'screens/spikes_screen.dart';
 import 'session/session_controller.dart';
 
@@ -18,9 +20,9 @@ String? sessionRedirect(SessionState s, String location) {
     case SessionLoading() || SessionUnavailable():
       return location == '/loading' ? null : '/loading';
     case SignedOut():
-      return location == '/join' || location == '/spikes' ? null : '/join';
+      return location == '/join' || location == '/pair' || location == '/spikes' ? null : '/join';
     case SignedIn(:final session):
-      if (location == '/join' || location == '/loading') return '/';
+      if (location == '/join' || location == '/pair' || location == '/loading') return '/';
       if (location == '/invite' && !session.isAdmin) return '/';
       return null;
   }
@@ -35,6 +37,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/loading', builder: (context, state) => const LoadingScreen()),
       GoRoute(path: '/join', builder: (context, state) => const JoinScreen()),
+      GoRoute(path: '/pair', builder: (context, state) => const PairScreen()),
       GoRoute(path: '/', builder: (context, state) => const ChatsShell()),
       GoRoute(
         path: '/chats/:id',
@@ -55,6 +58,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
+      GoRoute(path: '/devices/add', builder: (context, state) => const AddDeviceScreen()),
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),
     ],
