@@ -30,7 +30,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter test --platform chrome test/crypto_spike_test.dart
+      - run: flutter test --platform chrome test/crypto/
 
   linux:
     runs-on: ubuntu-latest

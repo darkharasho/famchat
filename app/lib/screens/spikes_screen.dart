@@ -1,10 +1,12 @@
 import 'dart:convert';
 
-import 'package:cryptography/cryptography.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../crypto/device_cert.dart';
+import '../crypto/envelope.dart';
+import '../crypto/keys.dart';
+import '../crypto/sealed_box.dart';
 import '../spikes/audio_spike.dart';
-import '../spikes/crypto_spike.dart';
 import '../spikes/db_spike.dart';
 import '../spikes/ws_spike.dart';
 
@@ -75,21 +77,20 @@ class _SpikesScreenState extends State<SpikesScreen> {
 }
 
 Future<String> _cryptoSpike() async {
-  final identity = await Ed25519().newKeyPair();
-  final enc = await X25519().newKeyPair();
-  final sign = await Ed25519().newKeyPair();
-  await makeDeviceCert(identity: identity, enc: enc, sign: sign);
-  final sealed = await sealBox((await enc.extractPublicKey()).bytes, utf8.encode('k'));
-  await openBox(enc, sealed);
-  final signPub = (await sign.extractPublicKey()).bytes;
-  final key = List.generate(32, (i) => i);
+  final identity = await newIdentityKey();
+  final device = await DeviceKeys.generate();
+  await signDeviceCert(identity: identity, device: device);
+  final sealed = await sealBox(await device.encPub(), utf8.encode('k'));
+  await openBox(device.enc, sealed);
+  final signPub = await device.signPub();
+  final key = newChatKey();
   final body = List.filled(1024, 7);
   final sw = Stopwatch()..start();
   for (var i = 0; i < 100; i++) {
-    final env = await encryptEnvelope(
-        chatKey: key, epoch: 1, chatId: 'C', messageId: 'M$i', senderDeviceId: 'D', signKey: sign, plaintext: body);
-    await decryptEnvelope(
-        chatKey: key, chatId: 'C', messageId: 'M$i', senderDeviceId: 'D', senderSignPub: signPub, envelope: env);
+    final env = await encryptEnvelope(chatKey: key, epoch: 1, chatId: 'C', messageId: 'M$i',
+        senderDeviceId: 'D', signKey: device.sign, plaintext: body);
+    await decryptEnvelope(envelope: env, chatKey: key, chatId: 'C', messageId: 'M$i',
+        senderDeviceId: 'D', senderSignPub: signPub);
   }
   return '100 envelopes in ${sw.elapsedMilliseconds} ms';
 }
