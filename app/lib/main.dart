@@ -13,6 +13,7 @@ import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 import 'theme/app_theme.dart';
 import 'voice/voice_io.dart';
+import 'window/title_bar.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,6 +54,8 @@ class FamChatApp extends ConsumerWidget {
       // Foreground pushes show as snack bars over any screen.
       scaffoldMessengerKey: ref.watch(rootMessengerKeyProvider),
       routerConfig: ref.watch(routerProvider),
+      // FamChat's own title bar over every screen on the desktop apps; nothing elsewhere.
+      builder: (context, child) => WindowFrame(child: child ?? const SizedBox.shrink()),
     );
   }
 }
