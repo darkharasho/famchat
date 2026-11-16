@@ -4,6 +4,7 @@ import { ApiError } from "../lib/errors";
 import { hubStub } from "../hub";
 import { memberIds } from "../lib/chatdb";
 import { sharingUserIds } from "../lib/family";
+import { logEvent } from "../lib/reset";
 import { requireAuth } from "../middleware/auth";
 import { notify } from "../notify";
 
@@ -60,6 +61,7 @@ devices.delete("/:id", async (c) => {
     ).bind(now, id, id, now, userId),
   ]);
   if (res.meta.changes !== 1) throw new ApiError("not_found");
+  await logEvent(db, { kind: "device_revoked", userId, actorId: userId, payload: { deviceId: id }, at: now });
   try {
     await hubStub(c.env).disconnectDevice(id);
   } catch (e) {
