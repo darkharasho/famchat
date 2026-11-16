@@ -9,6 +9,8 @@ export type ErrorCode =
   | "epoch_exists"
   | "stale_epoch"
   | "upgrade_required"
+  | "rate_limited"
+  | "pairing_invalid"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -22,6 +24,8 @@ const STATUS: Record<ErrorCode, number> = {
   epoch_exists: 409,
   stale_epoch: 409,
   upgrade_required: 426,
+  rate_limited: 429,
+  pairing_invalid: 410,
   internal: 500,
 };
 
