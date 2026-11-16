@@ -102,4 +102,61 @@ void main() {
     await expectLater(approver.approve(pending),
         throwsA(isA<PairingException>().having((e) => e.kind, 'kind', PairingError.notFound)));
   });
+
+  group('reverse pairing (this device shows the code)', () {
+    test('offer: waiting, then the new device takes it, checks out and is approved', () async {
+      final offer = await approver.createOffer();
+      expect(offer.qr, 'famchat-link:1:${offer.code.compact}');
+      expect(offer.expiresAt.isAfter(DateTime.now()), isTrue);
+      expect(await approver.checkOffer(offer), isNull);
+
+      final n = await startPairing(server, deviceName: 'New phone', platform: 'ios', offer: offer.code);
+      final pending = (await approver.checkOffer(offer))!;
+      expect((pending.deviceName, pending.platform), ('New phone', 'ios'));
+      await approver.approve(pending);
+
+      final bundle = await openSent(n);
+      expect(bundle.userId, alice.userId);
+      expect(bundle.deviceId, n.start.deviceId);
+    });
+
+    test('a session made without the offer\'s secret is a mismatch', () async {
+      final offer = await approver.createOffer();
+      await startPairing(server, offer: PairCode(offer.code.lookup, 'ZZZZZZZZZZZZ'));
+      await expectLater(approver.checkOffer(offer),
+          throwsA(isA<PairingException>().having((e) => e.kind, 'kind', PairingError.mismatch)));
+    });
+
+    test('swapped keys are a mismatch', () async {
+      final offer = await approver.createOffer();
+      await startPairing(server, offer: offer.code);
+      final evil = await DeviceKeys.generate();
+      server.tamperNextLookup = {'encPub': b64url(await evil.encPub())};
+      await expectLater(approver.checkOffer(offer),
+          throwsA(isA<PairingException>().having((e) => e.kind, 'kind', PairingError.mismatch)));
+    });
+
+    test('a cancelled or expired offer is expired', () async {
+      final offer = await approver.createOffer();
+      await approver.cancelOffer(offer);
+      await expectLater(approver.checkOffer(offer),
+          throwsA(isA<PairingException>().having((e) => e.kind, 'kind', PairingError.expired)));
+    });
+
+    test('cancelling a taken offer cancels the new device\'s session', () async {
+      final offer = await approver.createOffer();
+      final n = await startPairing(server, offer: offer.code);
+      await approver.cancelOffer(offer);
+      expect(server.pairSessionByCode(n.code.lookup)!.cancelledAt, isNotNull);
+    });
+
+    test('another user can\'t look up a session started from an offer', () async {
+      final offer = await approver.createOffer();
+      final n = await startPairing(server, offer: offer.code);
+      final bob = await signedInClient(server, name: 'Bob');
+      final bobs = DeviceApprover(api: bob.api, db: db, session: bob.session);
+      await expectLater(bobs.lookup(n.code.display),
+          throwsA(isA<PairingException>().having((e) => e.kind, 'kind', PairingError.notFound)));
+    });
+  });
 }

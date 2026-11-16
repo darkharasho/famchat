@@ -57,6 +57,20 @@ class FakePairSession {
   String? userId, certSig, bundle, approvedByDevice;
   DateTime? approvedAt, claimedAt, cancelledAt;
 
+  /// Set when started from an offer: only this user may look it up or approve it.
+  String? offerUserId;
+
+  DateTime get expiresAt => createdAt.add(FakeServer.pairTtl);
+}
+
+/// A signed-in device's offer (reverse pairing).
+class FakePairOffer {
+  FakePairOffer(this.id, this.code, this.userId, this.createdAt);
+  final String id, code, userId;
+  final DateTime createdAt;
+  String? sessionId;
+  DateTime? cancelledAt;
+
   DateTime get expiresAt => createdAt.add(FakeServer.pairTtl);
 }
 
@@ -84,6 +98,7 @@ class FakeServer {
   int failNext5xx = 0;
 
   final pairSessions = <String, FakePairSession>{};
+  final pairOffers = <String, FakePairOffer>{};
 
   /// Replaces fields of the next `GET /devices/pair/:code` answer (a lying server).
   Map<String, String>? tamperNextLookup;
@@ -352,6 +367,34 @@ class FakeServer {
         ],
       });
     }
+    if (r.method == 'POST' && path == '/api/devices/pair/offer') {
+      final id = _id('O');
+      final o = pairOffers[id] = FakePairOffer(id, _code(), userId, now());
+      return _json(
+          {'offerId': id, 'code': o.code, 'expiresAt': o.expiresAt.millisecondsSinceEpoch, 'expiresIn': pairTtl.inMilliseconds},
+          201);
+    }
+    final offer = RegExp(r'^/api/devices/pair/offer/([^/]+)(/cancel)?$').firstMatch(path);
+    if (offer != null) {
+      final o = pairOffers[offer[1]];
+      if (o == null || o.userId != userId) return _err('not_found');
+      final x = o.sessionId == null ? null : pairSessions[o.sessionId];
+      if (r.method == 'POST' && offer[2] != null) {
+        o.cancelledAt ??= now();
+        if (x != null && x.approvedAt == null) x.cancelledAt ??= now();
+        return http.Response('', 204);
+      }
+      if (o.cancelledAt != null) return _err('pairing_invalid');
+      if (x == null) {
+        return o.expiresAt.isAfter(now())
+            ? _json({'status': 'waiting', 'expiresAt': o.expiresAt.millisecondsSinceEpoch})
+            : _err('pairing_invalid');
+      }
+      if (x.cancelledAt != null) return _err('pairing_invalid');
+      if (x.approvedAt != null) return _json({'status': 'approved'});
+      if (!x.expiresAt.isAfter(now())) return _err('pairing_invalid');
+      return _json({'status': 'ready', 'session': _sessionOut(x)});
+    }
     final pair = RegExp(r'^/api/devices/pair/([^/]+)(/approve)?$').firstMatch(path);
     if (pair != null) {
       final x = pairSessions.values
@@ -359,19 +402,12 @@ class FakeServer {
               x.code == pair[1]!.toUpperCase() &&
               x.approvedAt == null &&
               x.cancelledAt == null &&
+              (x.offerUserId == null || x.offerUserId == userId) &&
               x.expiresAt.isAfter(now()))
           .firstOrNull;
       if (x == null) return _err('not_found');
       if (r.method == 'GET' && pair[2] == null) {
-        final session = {
-          'code': x.code,
-          'deviceId': x.deviceId,
-          ...x.body,
-          'expiresAt': x.expiresAt.millisecondsSinceEpoch,
-          ...?tamperNextLookup,
-        };
-        tamperNextLookup = null;
-        return _json({'session': session});
+        return _json({'session': _sessionOut(x)});
       }
       if (r.method == 'POST' && pair[2] != null) {
         final b = _body(r);
@@ -412,6 +448,24 @@ class FakeServer {
     return _err('not_found');
   }
 
+  /// A session as `GET /devices/pair/:code` and the offer poll show it (with [tamperNextLookup]).
+  Map<String, Object?> _sessionOut(FakePairSession x) {
+    final session = {
+      'code': x.code,
+      'deviceId': x.deviceId,
+      ...x.body,
+      'expiresAt': x.expiresAt.millisecondsSinceEpoch,
+      ...?tamperNextLookup,
+    };
+    tamperNextLookup = null;
+    return session;
+  }
+
+  String _code() {
+    const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+    return String.fromCharCodes(List.generate(4, (_) => alphabet.codeUnitAt(_rand.nextInt(32))));
+  }
+
   http.Response _pairStart(Map<String, Object?> b) {
     const platforms = ['ios', 'android', 'macos', 'windows', 'linux', 'web'];
     final body = {
@@ -421,14 +475,24 @@ class FakeServer {
     if (body.length != 6 || !platforms.contains(body['platform']) || body['deviceName']!.trim().isEmpty) {
       return _err('invalid_request');
     }
+    FakePairOffer? offer;
+    if (b['offer'] != null) {
+      final code = (b['offer'] as String).toUpperCase();
+      offer = pairOffers.values
+          .where((o) => o.code == code && o.sessionId == null && o.cancelledAt == null && o.expiresAt.isAfter(now()))
+          .firstOrNull;
+      if (offer == null) return _err('not_found');
+    }
     final id = _id('P');
-    const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-    final code = String.fromCharCodes(List.generate(4, (_) => alphabet.codeUnitAt(_rand.nextInt(32))));
-    final x = FakePairSession(id, code, _token(), _id('D'), body, now());
+    final x = FakePairSession(id, _code(), _token(), _id('D'), body, now());
     pairSessions[id] = x;
+    if (offer != null) {
+      offer.sessionId = id;
+      x.offerUserId = offer.userId;
+    }
     return _json({
       'sessionId': id,
-      'code': code,
+      'code': x.code,
       'secret': x.secret,
       'deviceId': x.deviceId,
       'expiresAt': x.expiresAt.millisecondsSinceEpoch,

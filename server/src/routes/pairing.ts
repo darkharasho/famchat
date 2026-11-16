@@ -8,6 +8,11 @@
 // 3. The new device claims the session with its claim secret: its device row is created and it gets
 //    tokens and the bundle. Member devices are told so they add wraps for it.
 //
+// Reverse direction (a signed-in device without a camera, a new phone): the signed-in device opens an
+// "offer" and shows its code and a QR; the new device scans it and starts its session with the offer's
+// code, which binds the session to the offering user. The offering device polls the offer, then checks
+// the MAC and approves exactly as above.
+//
 // The server never sees the bundle's key, so it can't read or forge it (docs/protocol.md "Pairing").
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
@@ -33,6 +38,8 @@ export const MAX_PER_IP = 5;
 const IP_WINDOW_MS = 10 * 60 * 1000;
 /** A storage guard only; the per-network limit is what stops abuse. */
 export const MAX_LIVE = 1000;
+/** Offers one user may open per [IP_WINDOW_MS]. */
+export const MAX_OFFERS_PER_USER = 5;
 
 /**
  * The rate-limit key for a client address: an IPv6 address by its /64 (one subscriber usually has a
@@ -84,7 +91,34 @@ type Session = {
   bundle: string | null;
   claimed_at: number | null;
   cancelled_at: number | null;
+  offer_user_id: string | null;
 };
+
+type Offer = {
+  id: string;
+  code: string;
+  user_id: string;
+  device_id: string;
+  created_at: number;
+  expires_at: number;
+  session_id: string | null;
+  cancelled_at: number | null;
+};
+
+/** A session as an approving device sees it. */
+function sessionOut(s: Session) {
+  return {
+    code: s.code,
+    deviceId: s.device_id,
+    ephPub: s.eph_pub,
+    encPub: s.enc_pub,
+    signPub: s.sign_pub,
+    keysMac: s.keys_mac,
+    deviceName: s.device_name,
+    platform: s.platform,
+    expiresAt: s.expires_at,
+  };
+}
 
 export const pairing = new Hono<AppEnv>();
 
@@ -97,6 +131,9 @@ pairing.post("/start", async (c) => {
   const deviceName = name(body.deviceName, 60);
   const platform = str(body.platform);
   if (!(PLATFORMS as readonly string[]).includes(platform)) throw new ApiError("invalid_request");
+  // Reverse pairing: the code of the offer the new device scanned or typed.
+  const offerCode = body.offer === undefined ? null : str(body.offer).toUpperCase();
+  if (offerCode !== null && !CODE.test(offerCode)) throw new ApiError("invalid_request");
 
   const db = c.env.DB;
   const now = Date.now();
@@ -117,13 +154,32 @@ pairing.post("/start", async (c) => {
   const expiresAt = now + PAIR_TTL_MS;
   for (let attempt = 0; ; attempt++) {
     const code = newCode();
+    // With an offer the session is born cancelled and comes alive only if it takes the offer, in the
+    // same transaction. A failed try still counts against the network's start limit (offer guessing).
+    const insert = db.prepare(
+      `INSERT INTO pair_sessions (id, code, secret_hash, device_id, eph_pub, enc_pub, sign_pub, keys_mac,
+         device_name, platform, client_ip, created_at, expires_at, cancelled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, code, await sha256Hex(secret), deviceId, ephPub, encPub, signPub, keysMac, deviceName, platform, ip, now, expiresAt,
+      offerCode === null ? null : now);
     try {
-      await db.prepare(
-        `INSERT INTO pair_sessions (id, code, secret_hash, device_id, eph_pub, enc_pub, sign_pub, keys_mac,
-           device_name, platform, client_ip, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(id, code, await sha256Hex(secret), deviceId, ephPub, encPub, signPub, keysMac, deviceName, platform, ip, now, expiresAt)
-        .run();
+      if (offerCode === null) {
+        await insert.run();
+      } else {
+        const [, , taken] = await db.batch([
+          insert,
+          db.prepare(
+            `UPDATE pair_offers SET session_id = ?
+             WHERE code = ? AND session_id IS NULL AND cancelled_at IS NULL AND expires_at > ?`,
+          ).bind(id, offerCode, now),
+          db.prepare(
+            `UPDATE pair_sessions SET cancelled_at = NULL,
+               offer_user_id = (SELECT user_id FROM pair_offers WHERE session_id = ?)
+             WHERE id = ? AND EXISTS (SELECT 1 FROM pair_offers WHERE session_id = ?)`,
+          ).bind(id, id, id),
+        ]);
+        if (taken.meta.changes !== 1) throw new ApiError("not_found");
+      }
       return c.json({ sessionId: id, code, secret, deviceId, expiresAt, expiresIn: PAIR_TTL_MS }, 201);
     } catch (e) {
       // A code still held by a recent session: pick another.
@@ -132,46 +188,106 @@ pairing.post("/start", async (c) => {
   }
 });
 
-/** A pending session by its code, for an approving device. Unknown, expired, cancelled or used → 404. */
-async function pending(db: D1Database, code: string, now: number): Promise<Session> {
+/**
+ * A pending session by its code, for an approving device of [userId]. Unknown, expired, cancelled,
+ * used, or started from another user's offer → 404.
+ */
+async function pending(db: D1Database, code: string, userId: string, now: number): Promise<Session> {
   const c = code.toUpperCase();
   if (!CODE.test(c)) throw new ApiError("not_found");
   const s = await db.prepare(
-    `SELECT * FROM pair_sessions WHERE code = ? AND approved_at IS NULL AND cancelled_at IS NULL AND expires_at > ?`,
-  ).bind(c, now).first<Session>();
+    `SELECT * FROM pair_sessions WHERE code = ? AND approved_at IS NULL AND cancelled_at IS NULL AND expires_at > ?
+       AND (offer_user_id IS NULL OR offer_user_id = ?)`,
+  ).bind(c, now, userId).first<Session>();
   if (!s) throw new ApiError("not_found");
   return s;
 }
 
+// --- reverse pairing: the signed-in device's offer ---
+
+pairing.post("/offer", requireAuth, async (c) => {
+  const db = c.env.DB;
+  const now = Date.now();
+  const userId = c.get("userId");
+  const [, recent] = await db.batch([
+    db.prepare("DELETE FROM pair_offers WHERE created_at < ?").bind(now - KEEP_MS),
+    db.prepare("SELECT COUNT(*) AS n FROM pair_offers WHERE user_id = ? AND created_at > ?").bind(userId, now - IP_WINDOW_MS),
+  ]);
+  if ((recent.results[0] as { n: number }).n >= MAX_OFFERS_PER_USER) throw new ApiError("rate_limited");
+  const id = newId(now);
+  const expiresAt = now + PAIR_TTL_MS;
+  for (let attempt = 0; ; attempt++) {
+    const code = newCode();
+    try {
+      await db.prepare(
+        "INSERT INTO pair_offers (id, code, user_id, device_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(id, code, userId, c.get("deviceId"), now, expiresAt).run();
+      return c.json({ offerId: id, code, expiresAt, expiresIn: PAIR_TTL_MS }, 201);
+    } catch (e) {
+      if (attempt >= 5 || !String(e).includes("UNIQUE")) throw e;
+    }
+  }
+});
+
+/** The caller's own offer by id; another user's or an unknown one → 404. */
+async function ownOffer(db: D1Database, id: string, userId: string): Promise<Offer> {
+  const o = await db.prepare("SELECT * FROM pair_offers WHERE id = ? AND user_id = ?").bind(id, userId).first<Offer>();
+  if (!o) throw new ApiError("not_found");
+  return o;
+}
+
+/**
+ * The offering device polls: `waiting` until a new device takes the offer, then `ready` with its
+ * session (to check and approve as with a scanned code), then `approved`. Gone → 410.
+ */
+pairing.get("/offer/:id", requireAuth, async (c) => {
+  const db = c.env.DB;
+  const now = Date.now();
+  const o = await ownOffer(db, c.req.param("id"), c.get("userId"));
+  if (o.cancelled_at !== null) throw new ApiError("pairing_invalid");
+  if (o.session_id === null) {
+    if (o.expires_at <= now) throw new ApiError("pairing_invalid");
+    return c.json({ status: "waiting", expiresAt: o.expires_at });
+  }
+  const s = await db.prepare("SELECT * FROM pair_sessions WHERE id = ?").bind(o.session_id).first<Session>();
+  if (!s || s.cancelled_at !== null) throw new ApiError("pairing_invalid");
+  if (s.approved_at !== null) return c.json({ status: "approved" });
+  if (s.expires_at <= now) throw new ApiError("pairing_invalid");
+  return c.json({ status: "ready", session: sessionOut(s) });
+});
+
+/** Withdraws the offer, and the new device's session if it took the offer and isn't approved yet. */
+pairing.post("/offer/:id/cancel", requireAuth, async (c) => {
+  const db = c.env.DB;
+  const now = Date.now();
+  const o = await ownOffer(db, c.req.param("id"), c.get("userId"));
+  await db.batch([
+    db.prepare("UPDATE pair_offers SET cancelled_at = ? WHERE id = ? AND cancelled_at IS NULL").bind(now, o.id),
+    db.prepare(
+      `UPDATE pair_sessions SET cancelled_at = ?
+       WHERE id = (SELECT session_id FROM pair_offers WHERE id = ?) AND approved_at IS NULL AND cancelled_at IS NULL`,
+    ).bind(now, o.id),
+  ]);
+  return c.body(null, 204);
+});
+
 pairing.get("/:code", requireAuth, async (c) => {
-  const s = await pending(c.env.DB, c.req.param("code"), Date.now());
-  return c.json({
-    session: {
-      code: s.code,
-      deviceId: s.device_id,
-      ephPub: s.eph_pub,
-      encPub: s.enc_pub,
-      signPub: s.sign_pub,
-      keysMac: s.keys_mac,
-      deviceName: s.device_name,
-      platform: s.platform,
-      expiresAt: s.expires_at,
-    },
-  });
+  const s = await pending(c.env.DB, c.req.param("code"), c.get("userId"), Date.now());
+  return c.json({ session: sessionOut(s) });
 });
 
 /** The new device's certificate, signed by the caller's identity key, and the sealed bundle. */
 pairing.post("/:code/approve", requireAuth, async (c) => {
   const db = c.env.DB;
   const now = Date.now();
-  const s = await pending(db, c.req.param("code"), now);
+  const userId = c.get("userId");
+  const s = await pending(db, c.req.param("code"), userId, now);
   const body = await readJson(c);
   if (body.deviceId !== s.device_id) throw new ApiError("invalid_request");
   const certSig = key(body.certSig, 64);
   const bundle = str(body.bundle);
   const size = b64urlDecode(bundle).length;
   if (size < 32 + 24 + 16 || size > MAX_BUNDLE_BYTES) throw new ApiError("invalid_request");
-  const userId = c.get("userId");
   const identityPub = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(userId).first<string>("identity_pub");
   if (!identityPub || !(await verifyDeviceCert(identityPub, s.enc_pub, s.sign_pub, certSig))) {
     throw new ApiError("invalid_request");

@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/common.dart';
 import 'update_controller.dart';
@@ -50,12 +52,30 @@ class UpdateBanner extends ConsumerWidget {
 }
 
 /// Settings: this app's version and the update check, on desktop builds that update themselves.
+/// On the web, opens a page in a new tab (the web app links to the installable apps). Null in the
+/// installed apps.
+final appDownloadsProvider = Provider<Future<bool> Function(Uri)?>(
+  (ref) => kIsWeb ? (u) => launchUrl(u, webOnlyWindowName: '_blank') : null,
+);
+
 class AppVersionGroup extends ConsumerWidget {
   const AppVersionGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (ref.watch(updateConfigProvider) == null) return const SizedBox.shrink();
+    if (ref.watch(updateConfigProvider) == null) {
+      final open = ref.watch(appDownloadsProvider);
+      if (open == null) return const SizedBox.shrink();
+      return SettingsGroup(title: 'App', children: [
+        ListTile(
+          key: const Key('settings-get-apps'),
+          leading: const TileIcon(Icons.download_rounded),
+          title: const Text('Get the apps'),
+          subtitle: const Text('FamChat for Windows, Mac, Linux, iPhone and Android.'),
+          onTap: () => open(Uri.base.resolve('/download.html')),
+        ),
+      ]);
+    }
     final state = ref.watch(updateProvider);
     final updates = ref.read(updateProvider.notifier);
     final (String subtitle, Widget? action) = switch (state) {

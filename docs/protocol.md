@@ -119,11 +119,11 @@ which never leaves the two devices.
 
 1. N makes an ephemeral X25519 key `eph`, its device keys, and `S` (12 Crockford base32 characters,
    60 bits). `POST /devices/pair/start` (no auth)
-   `{ephPub, encPub, signPub, keysMac, deviceName (1–60), platform}` →
+   `{ephPub, encPub, signPub, keysMac, deviceName (1–60), platform, offer?}` →
    `201 {sessionId, code, secret, deviceId, expiresAt, expiresIn}`.
    `keysMac = HMAC-SHA256(key = UTF-8(S), "famchat-pair-keys-v1" ‖ ephPub ‖ encPub ‖ signPub ‖ str(deviceName) ‖ str(platform))`.
    `code` is a 4-character lookup code; `secret` is N's claim secret (not `S`). At most 5 starts per
-   client IP per 10 minutes and 50 open sessions overall (`rate_limited`). A session can be approved
+   client IP per 10 minutes and 1000 open sessions overall (`rate_limited`). A session can be approved
    for 5 minutes.
 2. N shows the typed code `code ‖ S` as `XXXX-XXXX-XXXX-XXXX` and a QR with
    `famchat-pair:1:<code ‖ S, 16 chars>:<ephPub>`. Typed codes are case-insensitive; `O`→`0`, `I`/`L`→`1`;
@@ -146,6 +146,30 @@ which never leaves the two devices.
    the user's identity key changed (admin reset). Starts are limited per client network (an IPv6 /64, or
    one IPv4 address).
 6. `POST /devices/pair/cancel {sessionId, secret}` → 204 (N gave up).
+
+Reverse direction (E shows the code, N scans it; e.g. a desktop without a camera and a new phone). Same
+`S`, MAC, approval, bundle and claim; only who shows the code changes:
+
+1. E: `POST /devices/pair/offer` (authed) → `201 {offerId, code, expiresAt, expiresIn}`. E makes `S`
+   itself and shows `code ‖ S` as `XXXX-XXXX-XXXX-XXXX` and a QR with `famchat-link:1:<code ‖ S, 16 chars>`.
+   An offer can be taken for 5 minutes, once. At most 5 offers per user per 10 minutes (`rate_limited`).
+2. N scans (or types) it and starts as in step 1 above with `S` from the code and `offer: code`
+   (4 characters, else 400). The session is bound to the offer's user: only that user's devices can look
+   it up or approve it (404 for anyone else). An unknown, expired, cancelled or already taken offer →
+   404; such a try still counts toward the per-network start limit, so offer codes can't be guessed
+   faster than sessions can be started. N then polls `claim` as usual; it shows no code of its own.
+3. E polls `GET /devices/pair/offer/:offerId` (authed, own offers only, else 404) every ~2 s →
+   `{status: "waiting", expiresAt}` until N takes it, then
+   `{status: "ready", session: {code, deviceId, ephPub, encPub, signPub, keysMac, deviceName, platform, expiresAt}}`
+   (as from `GET /devices/pair/:code`), and `{status: "approved"}` once approved. Expired or cancelled
+   offer, or N's session cancelled or expired → 410 `pairing_invalid`.
+4. E checks `keysMac` with its own `S`, shows the device name and platform for confirmation, and
+   approves with `POST /devices/pair/<session.code>/approve` exactly as in step 4 above.
+5. `POST /devices/pair/offer/:offerId/cancel` (authed, own offers only) → 204: withdraws the offer and
+   cancels N's session if it took the offer and isn't approved yet.
+
+The server learns `code` but never `S`: a server (or a guesser) that swaps in its own session can't make
+a `keysMac` that E accepts, and can't open or forge the bundle, as in the forward direction.
 
 Bundle: `sealed = ephPubE(32) ‖ nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 with key
 `HKDF-SHA256(ikm = X25519(ephE, ephPubN) ‖ UTF-8(S), salt = ephPubE ‖ ephPubN, info = "famchat-pair-bundle-v1")`.
