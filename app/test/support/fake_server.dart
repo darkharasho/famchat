@@ -15,6 +15,7 @@ class FakeUser {
   String identityPub;
   String name;
   bool isAdmin;
+  bool deleted = false;
   String? recoveryPub, recoverySig;
   Map<String, Object?>? adminProof;
 
@@ -163,6 +164,20 @@ class FakeServer {
     }
   }
 
+  /// Account deletion (server/src/lib/delete-account.ts), minus chats: renamed, devices revoked.
+  void deleteUser(String userId) {
+    final u = users[userId]!
+      ..deleted = true
+      ..name = 'Deleted user'
+      ..isAdmin = false
+      ..adminProof = null
+      ..recoveryPub = null
+      ..recoverySig = null;
+    for (final d in devices.values.where((d) => d.userId == u.id && d.revokedAt == null).toList()) {
+      revoke(d.id);
+    }
+  }
+
   /// Makes every access token issued so far invalid (like a server-side expiry).
   void expireAccessTokens() => _epoch++;
 
@@ -204,6 +219,7 @@ class FakeServer {
         'forbidden' => 403,
         'not_found' => 404,
         'invite_invalid' || 'pairing_invalid' => 410,
+        'last_admin' => 409,
         _ => 500,
       });
 
@@ -274,9 +290,27 @@ class FakeServer {
                   },
               ],
               'resets': u.resets,
+              'deleted': u.deleted,
             },
         ],
       });
+    }
+    if (r.method == 'DELETE' && path == '/api/me') {
+      if (_body(r)['confirm'] != 'delete') return _err('invalid_request');
+      final u = users[userId]!;
+      final others = users.values.where((o) => o.id != userId && !o.deleted);
+      if (u.isAdmin && others.isNotEmpty && !others.any((o) => o.isAdmin)) return _err('last_admin');
+      deleteUser(userId);
+      return http.Response('', 204);
+    }
+    final removeMatch = RegExp(r'^/api/admin/users/([^/]+)$').firstMatch(path);
+    if (r.method == 'DELETE' && removeMatch != null) {
+      if (!users[userId]!.isAdmin) return _err('forbidden');
+      final target = users[removeMatch[1]];
+      if (removeMatch[1] == userId) return _err('invalid_request');
+      if (target == null || target.deleted) return _err('not_found');
+      deleteUser(target.id);
+      return http.Response('', 204);
     }
     final adminUser = RegExp(r'^/api/admin/users/([^/]+)/(reset|admin)$').firstMatch(path);
     if (r.method == 'POST' && adminUser != null) {

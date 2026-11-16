@@ -1,4 +1,5 @@
-// You and your family: devices, the admin pages, developer tools and signing out, in one place.
+// You and your family: devices, the admin pages, developer tools, signing out and deleting your
+// account, in one place.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -12,6 +13,7 @@ import '../widgets/brand_mark.dart';
 import '../widgets/common.dart';
 import '../widgets/person_avatar.dart';
 import 'account_providers.dart';
+import 'delete_account.dart';
 import 'sign_out.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -90,6 +92,15 @@ class SettingsScreen extends ConsumerWidget {
                 title: Text('Sign out', style: TextStyle(color: s.error)),
                 subtitle: const Text("Deletes this device's keys"),
                 onTap: () => confirmSignOut(context, ref),
+              ),
+            ]),
+            SettingsGroup(children: [
+              ListTile(
+                key: const Key('settings-delete-account'),
+                leading: TileIcon(Icons.delete_forever_rounded, color: s.onErrorContainer, background: s.errorContainer),
+                title: Text('Delete my account', style: TextStyle(color: s.error)),
+                subtitle: const Text('Your account, devices and the messages you sent. Permanent.'),
+                onTap: () => confirmDeleteAccount(context, ref),
               ),
             ]),
             const SizedBox(height: Space.lg),

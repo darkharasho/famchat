@@ -89,6 +89,7 @@ class Directory {
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
         pinnedAdmin: t.admins.contains(u.id),
+        deleted: u.deleted,
       ));
       for (final d in u.devices) {
         // Which trusted keys certify it: if only keys a verified reset retired, the server signed

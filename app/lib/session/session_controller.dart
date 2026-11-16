@@ -46,6 +46,7 @@ class SessionUnavailable extends SessionState {
 }
 
 const revokedMessage = 'This device was signed out. Ask for a new invite to sign in again.';
+const accountDeletedMessage = 'Your FamChat account was deleted.';
 const storageUnavailableMessage = "FamChat couldn't open this device's secure storage, where it keeps "
     'your keys. Try again in a moment. On Linux, check that a keyring such as GNOME Keyring or '
     'KWallet is installed and unlocked.';
@@ -280,6 +281,10 @@ class SessionController extends Notifier<SessionState> {
     }
     await _endSession(const SignedOut());
   }
+
+  /// After the server deleted this user's account (`ApiClient.deleteAccount`): wipes this device
+  /// as a sign-out does (the chat and media databases go with the session).
+  Future<void> accountDeleted() => _endSession(const SignedOut(message: accountDeletedMessage));
 
   /// From the storage error screen, after the user confirmed: delete whatever is stored.
   Future<void> startOver() => _serial(() async {

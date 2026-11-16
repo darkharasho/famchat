@@ -52,10 +52,15 @@ class UserDto {
     required this.devices,
     this.resets = const [],
     this.adminProof,
+    this.deleted = false,
   });
 
   final String id, name, identityPub;
   final bool isAdmin;
+
+  /// The account was deleted (docs/protocol.md "Deleting an account"): listed so old certificates
+  /// still verify, but gone from the family.
+  final bool deleted;
   final List<DeviceDto> devices;
 
   /// Who made this user an admin, signed; null for the bootstrapped first admin (and non-admins).
@@ -78,6 +83,7 @@ class UserDto {
         null => null,
         _ => throw const FormatException('bad adminProof'),
       },
+      deleted: j['deleted'] == true,
     );
   }
 }

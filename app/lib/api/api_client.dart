@@ -96,6 +96,15 @@ class ApiClient {
   Future<void> makeAdmin(String userId, {required String sig}) => _authed(
       (t) => _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/admin', bearer: t, body: {'sig': sig}));
 
+  /// Deletes this user's account for good (docs/protocol.md "Deleting an account"). Throws
+  /// [ApiException] `last_admin` if this is the family's only admin and others are left.
+  Future<void> deleteAccount() =>
+      _authed((t) => _send('DELETE', '/me', bearer: t, body: {'confirm': 'delete'}));
+
+  /// Admin: removes [userId] from the family, deleting their account the same way.
+  Future<void> removeUser(String userId) =>
+      _authed((t) => _send('DELETE', '/admin/users/${Uri.encodeComponent(userId)}', bearer: t));
+
   /// Admin: registers this admin's recovery key (base64url) with the identity key's signature over it.
   Future<void> setRecoveryKey({required String recoveryPub, required String sig}) =>
       _authed((t) => _send('POST', '/admin/recovery-key', bearer: t, body: {'recoveryPub': recoveryPub, 'sig': sig}));

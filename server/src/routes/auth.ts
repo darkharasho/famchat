@@ -64,7 +64,7 @@ auth.post("/invite/redeem", async (c) => {
     db.prepare(
       `UPDATE invites SET used_by = ?, used_at = ?
        WHERE token_hash = ? AND used_by IS NULL AND expires_at > ? AND user_id IS NULL
-         AND (created_by IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users))`,
+         AND (created_by IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL))`,
     ).bind(userId, now, tokenHash, now),
     db.prepare(
       `INSERT INTO users (id, name, is_admin, identity_pub, created_at)

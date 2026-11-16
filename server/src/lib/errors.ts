@@ -14,6 +14,7 @@ export type ErrorCode =
   | "too_large"
   | "media_expired"
   | "conflict"
+  | "last_admin"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -32,6 +33,7 @@ const STATUS: Record<ErrorCode, number> = {
   too_large: 413,
   media_expired: 410,
   conflict: 409,
+  last_admin: 409,
   internal: 500,
 };
 

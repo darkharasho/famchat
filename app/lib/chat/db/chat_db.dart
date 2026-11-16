@@ -101,6 +101,10 @@ class LocalUsers extends Table {
   /// [isAdmin] alone doesn't make anyone's reset count.
   BoolColumn get pinnedAdmin => boolean().withDefault(const Constant(false))();
 
+  /// The account was deleted (docs/protocol.md "Deleting an account"): kept so old messages and
+  /// certificates still resolve, but not offered for new chats. Null means not deleted.
+  BoolColumn get deleted => boolean().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -171,7 +175,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -183,6 +187,7 @@ class ChatDb extends _$ChatDb {
             await customStatement('UPDATE local_users SET pinned_admin = is_admin');
             await into(meta).insertOnConflictUpdate(const MetaRow(key: adminsPinnedKey, value: '1'));
           }
+          if (from < 3) await m.addColumn(localUsers, localUsers.deleted);
         },
       );
 

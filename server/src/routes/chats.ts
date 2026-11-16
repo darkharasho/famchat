@@ -56,7 +56,7 @@ chats.post("/", async (c) => {
     if (dup) return c.json({ chat: await chatOut(db, dup.id), created: false }, 200);
   }
   const known = await db.prepare(
-    `SELECT COUNT(*) AS n FROM users WHERE id IN (${others.map(() => "?").join(",")})`,
+    `SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND id IN (${others.map(() => "?").join(",")})`,
   ).bind(...others).first<number>("n");
   if (known !== others.length) throw new ApiError("invalid_request");
 
@@ -103,7 +103,7 @@ chats.post("/:id/members", async (c) => {
   if (!body.userIds.every((u) => typeof u === "string")) throw new ApiError("invalid_request");
   const added = [...new Set(body.userIds as string[])];
   if (added.some((u) => chat.members.some((m) => m.userId === u))) throw new ApiError("invalid_request");
-  const known = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE id IN (${added.map(() => "?").join(",")})`)
+  const known = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND id IN (${added.map(() => "?").join(",")})`)
     .bind(...added).first<number>("n");
   if (known !== added.length) throw new ApiError("invalid_request");
   if (!chat.epochReady) throw new ApiError("stale_epoch");

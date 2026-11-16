@@ -85,7 +85,7 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
         : {for (final m in ref.watch(membersProvider(addTo)).value ?? const []) m.userId};
     final users = (ref.watch(usersProvider).value ?? const {})
         .values
-        .where((u) => u.id != me && !existing.contains(u.id))
+        .where((u) => u.id != me && !existing.contains(u.id) && u.deleted != true)
         .toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final names = {for (final u in users) u.id: u.name};

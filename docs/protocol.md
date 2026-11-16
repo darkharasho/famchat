@@ -23,6 +23,7 @@ reference; this document says what clients may rely on.
   | `pairing_invalid` | 410 | pairing session expired, cancelled, or already claimed |
   | `rate_limited` | 429 | too many pairing sessions started; wait a few minutes |
   | `conflict` | 409 | a media key already used by another device or for another chat |
+  | `last_admin` | 409 | the only admin can't delete their account while anyone else is in the family |
   | `media_expired` | 410 | the media was deleted by quota eviction (show "media expired") |
   | `too_large` | 413 | upload over its kind's byte cap |
   | `upgrade_required` | 426 | `/api/ws` without a WebSocket upgrade |
@@ -36,7 +37,7 @@ reference; this document says what clients may rely on.
 
 ```
 User      = {id, name, isAdmin, identityPub, adminProof: {byUserId, signerPub, sig}|null,
-             devices: Device[], resets: Reset[]}
+             devices: Device[], resets: Reset[], deleted}                 ("Deleting an account")
 Reset     = {id, signerUserId, signerKind: "admin"|"recovery", signerPub, recoverySig: string|null,
              oldIdentityPub, claimPub, createdAt, sig, newIdentityPub: string|null,
              claimSig: string|null, completedAt: number|null}            ("Account resets")
@@ -183,7 +184,39 @@ of whatever the server shows. Member devices also add wraps for N on the `device
 - `GET /users` → `{users: User[]}`: every family member and every device, revoked ones included
   (`revoked: true`) so old signatures still verify. Wrap only for devices with `revoked: false`.
   `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
-  accept only through resets they verify ("Account resets").
+  accept only through resets they verify ("Account resets"). A deleted account stays listed with
+  `deleted: true`, name `"Deleted user"` and every device revoked; don't offer it for new chats.
+
+### Deleting an account
+Required by app stores for apps with accounts. Two ways in, one transaction:
+
+- `DELETE /me {confirm: "delete"}` → 204: the caller deletes their own account. Any other body → 400.
+  The family's only admin gets `409 last_admin` while anyone else is left (make someone else an admin
+  first); the last person in the family may delete their account, after which `POST /admin/bootstrap`
+  works again.
+- `DELETE /admin/users/:id` (admin) → 204: removes another member the same way (a deletion request, or
+  someone who left the family). Yourself → 400 (use `DELETE /me`); unknown or already deleted → 404.
+
+What happens, atomically:
+- **Deleted:** every message the user sent (ciphertext rows: their texts, photos, voice messages and
+  reactions, so `seq` gaps appear in history), every media object they uploaded (R2 object and row,
+  live or expired), every chat-key wrap addressed to their devices, their WebSocket tickets.
+- **Revoked:** every device (refresh tokens and push tokens cleared, sockets closed with 4001, unclaimed
+  pairings cancelled); device names become `"Deleted device"`.
+- **Left:** every chat they were in, direct ones included. Each chat moves to `currentEpoch + 1` with
+  `epochReady: false`, exactly as after a leave, and the remaining members create the new epoch
+  without them. A direct chat stays with its one remaining member (clients title it "Deleted user").
+- **Anonymized, kept:** the `users` row (name `"Deleted user"`, admin flag, admin proof and recovery
+  key cleared, `deleted_at` set). Its id and identity key stay because devices, chats, resets and the
+  audit log reference them and other members' devices still verify old certificates and resets with
+  them. Invites made out to them are renamed; their unused reset links and the invites they made expire.
+- **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
+
+Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,
+`media_expired {chatId, keys}` for their media, and everyone gets `account_deleted {userId}`.
+Messages are end-to-end encrypted, so the server can't reach copies other members' devices already
+downloaded and decrypted; those stay on those devices until deleted there. A deleted user can't be
+reset, promoted, or added to a chat; their account can't be restored.
 
 ### Account resets (plan 10)
 An admin resets a user who lost every device. The admin can't read their messages: the new device
@@ -250,8 +283,8 @@ the new identity key and device, and the recovery key is cleared (single use; 40
 reset row keeps `recoverySig` so clients can verify it later. A retry with the same body within
 10 minutes reissues tokens.
 
-Every reset, recovery, promotion, recovery-key change, join, pairing and revocation writes an
-`events` row (audit log; not exposed by the API yet).
+Every reset, recovery, promotion, recovery-key change, join, pairing, revocation and account deletion
+writes an `events` row (audit log; not exposed by the API yet).
 
 ### Chats
 - `GET /chats` → `{chats: Chat[]}` (yours, newest activity first). `GET /chats/:id` → `{chat}`.
@@ -340,6 +373,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone): `GET /users` and check it |
+| `{type:"account_deleted", userId}` | that account was deleted (to everyone): `GET /users` ("Deleting an account") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 
@@ -348,7 +382,8 @@ Frames are JSON text. One socket per device carries every chat.
   that epoch created; otherwise `invalid_request` / `stale_epoch`. Not a member → `not_member`.
 - **Idempotent on `id`:** resending an id from the same device and chat returns the original `ack`
   (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`.
-- Sends are processed one at a time; `seq` per chat is gap-free and `msg` frames go out in `seq` order.
+- Sends are processed one at a time; `seq` per chat is assigned without gaps and `msg` frames go out in
+  `seq` order (deleting an account later removes its messages, which leaves holes in history).
   Clients still treat a `seq` above `lastSeen + 1` as a gap and fetch `?after=lastSeen`.
 - On `stale_epoch`, get the chat, create or fetch the current epoch's key, re-encrypt **with the same
   id**, and resend.

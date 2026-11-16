@@ -106,6 +106,8 @@ final typingProvider = StreamProvider.family<Set<String>, String>((ref, chatId) 
 String chatTitle(ChatRow chat, List<MemberRow> members, Map<String, UserRow> users, String? me) {
   if (chat.kind == 'group') return chat.title ?? 'Group';
   final other = members.where((m) => m.userId != me).firstOrNull;
+  // The other person deleted their account (and so left the chat).
+  if (other == null && members.isNotEmpty) return 'Deleted user';
   return users[other?.userId]?.name ?? 'Chat';
 }
 

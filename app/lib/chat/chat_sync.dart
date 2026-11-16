@@ -383,6 +383,10 @@ class ChatSync {
         await directory.refresh();
         await _retryUndecryptable();
         await _repair();
+      case 'account_deleted':
+        // Someone's account was deleted: they're renamed and their devices revoked. The `chat`
+        // events that come with it move each shared chat to a new epoch.
+        await directory.refresh();
       case 'keys':
         await keys.fetch(chatId: e['chatId'] as String?);
         await _retryUndecryptable();
