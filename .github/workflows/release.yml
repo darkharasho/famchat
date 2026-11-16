@@ -17,11 +17,13 @@ name: release
 # needs the app record (created by hand), Play needs its first bundle uploaded by hand in Play
 # Console and the service account invited to the app. The signed files are artifacts either way.
 #
-# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY (.p8 text),
-# APPLE_TEAM_ID; CSC_LINK (Developer ID Application .p12, base64), CSC_KEY_PASSWORD;
-# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-# (1Password: "FamChat Android upload keystore"), PLAY_SERVICE_ACCOUNT_JSON; AZURE_TENANT_ID,
-# AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (~/.claude/templates/windows-signing).
+# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY (.p8 text
+# of an Admin key: cloud-managed distribution signing refuses App Manager keys), APPLE_TEAM_ID;
+# CSC_LINK (Developer ID Application .p12, base64), CSC_KEY_PASSWORD; ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD (1Password: "FamChat Android upload keystore"),
+# PLAY_SERVICE_ACCOUNT_JSON; AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+# (~/.claude/templates/windows-signing). Variable: ANDROID_KEY_ALIAS (not secret; as a secret,
+# GitHub would mask the word "upload" in every log).
 
 on:
   push:
@@ -183,7 +185,7 @@ jobs:
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           [ -n "$KEYSTORE" ] || { echo "::error::ANDROID_KEYSTORE_BASE64 isn't set."; exit 1; }
@@ -319,10 +321,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with: { name: desktop-macos, path: dist/, if-no-files-found: error }
-
-      - name: Remove the keychain
-        if: always()
-        run: security delete-keychain signing_temp.keychain || true
+      # import-codesign-certs deletes its keychain in its post step.
 
   windows:
     needs: version
