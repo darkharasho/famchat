@@ -35,7 +35,12 @@ Future<void> finishPairing(WidgetRef ref, PairedDevice device) async {
 final deviceApproverProvider = Provider<DeviceApprover?>((ref) {
   final s = ref.watch(sessionProvider);
   if (s is! SignedIn) return null;
-  return DeviceApprover(api: ref.watch(apiClientProvider), db: ref.watch(chatDbProvider), session: s.session);
+  return DeviceApprover(
+    api: ref.watch(apiClientProvider),
+    db: ref.watch(chatDbProvider),
+    session: s.session,
+    now: ref.watch(clockProvider),
+  );
 });
 
 /// Builds a camera view that reports scanned text.

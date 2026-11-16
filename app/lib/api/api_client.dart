@@ -145,7 +145,8 @@ class ApiClient {
 
   // --- pairing (docs/protocol.md "Pairing a new device") ---
 
-  /// Unauthenticated: the new device opens a session.
+  /// Unauthenticated: the new device opens a session; with [offer] (a signed-in device's lookup
+  /// code) it takes that offer.
   Future<PairStartResult> pairStart({
     required String ephPub,
     required String encPub,
@@ -153,6 +154,7 @@ class ApiClient {
     required String keysMac,
     required String deviceName,
     required String platform,
+    String? offer,
   }) async {
     final j = await _send('POST', '/devices/pair/start', body: {
       'ephPub': ephPub,
@@ -161,6 +163,7 @@ class ApiClient {
       'keysMac': keysMac,
       'deviceName': deviceName,
       'platform': platform,
+      'offer': ?offer,
     });
     return _parse(201, () => PairStartResult(
           sessionId: j!['sessionId'] as String,
@@ -193,23 +196,47 @@ class ApiClient {
   Future<void> pairCancel(String sessionId, String secret) =>
       _send('POST', '/devices/pair/cancel', body: {'sessionId': sessionId, 'secret': secret});
 
+  static PairSessionInfo _sessionInfo(Map<String, Object?> s) => PairSessionInfo(
+        lookup: s['code'] as String,
+        deviceId: s['deviceId'] as String,
+        ephPub: s['ephPub'] as String,
+        encPub: s['encPub'] as String,
+        signPub: s['signPub'] as String,
+        keysMac: s['keysMac'] as String,
+        deviceName: s['deviceName'] as String,
+        platform: s['platform'] as String,
+      );
+
   /// Authed: the approving device fetches the session by its lookup code.
   Future<PairSessionInfo> pairLookup(String lookup) => _authed((t) async {
         final j = await _send('GET', '/devices/pair/${Uri.encodeComponent(lookup)}', bearer: t);
-        return _parse(200, () {
-          final s = j!['session'] as Map<String, Object?>;
-          return PairSessionInfo(
-            lookup: s['code'] as String,
-            deviceId: s['deviceId'] as String,
-            ephPub: s['ephPub'] as String,
-            encPub: s['encPub'] as String,
-            signPub: s['signPub'] as String,
-            keysMac: s['keysMac'] as String,
-            deviceName: s['deviceName'] as String,
-            platform: s['platform'] as String,
-          );
-        });
+        return _parse(200, () => _sessionInfo(j!['session'] as Map<String, Object?>));
       });
+
+  /// Authed: opens an offer a new device can take (reverse pairing).
+  Future<PairOffer> pairOffer() => _authed((t) async {
+        final j = await _send('POST', '/devices/pair/offer', bearer: t);
+        return _parse(201, () => PairOffer(
+              offerId: j!['offerId'] as String,
+              lookup: j['code'] as String,
+              expiresIn: Duration(milliseconds: j['expiresIn'] as int),
+            ));
+      });
+
+  /// Authed: whether a new device took the offer.
+  Future<PairOfferStatus> pairOfferStatus(String offerId) => _authed((t) async {
+        final j = await _send('GET', '/devices/pair/offer/${Uri.encodeComponent(offerId)}', bearer: t);
+        return _parse(200, () => switch (j!['status']) {
+              'waiting' => const OfferWaiting(),
+              'ready' => OfferTaken(_sessionInfo(j['session'] as Map<String, Object?>)),
+              'approved' => const OfferApproved(),
+              _ => throw TypeError(),
+            });
+      });
+
+  /// Authed: withdraws the offer (and the new device's session if it took it).
+  Future<void> pairOfferCancel(String offerId) => _authed(
+      (t) => _send('POST', '/devices/pair/offer/${Uri.encodeComponent(offerId)}/cancel', bearer: t));
 
   /// Authed: approves the session with the new device's cert and the sealed bundle (base64url).
   Future<void> pairApprove(String lookup, {required String deviceId, required String certSig, required String bundle}) =>

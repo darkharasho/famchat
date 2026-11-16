@@ -1,5 +1,7 @@
 // The new device's side of pairing: make keys and a secret, open a session, show the code and QR,
 // poll until another device of the user approves, then verify the bundle and produce a session.
+// In reverse pairing the code (and so the secret) comes from the other device's offer instead, and
+// nothing is shown here while waiting.
 // Nothing is stored here; the caller installs the handover and saves the session.
 import 'dart:async';
 
@@ -34,6 +36,12 @@ class PairShowing extends PairState {
   final DateTime expiresAt;
 }
 
+/// Took the other device's offer (reverse pairing); waiting for approval there until [expiresAt].
+class PairJoined extends PairState {
+  const PairJoined(this.expiresAt);
+  final DateTime expiresAt;
+}
+
 /// Approved; verifying the bundle and setting up.
 class PairFinishing extends PairState {
   const PairFinishing();
@@ -65,6 +73,9 @@ class PairedDevice {
   final String accessToken;
   final PairBundle bundle;
 }
+
+const unknownOfferMessage = 'No device is showing that code. Codes expire after 5 minutes; '
+    'get a new one on your other device.';
 
 const forgedBundleMessage = "The approval couldn't be verified, so nothing was set up. Start again, "
     'and approve from one of your own devices.';
@@ -103,11 +114,14 @@ class NewDevicePairing {
 
   /// Opens the session and shows the code; polling then runs until done, expired, failed or
   /// cancelled. Errors while opening the session end in [PairFailed].
-  Future<void> start() async {
+  ///
+  /// With [offer] (a code scanned or typed from a signed-in device) the session takes that offer and
+  /// uses its secret, and the state is [PairJoined] instead of [PairShowing].
+  Future<void> start({PairCode? offer}) async {
     _set(const PairStarting());
     final eph = await X25519().newKeyPair();
     final keys = await DeviceKeys.generate();
-    final secret = newPairSecret();
+    final secret = offer?.secret ?? newPairSecret();
     final ephPub = await publicKeyOf(eph), encPub = await keys.encPub(), signPub = await keys.signPub();
     final PairStartResult s;
     try {
@@ -119,16 +133,21 @@ class NewDevicePairing {
             secret: secret, ephPub: ephPub, encPub: encPub, signPub: signPub, deviceName: deviceName, platform: platform)),
         deviceName: deviceName,
         platform: platform,
+        offer: offer?.lookup,
       );
     } catch (e) {
-      if (!_stopped) _set(PairFailed(startErrorMessage(e)));
+      if (!_stopped) {
+        _set(PairFailed(
+            offer != null && e is ApiException && e.code == 'not_found' ? unknownOfferMessage : startErrorMessage(e)));
+      }
       return;
     }
     _session = s;
     if (_stopped) return _cancelOnServer(); // cancelled while the session was being opened
     final code = PairCode(s.lookup, secret);
-    _set(PairShowing(code, PairQr(code, ephPub).encode(), _now().add(s.expiresIn)));
-    unawaited(_poll(s, code, eph, keys));
+    final expiresAt = _now().add(s.expiresIn);
+    _set(offer != null ? PairJoined(expiresAt) : PairShowing(code, PairQr(code, ephPub).encode(), expiresAt));
+    unawaited(_poll(s, code, eph, keys, expiresAt));
   }
 
   static String startErrorMessage(Object e) => switch (e) {
@@ -138,8 +157,7 @@ class NewDevicePairing {
         _ => 'Something went wrong. Please try again.',
       };
 
-  Future<void> _poll(PairStartResult s, PairCode code, SimpleKeyPair eph, DeviceKeys keys) async {
-    final expiresAt = (_state as PairShowing).expiresAt;
+  Future<void> _poll(PairStartResult s, PairCode code, SimpleKeyPair eph, DeviceKeys keys, DateTime expiresAt) async {
     while (!_stopped) {
       await _sleep();
       if (_stopped) return;

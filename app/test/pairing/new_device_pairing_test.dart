@@ -6,6 +6,7 @@ import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/crypto/pairing.dart';
 import 'package:famchat/pairing/bundle.dart';
 import 'package:famchat/pairing/new_device_pairing.dart';
+import 'package:famchat/pairing/pair_code.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -36,7 +37,7 @@ void main() {
     return p.state as PairShowing;
   }
 
-  Future<PairState> settled() => p.states.firstWhere((s) => s is! PairShowing && s is! PairFinishing).timeout(
+  Future<PairState> settled() => p.states.firstWhere((s) => s is! PairShowing && s is! PairJoined && s is! PairFinishing).timeout(
         const Duration(seconds: 5),
         onTimeout: () => p.state,
       );
@@ -154,6 +155,49 @@ void main() {
     final n = claims();
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(claims(), lessThanOrEqualTo(n + 1));
+  });
+
+  group('with an offer (reverse pairing)', () {
+    test('takes the offer, waits without showing a code, then finishes', () async {
+      final alice = await signedInClient(server);
+      final o = await alice.api.pairOffer();
+      final offerCode = PairCode(o.lookup, newPairSecret());
+      await p.start(offer: offerCode);
+      final waiting = p.state as PairJoined;
+      expect(waiting.expiresAt, clock.add(const Duration(minutes: 5)));
+      final x = server.pairSessions.values.single;
+      expect(server.pairOffers[o.offerId]!.sessionId, x.id);
+      // MAC'd with the offer's secret, so the offering device can check the keys.
+      expect(
+        await checkPairKeysMac(
+          secret: offerCode.secret,
+          ephPub: b64urlDecode(x.body['ephPub']!),
+          encPub: b64urlDecode(x.body['encPub']!),
+          signPub: b64urlDecode(x.body['signPub']!),
+          deviceName: 'Laptop',
+          platform: 'linux',
+          mac: b64urlDecode(x.body['keysMac']!),
+        ),
+        isTrue,
+      );
+      final approver = await approveByHand(server, PairCode(x.code, offerCode.secret));
+      final done = await settled() as PairDone;
+      expect(done.device.session.userId, approver.userId);
+    });
+
+    test('an unknown offer fails with a message', () async {
+      await p.start(offer: const PairCode('ZZZZ', 'ABCDEFGH0123'));
+      expect((p.state as PairFailed).message, contains('No device is showing that code'));
+    });
+
+    test('a forged approval is refused', () async {
+      final alice = await signedInClient(server);
+      final o = await alice.api.pairOffer();
+      await p.start(offer: PairCode(o.lookup, newPairSecret()));
+      final x = server.pairSessions.values.single;
+      await approveByHand(server, PairCode(x.code, 'ZZZZZZZZZZZZ'));
+      expect(await settled(), isA<PairFailed>());
+    });
   });
 
   test('rate limited start fails with a message', () async {
