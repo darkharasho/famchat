@@ -103,6 +103,11 @@ All cryptography runs on the client. The server never sees a private key or a ch
 - **Device keys**: X25519 for receiving wrapped keys and Ed25519 for signing messages. Each device's public keys carry a certificate signed by the user's identity key.
 - **Chat key** (32 random bytes) per chat **epoch**. Each epoch's key is wrapped separately for every member device:
   ephemeral X25519 → HKDF-SHA256 → XChaCha20-Poly1305 (a sealed box).
+- **Signed wraps.** The wrapping device signs each wrap with its Ed25519 sign key over
+  `"famchat-wrap-v1" ‖ str(chatId) ‖ u32(epoch) ‖ str(recipientDeviceId) ‖ str(wrapperDeviceId) ‖ sealed`.
+  A device accepts a wrap only if that signature verifies with the sign key of a device whose
+  certificate chains to the identity key of a current chat member. So the server can't hand a
+  device a chat key it made up, or move a wrap to another chat, epoch or device.
 
 Other members trust a user's identity key on first use. If it changes, every chat with that user shows a banner.
 
@@ -110,8 +115,10 @@ Other members trust a user's identity key on first use. If it changes, every cha
 
 ```
 envelope = { v:1, epoch, nonce, ct, sig }
-ct  = XChaCha20-Poly1305(chatKey[epoch], nonce, plaintext, aad = chatId|messageId|senderDeviceId)
-sig = Ed25519(deviceSignKey, ct|aad)
+aad = "famchat-envelope-v1" ‖ u8(v) ‖ str(chatId) ‖ u32(epoch) ‖ str(messageId) ‖ str(senderDeviceId)
+ct  = XChaCha20-Poly1305(chatKey[epoch], nonce, plaintext, aad)      (ct includes the 16-byte MAC)
+sig = Ed25519(deviceSignKey, aad ‖ nonce ‖ ct)
+str(s) = u16be(len) ‖ UTF-8(s); integers big-endian
 plaintext = JSON { kind: text|photo|voice|reaction, ... }
 ```
 
@@ -153,6 +160,9 @@ What this does and doesn't protect:
 - The web app's code is served by our own Worker, so the web client is only as trustworthy as the deployment.
 - No forward secrecy inside an epoch; that's the price of syncing history to new devices.
 - No safety-number verification screen in v1; trust is first-use plus the reset banners.
+- XChaCha20-Poly1305 is not key-committing. A malicious member who wraps different keys for one epoch
+  to different devices could show them different text for the same message. Accepted for one family;
+  revisit if membership widens.
 
 ## Push notifications
 
