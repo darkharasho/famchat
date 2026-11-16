@@ -1,5 +1,6 @@
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/crypto/sealed_box.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -10,6 +11,8 @@ void main() {
     final restored = await DeviceKeys.fromStorage(stored);
     expect(await restored.encPub(), await keys.encPub());
     expect(await restored.signPub(), await keys.signPub());
+    final sealed = await sealBox(await keys.encPub(), [7, 7, 7]);
+    expect(await openBox(restored.enc, sealed), [7, 7, 7]);
   });
 
   test('fromStorage with a bad seed throws CryptoFailure', () async {
