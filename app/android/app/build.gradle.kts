@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "dev.famchat.app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_local_notifications 23 (and the androidx.core it pulls in) needs SDK 37 to compile
+    // against; targetSdk stays Flutter's default.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
