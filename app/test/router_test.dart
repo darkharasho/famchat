@@ -30,12 +30,16 @@ void main() {
       (out, '/loading', '/join'),
       (out, '/join', null),
       (out, '/spikes', null),
+      (out, '/pair', null),
+      (out, '/devices/add', '/join'),
     ];
     for (final (s, loc, want) in cases) {
       expect(sessionRedirect(s, loc), want, reason: '$s $loc');
     }
     expect(sessionRedirect(user, '/join'), '/');
     expect(sessionRedirect(user, '/loading'), '/');
+    expect(sessionRedirect(user, '/pair'), '/');
+    expect(sessionRedirect(user, '/devices/add'), isNull);
     expect(sessionRedirect(user, '/'), isNull);
     expect(sessionRedirect(user, '/devices'), isNull);
     expect(sessionRedirect(user, '/spikes'), isNull);

@@ -346,6 +346,17 @@ class ChatSync {
         await _flushOutbox();
       case 'removed':
         await db.deleteChat(e['chatId'] as String);
+      case 'device':
+        // A device was added (pairing) or revoked: refresh who gets wraps. A new one gets the keys
+        // this device holds now, instead of when some member next reconnects.
+        await directory.refresh();
+        if (e['revoked'] != true) {
+          try {
+            await keys.repairMissing();
+          } on ApiException {
+            // Membership changed meanwhile; the next sync repairs.
+          }
+        }
       case 'keys':
         await keys.fetch(chatId: e['chatId'] as String?);
         await _retryUndecryptable();

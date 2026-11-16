@@ -18,7 +18,7 @@ final _aead = Xchacha20.poly1305Aead();
 final _sha256 = Sha256();
 final _random = Random.secure();
 
-const mediaDomain = 'famchat-media-v1';
+const mediaDomain = domainMedia;
 
 /// nonce + MAC.
 const mediaOverhead = 24 + 16;

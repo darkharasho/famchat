@@ -8,7 +8,7 @@ import 'encoding.dart';
 import 'keys.dart';
 
 final _ed25519 = Ed25519();
-final _certContext = utf8.encode('famchat-device-cert-v1');
+final _certContext = utf8.encode(domainDeviceCert);
 
 class DeviceCert {
   DeviceCert(this.identityPub, this.encPub, this.signPub, this.certSig);
@@ -41,9 +41,14 @@ Uint8List deviceCertMessage(List<int> encPub, List<int> signPub) {
 
 Future<DeviceCert> signDeviceCert({required SimpleKeyPair identity, required DeviceKeys device}) async {
   final encPub = await device.encPub(), signPub = await device.signPub();
-  final sig = await _ed25519.sign(deviceCertMessage(encPub, signPub), keyPair: identity);
-  return DeviceCert(await publicKeyOf(identity), encPub, signPub, Uint8List.fromList(sig.bytes));
+  final sig = await signCertFor(identity: identity, encPub: encPub, signPub: signPub);
+  return DeviceCert(await publicKeyOf(identity), encPub, signPub, sig);
 }
+
+/// The cert signature for another device's public keys (pairing: the approving device certifies
+/// the new one).
+Future<Uint8List> signCertFor({required SimpleKeyPair identity, required List<int> encPub, required List<int> signPub}) async =>
+    Uint8List.fromList((await _ed25519.sign(deviceCertMessage(encPub, signPub), keyPair: identity)).bytes);
 
 /// True if [c.certSig] is [c.identityPub]'s signature over the cert message. Never throws.
 Future<bool> verifyDeviceCert(DeviceCert c) async {

@@ -150,6 +150,19 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
                         ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Join'),
                   ),
+                  const SizedBox(height: 24),
+                  OutlinedButton.icon(
+                    key: const Key('pair-link'),
+                    onPressed: _busy ? null : () => context.go('/pair'),
+                    icon: const Icon(Icons.qr_code_2_rounded),
+                    label: const Text('Sign in with another device'),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Already use FamChat on a phone or computer? Approve this device from there.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 32),
                   TextButton(
                     onPressed: () => context.go('/spikes'),

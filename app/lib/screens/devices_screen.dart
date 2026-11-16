@@ -16,13 +16,16 @@ const _platformLabels = {
   'web': 'Web',
 };
 
+String platformLabel(String p) => _platformLabels[p] ?? p;
+
 IconData _platformIcon(String p) => switch (p) {
       'ios' || 'android' => Icons.smartphone,
       'web' => Icons.language,
       _ => Icons.computer,
     };
 
-/// This user's signed-in devices; revoke others, or sign this one out.
+/// This user's signed-in devices; add one (pairing), revoke others, or sign this one out.
+/// Revoking moves every chat to a new key (the server rotates; member devices create the epoch).
 class DevicesScreen extends ConsumerWidget {
   const DevicesScreen({super.key});
 
@@ -31,7 +34,9 @@ class DevicesScreen extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Revoke ${d.name}?'),
-        content: const Text('It will be signed out right away and its keys will stop working.'),
+        content: const Text(
+          "It will be signed out right away. Your chats move to new keys, so it can't read anything sent after this.",
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Revoke')),
@@ -62,6 +67,12 @@ class DevicesScreen extends ConsumerWidget {
         leading: BackButton(onPressed: () => context.go('/')),
         title: const Text('Devices'),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const Key('add-device'),
+        onPressed: () => context.go('/devices/add'),
+        icon: const Icon(Icons.add),
+        label: const Text('Add a device'),
+      ),
       body: devices.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
@@ -81,7 +92,7 @@ class DevicesScreen extends ConsumerWidget {
                   leading: Icon(_platformIcon(d.platform)),
                   title: Text(d.name),
                   subtitle: Text(
-                    '${_platformLabels[d.platform] ?? d.platform} · Last seen ${loc.formatMediumDate(d.lastSeen)}',
+                    '${platformLabel(d.platform)} · Last seen ${loc.formatMediumDate(d.lastSeen)}',
                   ),
                   trailing: d.current
                       ? const Chip(label: Text('This device'))

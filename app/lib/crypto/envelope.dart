@@ -47,7 +47,7 @@ Uint8List envelopeAad({
   required String messageId,
   required String senderDeviceId,
 }) =>
-    (ByteWriter('famchat-envelope-v1')
+    (ByteWriter(domainEnvelope)
           ..u8(v)
           ..str(chatId)
           ..u32(epoch)

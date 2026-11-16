@@ -8,6 +8,7 @@ import { devices } from "./routes/devices";
 import { keys } from "./routes/keys";
 import { media } from "./routes/media";
 import { me } from "./routes/me";
+import { pairing } from "./routes/pairing";
 import { users } from "./routes/users";
 import { ws } from "./routes/ws";
 
@@ -16,6 +17,8 @@ export const app = new Hono<AppEnv>().basePath("/api");
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/admin", admin);
 app.route("/auth", auth);
+// Before /devices: its requireAuth would otherwise catch the unauthenticated pairing routes.
+app.route("/devices/pair", pairing);
 app.route("/devices", devices);
 app.route("/me", me);
 app.route("/users", users);

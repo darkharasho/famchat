@@ -65,6 +65,54 @@ class DeviceInfo {
   final bool current;
 }
 
+/// `POST /devices/pair/start`: the session the new device polls, and the server's lookup code.
+class PairStartResult {
+  const PairStartResult({
+    required this.sessionId,
+    required this.lookup,
+    required this.secret,
+    required this.deviceId,
+    required this.expiresIn,
+  });
+  final String sessionId, lookup, deviceId;
+
+  /// The claim secret (not the pairing secret shown in the code).
+  final String secret;
+  final Duration expiresIn;
+}
+
+/// `POST /devices/pair/claim`.
+sealed class PairClaim {
+  const PairClaim();
+}
+
+class PairWaiting extends PairClaim {
+  const PairWaiting();
+}
+
+class PairApproved extends PairClaim {
+  const PairApproved(this.result, this.bundle);
+  final RedeemResult result;
+
+  /// The sealed bundle, base64url.
+  final String bundle;
+}
+
+/// `GET /devices/pair/:code`: the new device as the server describes it (unverified until the MAC checks).
+class PairSessionInfo {
+  const PairSessionInfo({
+    required this.lookup,
+    required this.deviceId,
+    required this.ephPub,
+    required this.encPub,
+    required this.signPub,
+    required this.keysMac,
+    required this.deviceName,
+    required this.platform,
+  });
+  final String lookup, deviceId, ephPub, encPub, signPub, keysMac, deviceName, platform;
+}
+
 class Invite {
   const Invite({required this.inviteToken, required this.inviteUrl, required this.expiresAt});
   final String inviteToken, inviteUrl;
