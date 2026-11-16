@@ -65,7 +65,7 @@ export async function resetUser(admin: TestUser, target: TestUser) {
 }
 
 /** Redeems a reset invite with fresh keys and a valid claim. */
-export async function redeemReset(token: string, resetId: string, claim: { priv: CryptoKey }, keys?: TestKeys) {
+export async function redeemReset(token: string, resetId: string, claim: { priv: CryptoKey; pub: string }, keys?: TestKeys) {
   const k = keys ?? (await makeKeys());
   const res = await SELF.fetch(
     `${BASE}/api/auth/invite/redeem`,
@@ -77,7 +77,7 @@ export async function redeemReset(token: string, resetId: string, claim: { priv:
       encPub: k.encPub,
       signPub: k.signPub,
       certSig: k.certSig,
-      resetClaimSig: await sign(claim.priv, claimMessage(resetId, k.identityPub)),
+      resetClaimSig: await sign(claim.priv, claimMessage(claim.pub, k.identityPub)),
     }),
   );
   return { res, keys: k };

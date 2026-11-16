@@ -44,7 +44,7 @@ Future<ResetDto> makeReset({
   String? claimSig;
   if (next != null) {
     final signWith = badClaim ? (await K.make()).pair : claim.pair;
-    claimSig = b64url(await signResetClaim(signWith, resetId: id, newIdentityPub: b64urlDecode(next.pub)));
+    claimSig = b64url(await signResetClaim(signWith, newIdentityPub: b64urlDecode(next.pub)));
   }
   return ResetDto(
     id: id,

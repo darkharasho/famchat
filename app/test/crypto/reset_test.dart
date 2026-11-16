@@ -56,14 +56,14 @@ void main() {
     expect(await verifyReset(st, signerPub: pub, sig: Uint8List(3)), isFalse);
   });
 
-  test('claim binds the reset id and new identity key', () async {
+  test('claim binds the claim key and the new identity key', () async {
     final claim = await newIdentityKey();
     final newId = _bytes(32, 7);
-    final sig = await signResetClaim(claim, resetId: 'R1', newIdentityPub: newId);
+    final sig = await signResetClaim(claim, newIdentityPub: newId);
     final pub = await publicKeyOf(claim);
-    expect(await verifyResetClaim(claimPub: pub, resetId: 'R1', newIdentityPub: newId, sig: sig), isTrue);
-    expect(await verifyResetClaim(claimPub: pub, resetId: 'R2', newIdentityPub: newId, sig: sig), isFalse);
-    expect(await verifyResetClaim(claimPub: pub, resetId: 'R1', newIdentityPub: _bytes(32, 8), sig: sig), isFalse);
+    expect(await verifyResetClaim(claimPub: pub, newIdentityPub: newId, sig: sig), isTrue);
+    expect(await verifyResetClaim(claimPub: pub, newIdentityPub: _bytes(32, 8), sig: sig), isFalse);
+    expect(await verifyResetClaim(claimPub: await publicKeyOf(await newIdentityKey()), newIdentityPub: newId, sig: sig), isFalse);
   });
 
   test('recovery key registration is signed by the identity key', () async {
@@ -107,7 +107,7 @@ void main() {
     expect(b64url(await publicKeyOf(signer)), resetVector['signerPub']);
     expect(b64url(sig), resetVector['sig']);
     final claim = await newIdentityKey(seed: _bytes(32, 0x22));
-    expect(b64url(await signResetClaim(claim, resetId: st.resetId, newIdentityPub: _bytes(32, 3))), resetVector['claimSig']);
+    expect(b64url(await signResetClaim(claim, newIdentityPub: _bytes(32, 3))), resetVector['claimSig']);
     expect(b64url(await publicKeyOf(claim)), resetVector['claimPub']);
     final rk = await recoveryKeyFrom(RecoveryCode.parse('ABCDE-FGHJK-MNPQR-STVWX-YZ012')!);
     expect(b64url(await publicKeyOf(rk)), resetVector['recoveryPub']);
@@ -119,6 +119,6 @@ const resetVector = <String, String>{
   'signerPub': '0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc',
   'sig': '2bTQ9TLFCiIhyFcaaiIdJG5EYZ5DWv4NnPBSezyszPNyhHTC--a4j2MKAtke7MRr2utg04wxqEkBylI2sYr7Dg',
   'claimPub': 'oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA',
-  'claimSig': 'LhTcuzfu93E6nxxyr74-YtGzOYlxWkNdgLJQ91B6g4ur3w4Pew_ReiM27mRLUUZL3n6wWxp54OqR2kSob9TSAQ',
+  'claimSig': 'Jlze_kYQ0E_SOE2Vk6N1uO6MZap0wohPBjrFZiznTKtHmwZP47d9H15vqMVFkDpQEjwNFcQFnryJ9rQxdVGwDg',
   'recoveryPub': 'eUCm29K8ImuMaI3m5sFSFc5dTYRJGuhtXRbOZQv2CWY',
 };

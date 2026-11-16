@@ -76,26 +76,27 @@ Future<bool> verifyReset(ResetStatement s, {required List<int> signerPub, requir
   return _verify(signerPub, sig, msg);
 }
 
-Uint8List _claimMessage(String resetId, List<int> newIdentityPub) {
-  if (newIdentityPub.length != 32) throw ArgumentError('key must be 32 bytes');
+/// `"famchat-reset-claim-v1" ‖ claimPub ‖ newIdentityPub`. The claim key is made for one reset
+/// (whose signed statement names it), so it binds the reset; the new device needn't know its id.
+Uint8List _claimMessage(List<int> claimPub, List<int> newIdentityPub) {
+  if (claimPub.length != 32 || newIdentityPub.length != 32) throw ArgumentError('keys must be 32 bytes');
   return (ByteWriter(domainResetClaim)
-        ..str(resetId)
+        ..bytes(claimPub)
         ..bytes(newIdentityPub))
       .finish();
 }
 
 /// The new device's proof that it holds the reset link's claim key.
-Future<Uint8List> signResetClaim(SimpleKeyPair claimKey, {required String resetId, required List<int> newIdentityPub}) =>
-    _sign(claimKey, _claimMessage(resetId, newIdentityPub));
+Future<Uint8List> signResetClaim(SimpleKeyPair claimKey, {required List<int> newIdentityPub}) async =>
+    _sign(claimKey, _claimMessage(await publicKeyOf(claimKey), newIdentityPub));
 
 Future<bool> verifyResetClaim({
   required List<int> claimPub,
-  required String resetId,
   required List<int> newIdentityPub,
   required List<int> sig,
 }) async {
-  if (newIdentityPub.length != 32) return false;
-  return _verify(claimPub, sig, _claimMessage(resetId, newIdentityPub));
+  if (claimPub.length != 32 || newIdentityPub.length != 32) return false;
+  return _verify(claimPub, sig, _claimMessage(claimPub, newIdentityPub));
 }
 
 Uint8List _recoveryKeyMessage(String userId, List<int> recoveryPub) {

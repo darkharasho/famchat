@@ -9,7 +9,7 @@ const vector = {
   signerPub: "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
   sig: "2bTQ9TLFCiIhyFcaaiIdJG5EYZ5DWv4NnPBSezyszPNyhHTC--a4j2MKAtke7MRr2utg04wxqEkBylI2sYr7Dg",
   claimPub: "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
-  claimSig: "LhTcuzfu93E6nxxyr74-YtGzOYlxWkNdgLJQ91B6g4ur3w4Pew_ReiM27mRLUUZL3n6wWxp54OqR2kSob9TSAQ",
+  claimSig: "Jlze_kYQ0E_SOE2Vk6N1uO6MZap0wohPBjrFZiznTKtHmwZP47d9H15vqMVFkDpQEjwNFcQFnryJ9rQxdVGwDg",
 };
 
 const statement = {
@@ -29,6 +29,6 @@ describe("reset byte strings match the Dart client", () => {
   });
 
   it("claim signature from Dart verifies", async () => {
-    expect(await verifyEd25519(vector.claimPub, vector.claimSig, claimMessage(statement.resetId, fill(32, 3)))).toBe(true);
+    expect(await verifyEd25519(vector.claimPub, vector.claimSig, claimMessage(vector.claimPub, fill(32, 3)))).toBe(true);
   });
 });

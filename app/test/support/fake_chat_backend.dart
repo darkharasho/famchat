@@ -227,7 +227,7 @@ class FakeChatBackend {
     u.identity = await newIdentityKey();
     u.identityPub = await publicKeyOf(u.identity);
     r.newIdentityPub = u.identityPub;
-    r.claimSig = await signResetClaim(badClaim ? await newIdentityKey() : r.claim, resetId: resetId, newIdentityPub: u.identityPub);
+    r.claimSig = await signResetClaim(badClaim ? await newIdentityKey() : r.claim, newIdentityPub: u.identityPub);
     final d = await addDevice(userId);
     _notify(_sharing(userId), {'type': 'device', 'userId': userId, 'deviceId': d.deviceId});
     _notify(_users.keys, {'type': 'reset', 'userId': userId, 'resetId': resetId});

@@ -32,7 +32,7 @@ async function recoverBody(
       claimPub: claim.pub,
       createdAt,
       sig,
-      claimSig: await sign(claim.priv, claimMessage(resetId, k.identityPub)),
+      claimSig: await sign(claim.priv, claimMessage(claim.pub, k.identityPub)),
       identityPub: k.identityPub,
       encPub: k.encPub,
       signPub: k.signPub,
@@ -114,6 +114,15 @@ describe("POST /api/auth/recover", () => {
     expect(await again.json()).toMatchObject({ userId: admin.userId, deviceId: a.deviceId });
     const other = await recoverBody(admin.userId, first.keys.identityPub, rk);
     expect((await recover(other.body)).status).toBe(401);
+  });
+
+  it("lookup tells the code's holder whose key it is", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const { rk } = await registerRecovery(admin);
+    const res = await SELF.fetch(`${BASE}/api/auth/recover/lookup`, jsonReq("POST", { recoveryPub: rk.pub }));
+    expect(await res.json()).toEqual({ userId: admin.userId, identityPub: admin.keys.identityPub });
+    const other = await ed25519();
+    expect((await SELF.fetch(`${BASE}/api/auth/recover/lookup`, jsonReq("POST", { recoveryPub: other.pub }))).status).toBe(401);
   });
 
   it("recover with an unknown key -> 401", async () => {

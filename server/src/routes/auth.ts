@@ -120,7 +120,7 @@ async function redeemReset(env: Env, body: Record<string, unknown>, tokenHash: s
   const claimSig = signature(body.resetClaimSig);
   const reset = await db.prepare("SELECT claim_pub FROM resets WHERE id = ? AND user_id = ?")
     .bind(resetId, userId).first<string>("claim_pub");
-  if (!reset || !(await verifyEd25519(reset, claimSig, claimMessage(resetId, k.identityPub)))) {
+  if (!reset || !(await verifyEd25519(reset, claimSig, claimMessage(reset, k.identityPub)))) {
     throw new ApiError("invalid_request");
   }
   const deviceId = newId();
@@ -151,6 +151,19 @@ async function redeemReset(env: Env, body: Record<string, unknown>, tokenHash: s
   const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: isAdmin });
   return { userId, deviceId, isAdmin, accessToken, refreshToken };
 }
+
+/**
+ * Step 1 of a recovery: whose recovery key this is, and their current identity key (both go into
+ * the statement the recovering device signs). The public key is derived from the printed code and
+ * isn't published anywhere while unused, so only the code's holder can ask.
+ */
+auth.post("/recover/lookup", async (c) => {
+  const recoveryPub = pubKey((await readJson(c)).recoveryPub);
+  const user = await c.env.DB.prepare("SELECT id, identity_pub FROM users WHERE recovery_pub = ? AND is_admin = 1")
+    .bind(recoveryPub).first<{ id: string; identity_pub: string }>();
+  if (!user) throw new ApiError("unauthorized");
+  return c.json({ userId: user.id, identityPub: user.identity_pub });
+});
 
 /**
  * Admin recovery without any device: the holder of the printed recovery code proves it with a
@@ -189,7 +202,7 @@ auth.post("/recover", async (c) => {
     resetId, userId: user.id, signerUserId: user.id, signerKind: "recovery" as const, oldIdentityPub, claimPub, createdAt,
   };
   if (!(await verifyEd25519(recoveryPub, sig, resetMessage(statement)))) throw new ApiError("invalid_request");
-  if (!(await verifyEd25519(claimPub, claimSig, claimMessage(resetId, k.identityPub)))) throw new ApiError("invalid_request");
+  if (!(await verifyEd25519(claimPub, claimSig, claimMessage(claimPub, k.identityPub)))) throw new ApiError("invalid_request");
   if (oldIdentityPub !== user.identity_pub) throw new ApiError("conflict");
 
   const deviceId = newId();

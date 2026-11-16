@@ -68,8 +68,8 @@ export function resetMessage(s: ResetStatement): Uint8Array {
     .finish();
 }
 
-export function claimMessage(resetId: string, newIdentityPub: string): Uint8Array {
-  return new Writer("famchat-reset-claim-v1").str(resetId).bytes(key32(newIdentityPub)).finish();
+export function claimMessage(claimPub: string, newIdentityPub: string): Uint8Array {
+  return new Writer("famchat-reset-claim-v1").bytes(key32(claimPub)).bytes(key32(newIdentityPub)).finish();
 }
 
 export function recoveryKeyMessage(userId: string, recoveryPub: string): Uint8Array {

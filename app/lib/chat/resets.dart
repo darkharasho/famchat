@@ -164,7 +164,6 @@ Future<bool> _claimValid(ResetDto r) async {
   try {
     return await verifyResetClaim(
       claimPub: b64urlDecode(r.claimPub),
-      resetId: r.id,
       newIdentityPub: b64urlDecode(next),
       sig: b64urlDecode(sig),
     );
