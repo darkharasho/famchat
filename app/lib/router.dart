@@ -10,6 +10,7 @@ import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
 import 'screens/spikes_screen.dart';
+import 'screens/storage_screen.dart';
 import 'session/session_controller.dart';
 
 /// Where [location] must go for session state [s], or null to stay.
@@ -21,7 +22,7 @@ String? sessionRedirect(SessionState s, String location) {
       return location == '/join' || location == '/spikes' ? null : '/join';
     case SignedIn(:final session):
       if (location == '/join' || location == '/loading') return '/';
-      if (location == '/invite' && !session.isAdmin) return '/';
+      if ((location == '/invite' || location == '/storage') && !session.isAdmin) return '/';
       return null;
   }
 }
@@ -57,6 +58,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),
+      GoRoute(path: '/storage', builder: (context, state) => const StorageScreen()),
     ],
   );
   ref.onDispose(() {

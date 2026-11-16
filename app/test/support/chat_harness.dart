@@ -6,12 +6,16 @@ import 'package:famchat/chat/directory.dart';
 import 'package:famchat/chat/hub_link.dart';
 import 'package:famchat/chat/providers.dart';
 import 'package:famchat/main.dart';
+import 'package:famchat/media/media_db.dart';
+import 'package:famchat/media/photo_picker.dart';
+import 'package:famchat/media/providers.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'app_harness.dart';
 import 'fake_chat_backend.dart';
+import 'fake_media.dart';
 import 'fake_server.dart';
 import 'session_overrides.dart';
 
@@ -69,7 +73,14 @@ void setWindow(WidgetTester tester, Size size) {
 }
 
 /// Pumps the signed-in app with [me]'s chat stack (database, fake API, scripted hub).
-Future<ScriptedHubLink> pumpChatApp(WidgetTester tester, TestDevice me, {String name = 'Alice'}) async {
+Future<ScriptedHubLink> pumpChatApp(
+  WidgetTester tester,
+  TestDevice me, {
+  String name = 'Alice',
+  bool admin = false,
+  MediaDb? mediaDb,
+  PhotoPicker? picker,
+}) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
     await me.db.bindDevice(me.deviceId); // as ChatSync.start does; binding later would wipe the directory
@@ -83,11 +94,15 @@ Future<ScriptedHubLink> pumpChatApp(WidgetTester tester, TestDevice me, {String 
       chatApiProvider.overrideWithValue(me.api),
       hubLinkProvider.overrideWithValue(hub),
       localIdentityProvider.overrideWith((ref) async => me.me),
+      mediaDbProvider.overrideWithValue(mediaDb ?? memoryMediaDb()),
+      mediaApiProvider.overrideWithValue(me.media),
+      photoProcessorProvider.overrideWithValue(FakeProcessor()),
+      if (picker != null) photoPickerProvider.overrideWithValue(picker),
     ],
     child: const FamChatApp(),
   ));
   await tester.pumpAndSettle();
-  await signInDirectly(tester, server, name: name);
+  await signInDirectly(tester, server, name: name, admin: admin);
   await settle(tester);
   return hub;
 }

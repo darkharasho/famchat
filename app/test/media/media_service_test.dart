@@ -174,6 +174,25 @@ void main() {
     await restarted.stop();
   });
 
+  test('without the media gate a photo message waits in the outbox', () async {
+    final (alice, bob, chatId) = await pair();
+    alice.d.media.hold = Completer<void>();
+    final id = await alice.media.sendPhoto(chatId, photoBytes(200));
+    await alice.media.stop(); // the app restarts; ChatSync flushes before MediaService starts
+    alice.d.media.hold!.complete();
+    alice.d.media.hold = null;
+    alice.d.hub.drop();
+    await alice.d.hub.connect();
+    await alice.sync.idle;
+    expect(alice.d.hub.sent.where((f) => f['type'] == 'send'), isEmpty);
+    expect((await alice.row(id))!.state, 'pending');
+    final restarted = MediaService(db: alice.db, api: alice.d.media, sync: alice.sync, processor: alice.processor);
+    await restarted.start();
+    await until(() async => (await alice.row(id))!.state == 'sent', reason: 'sent once the gate is back');
+    await until(() async => (await bob.photos(chatId)).isNotEmpty);
+    await restarted.stop();
+  });
+
   test('a 413 marks the message failed and retry re-uploads', () async {
     final (alice, _, chatId) = await pair();
     alice.d.media.failUploads = 1;

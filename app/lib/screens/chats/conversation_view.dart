@@ -9,6 +9,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
+import '../../media/photo.dart';
+import '../../media/photo_picker.dart';
+import '../../media/providers.dart';
 import 'chat_list.dart' show ChatAvatar;
 import 'message_bubble.dart';
 
@@ -54,6 +57,61 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       }
     }
     _focus.requestFocus();
+  }
+
+  /// Photos being compressed and encrypted (before they appear in the list).
+  int _preparing = 0;
+
+  Future<void> _attach() async {
+    final media = ref.read(mediaServiceProvider);
+    if (media == null) return;
+    var camera = false;
+    if (cameraAvailable) {
+      final choice = await showModalBottomSheet<bool>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photo library'),
+              onTap: () => Navigator.pop(context, false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(context, true),
+            ),
+          ]),
+        ),
+      );
+      if (choice == null) return;
+      camera = choice;
+    }
+    final List<Uint8List> picked;
+    try {
+      picked = await ref.read(photoPickerProvider)(camera: camera);
+    } catch (e) {
+      _snack("Couldn't open the photo picker.");
+      return;
+    }
+    var failed = 0;
+    for (final bytes in picked) {
+      setState(() => _preparing++);
+      try {
+        await media.sendPhoto(widget.chatId, bytes);
+      } on UnsupportedImageException {
+        failed++;
+      } on ArgumentError {
+        failed++;
+      } finally {
+        if (mounted) setState(() => _preparing--);
+      }
+    }
+    if (failed > 0) _snack(failed == 1 ? "That image can't be sent." : "$failed images can't be sent.");
+  }
+
+  void _snack(String text) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   bool get _enterSends =>
@@ -175,11 +233,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
           ),
+        if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
         SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 8, 8),
+            padding: const EdgeInsets.fromLTRB(4, 4, 8, 8),
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              IconButton(tooltip: 'Attach photo', icon: const Icon(Icons.add_photo_alternate_outlined), onPressed: _attach),
               Expanded(
                 child: CallbackShortcuts(
                   bindings: {

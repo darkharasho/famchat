@@ -446,7 +446,7 @@ class ChatSync {
   Future<void> _sendRow(MessageRow row) async {
     if (row.state != 'pending' || !hub.connected) return;
     final gate = beforeSend;
-    if (gate != null && !await gate(row)) return; // e.g. its media is still uploading
+    if (gate == null ? mediaKinds.contains(row.kind) : !await gate(row)) return; // media not uploaded yet
     final ok = await keys.ensureCurrentEpoch(row.chatId);
     final chat = await db.chatById(row.chatId);
     if (chat == null) {
@@ -472,6 +472,9 @@ class ChatSync {
   /// Called before each outbox send; false keeps the row pending without sending it (the media
   /// layer returns false until a message's blobs are uploaded, then calls [flushSoon]).
   Future<bool> Function(MessageRow row)? beforeSend;
+
+  /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
+  static const mediaKinds = {'photo', 'voice'};
 
   /// Queues an outbox flush (after work queued before it).
   void flushSoon() => unawaited(_enqueue(_flushOutbox));
