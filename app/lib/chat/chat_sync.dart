@@ -229,7 +229,7 @@ class ChatSync {
     await db.noteActivity(m.chatId, m.seq, m.createdAt);
   }
 
-  /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, unknown,
+  /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, photo, voice, unknown,
   /// undecryptable (key not held yet; envelope kept), invalid (fails verification for good).
   Future<MessageRow> _decrypt(MessageDto m) async {
     final base = MessageRow(
@@ -293,6 +293,7 @@ class ChatSync {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
+      VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }

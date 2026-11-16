@@ -11,6 +11,7 @@ import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/media.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/media_service.dart';
+import 'package:famchat/voice/waveform.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_chat_backend.dart';
@@ -37,6 +38,10 @@ class Node {
 
   Future<List<MessageRow>> rows(String chatId) => d.db.watchMessages(chatId).first;
   Future<MessageRow?> row(String id) => d.db.messageById(id);
+  Future<List<VoiceBody>> voices(String chatId) async => [
+        for (final r in await rows(chatId))
+          if (r.kind == 'voice') Plaintext.decode(utf8.encode(r.body!)) as VoiceBody,
+      ];
   Future<List<PhotoBody>> photos(String chatId) async => [
         for (final r in await rows(chatId))
           if (r.kind == 'photo') Plaintext.decode(utf8.encode(r.body!)) as PhotoBody,
@@ -411,5 +416,42 @@ void main() {
     final mine = (await alice.photos(chatId)).single, theirs = (await bob.photos(chatId)).single;
     expect(b64url(theirs.key), b64url(mine.key));
     expect(theirs.toJson(), mine.toJson());
+  });
+
+  group('voice', () {
+    RecordedVoice clip({int n = 2000, Duration duration = const Duration(seconds: 3)}) =>
+        RecordedVoice(bytes: photoBytes(n, 3), duration: duration, waveform: [for (var i = 0; i < 64; i++) i]);
+
+    test('sendVoice stages one voice blob and queues a voice message that Bob can play', () async {
+      final (alice, bob, chatId) = await pair();
+      final c = clip();
+      final id = await alice.media.sendVoice(chatId, c);
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'voice sent');
+      expect(alice.d.media.uploads, hasLength(1));
+      await until(() async => (await bob.voices(chatId)).isNotEmpty, reason: 'bob gets the voice');
+      final v = (await bob.voices(chatId)).single;
+      expect((await bob.row(id))!.kind, 'voice');
+      expect((v.durationMs, v.bytes, v.mime), (3000, 2000, 'audio/mp4'));
+      expect(v.waveform, c.waveform);
+      expect(alice.d.media.uploads.single, v.mediaKey);
+      expect(backend.mediaBlob(v.mediaKey), isNot(contains(c.bytes.sublist(0, 32))));
+      expect(await bob.media.load(v.ref), c.bytes);
+    });
+
+    test('sendVoice rejects over ten minutes, empty clips and zero length', () async {
+      final (alice, _, chatId) = await pair();
+      await expectLater(alice.media.sendVoice(chatId, clip(duration: maxVoiceDuration + const Duration(milliseconds: 1))),
+          throwsArgumentError);
+      await expectLater(alice.media.sendVoice(chatId, clip(n: 0)), throwsArgumentError);
+      await expectLater(alice.media.sendVoice(chatId, clip(duration: Duration.zero)), throwsArgumentError);
+      expect(await alice.media.sendVoice(chatId, clip(duration: maxVoiceDuration)), isNotEmpty);
+      expect((await alice.rows(chatId)).where((r) => r.kind == 'voice'), hasLength(1));
+    });
+
+    test('sendVoice rejects a clip over the 8 MiB voice cap', () async {
+      final (alice, _, chatId) = await pair();
+      await expectLater(alice.media.sendVoice(chatId, clip(n: 8 * 1024 * 1024)), throwsArgumentError);
+      expect(await alice.rows(chatId), isEmpty);
+    });
   });
 }

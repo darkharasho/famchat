@@ -151,6 +151,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me) {
   return switch (m.kind) {
     'text' => '$who${(jsonDecode(m.body!) as Map)['text']}',
     'photo' => '$who📷 Photo',
+    'voice' => '$who🎤 Voice message',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
