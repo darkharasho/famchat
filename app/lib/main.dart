@@ -1,28 +1,38 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'audio_init.dart';
 import 'router.dart';
+import 'session/invite_link.dart';
+import 'session/session_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // famchat.dev/join#<token>: the fragment is the invite, not a route, so use path URLs.
+  usePathUrlStrategy();
   // just_audio has no Linux/Windows backend of its own; media_kit (libmpv) provides it.
   // If libmpv is missing, only audio playback is lost.
   final audioErr = initAudioBackend();
   if (audioErr != null) debugPrint('audio backend unavailable: $audioErr');
-  runApp(const ProviderScope(child: FamChatApp()));
+  final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
+  runApp(ProviderScope(
+    overrides: [initialInviteTokenProvider.overrideWithValue(invite)],
+    child: const FamChatApp(),
+  ));
 }
 
-class FamChatApp extends StatelessWidget {
+class FamChatApp extends ConsumerWidget {
   const FamChatApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       title: 'FamChat',
       theme: ThemeData(colorSchemeSeed: Colors.indigo),
       darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
-      routerConfig: appRouter,
+      routerConfig: ref.watch(routerProvider),
     );
   }
 }

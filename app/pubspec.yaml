@@ -50,6 +50,10 @@ dependencies:
   media_kit_libs_linux: ^1.2.1
   media_kit_libs_windows_audio: ^1.0.9
   meta: ^1.19.0
+  flutter_secure_storage: ^11.2.0
+  http: ^1.6.0
+  flutter_web_plugins:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

@@ -1,20 +1,19 @@
-import 'package:famchat/main.dart';
-import 'package:famchat/router.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:famchat/session/secure_kv.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/app_harness.dart';
+import 'support/fake_server.dart';
+
 void main() {
-  testWidgets('shows home', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: FamChatApp()));
-    expect(find.text('FamChat'), findsWidgets);
+  testWidgets('empty storage opens the join screen', (tester) async {
+    await pumpApp(tester, server: FakeServer(), kv: MemorySecureKv());
+    expect(find.text('Join FamChat'), findsOneWidget);
   });
 
-  testWidgets('navigates to spikes', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: FamChatApp()));
-    appRouter.go('/spikes');
+  testWidgets('spikes stay reachable when signed out', (tester) async {
+    await pumpApp(tester, server: FakeServer(), kv: MemorySecureKv());
+    appRouter(tester).go('/spikes');
     await tester.pumpAndSettle();
     expect(find.text('Platform spikes'), findsOneWidget);
-    appRouter.go('/');
-    await tester.pumpAndSettle();
   });
 }

@@ -1,0 +1,284 @@
+// A stateful in-memory copy of the plan 1 API (server/src/routes/*.ts), served through
+// package:http's MockClient. Access tokens are JWT-shaped but unsigned.
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:famchat/crypto/device_cert.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+
+class FakeUser {
+  FakeUser(this.id, this.name, this.isAdmin, this.identityPub);
+  final String id, identityPub;
+  String name;
+  bool isAdmin;
+}
+
+class FakeDevice {
+  FakeDevice(this.id, this.userId, this.name, this.platform, this.cert, this.refresh, this.createdAt);
+  final String id, userId, name, platform;
+  final Map<String, String> cert;
+  String? refresh, prevRefresh;
+  DateTime? refreshedAt, revokedAt;
+  final DateTime createdAt;
+  late DateTime lastSeen = createdAt;
+}
+
+class FakeInvite {
+  FakeInvite(this.name, this.admin, this.expiresAt);
+  final String name;
+  final bool admin;
+  final DateTime expiresAt;
+  String? usedBy;
+  DateTime? usedAt;
+}
+
+class FakeServer {
+  FakeServer({DateTime Function()? now}) : now = now ?? DateTime.now;
+
+  /// The server's clock; tests may replace it.
+  DateTime Function() now;
+
+  final users = <String, FakeUser>{};
+  final devices = <String, FakeDevice>{};
+  final invites = <String, FakeInvite>{};
+
+  /// Every request as "METHOD /path -> status" (status 0 when the response was dropped).
+  final log = <String>[];
+  int refreshCalls = 0;
+
+  /// The next refresh rotates the token server-side, then the response is lost.
+  bool dropNextRefreshResponse = false;
+
+  /// The next redeem succeeds server-side, then the response is lost.
+  bool dropNextRedeemResponse = false;
+
+  /// The next N refresh calls answer 500.
+  int failNext5xx = 0;
+
+  int _epoch = 0;
+  int _ids = 0;
+  final _rand = Random(42);
+
+  MockClient get client => MockClient(_handle);
+
+  int get requestCount => log.length;
+
+  String addInvite({String name = 'Mom', bool admin = false}) {
+    final token = _token();
+    invites[token] = FakeInvite(name, admin, now().add(const Duration(days: 7)));
+    return token;
+  }
+
+  /// Adds a device for [userId] directly (like another phone the user already has).
+  String addDevice(String userId, {String name = 'Laptop', String platform = 'linux'}) {
+    final id = _id('D');
+    devices[id] = FakeDevice(id, userId, name, platform, const {}, _token(), now());
+    return id;
+  }
+
+  void revoke(String deviceId) {
+    final d = devices[deviceId]!;
+    d.revokedAt = now();
+    d.refresh = d.prevRefresh = null;
+  }
+
+  /// Makes every access token issued so far invalid (like a server-side expiry).
+  void expireAccessTokens() => _epoch++;
+
+  List<FakeDevice> liveDevices(String userId) =>
+      devices.values.where((d) => d.userId == userId && d.revokedAt == null).toList();
+
+  String _id(String p) => '01J$p${(_ids++).toString().padLeft(22, '0')}';
+
+  String _token() => base64Url.encode(List.generate(32, (_) => _rand.nextInt(256))).replaceAll('=', '');
+
+  String _access(String sub, String dev, bool adm) {
+    String enc(Object o) => base64Url.encode(utf8.encode(jsonEncode(o))).replaceAll('=', '');
+    final exp = now().add(const Duration(minutes: 15)).millisecondsSinceEpoch ~/ 1000;
+    return '${enc({'alg': 'none'})}.${enc({'sub': sub, 'dev': dev, 'adm': adm, 'exp': exp, 'e': _epoch})}.x';
+  }
+
+  Map<String, Object?>? _claims(http.Request r) {
+    final h = r.headers['authorization'];
+    if (h == null || !h.startsWith('Bearer ')) return null;
+    try {
+      final p = h.substring(7).split('.')[1];
+      final j = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(p)))) as Map<String, Object?>;
+      if (j['e'] != _epoch) return null;
+      if ((j['exp'] as int) * 1000 <= now().millisecondsSinceEpoch) return null;
+      final d = devices[j['dev']];
+      if (d == null || d.revokedAt != null || d.userId != j['sub']) return null;
+      return j;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  http.Response _json(Object body, [int status = 200]) =>
+      http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
+
+  http.Response _err(String code) => _json({'error': code}, switch (code) {
+        'invalid_request' => 400,
+        'unauthorized' => 401,
+        'forbidden' => 403,
+        'not_found' => 404,
+        'invite_invalid' => 410,
+        _ => 500,
+      });
+
+  Future<http.Response> _handle(http.Request r) async {
+    final key = '${r.method} ${r.url.path}';
+    try {
+      final res = await _route(r);
+      log.add('$key -> ${res.statusCode}');
+      return res;
+    } on http.ClientException {
+      log.add('$key -> 0');
+      rethrow;
+    }
+  }
+
+  Map<String, Object?> _body(http.Request r) => jsonDecode(r.body) as Map<String, Object?>;
+
+  Future<http.Response> _route(http.Request r) async {
+    final path = r.url.path;
+    if (r.method == 'POST' && path == '/api/auth/invite/redeem') return await _redeem(_body(r));
+    if (r.method == 'POST' && path == '/api/auth/refresh') return _refresh(_body(r));
+    final c = _claims(r);
+    if (c == null) return _err('unauthorized');
+    final userId = c['sub'] as String, deviceId = c['dev'] as String;
+    if (r.method == 'GET' && path == '/api/me') {
+      final u = users[userId]!;
+      return _json({'userId': userId, 'deviceId': deviceId, 'name': u.name, 'isAdmin': u.isAdmin});
+    }
+    if (r.method == 'GET' && path == '/api/devices') {
+      return _json({
+        'devices': [
+          for (final d in liveDevices(userId))
+            {
+              'id': d.id,
+              'name': d.name,
+              'platform': d.platform,
+              'createdAt': d.createdAt.millisecondsSinceEpoch,
+              'lastSeen': d.lastSeen.millisecondsSinceEpoch,
+              'current': d.id == deviceId,
+            },
+        ],
+      });
+    }
+    if (r.method == 'DELETE' && path.startsWith('/api/devices/')) {
+      final d = devices[path.substring('/api/devices/'.length)];
+      if (d == null || d.userId != userId || d.revokedAt != null) return _err('not_found');
+      revoke(d.id);
+      return http.Response('', 204);
+    }
+    if (r.method == 'POST' && path == '/api/admin/invites') {
+      if (c['adm'] != true) return _err('forbidden');
+      final name = (_body(r)['name'] as String?)?.trim() ?? '';
+      if (name.isEmpty || name.length > 40) return _err('invalid_request');
+      final token = addInvite(name: name);
+      return _json({
+        'inviteToken': token,
+        'inviteUrl': 'https://famchat.dev/join#$token',
+        'expiresAt': invites[token]!.expiresAt.millisecondsSinceEpoch,
+      }, 201);
+    }
+    return _err('not_found');
+  }
+
+  Future<http.Response> _redeem(Map<String, Object?> b) async {
+    final token = b['token'] as String;
+    final deviceName = (b['deviceName'] as String).trim();
+    const platforms = ['ios', 'android', 'macos', 'windows', 'linux', 'web'];
+    if (deviceName.isEmpty || deviceName.length > 60 || !platforms.contains(b['platform'])) {
+      return _err('invalid_request');
+    }
+    final cert = {for (final k in ['identityPub', 'encPub', 'signPub', 'certSig']) k: b[k] as String};
+    try {
+      if (!await verifyDeviceCert(DeviceCert.fromJson(cert))) return _err('invalid_request');
+    } catch (_) {
+      return _err('invalid_request');
+    }
+    final inv = invites[token];
+    final t = now();
+    final refresh = _token();
+    if (inv != null && inv.usedBy == null && inv.expiresAt.isAfter(t)) {
+      final userId = _id('U'), deviceId = _id('D');
+      users[userId] = FakeUser(userId, inv.name, inv.admin, cert['identityPub']!);
+      devices[deviceId] = FakeDevice(deviceId, userId, deviceName, b['platform'] as String, cert, refresh, t);
+      inv
+        ..usedBy = userId
+        ..usedAt = t;
+      return _redeemed(userId, deviceId, refresh);
+    }
+    // Same-keys retry within 10 minutes.
+    if (inv != null && inv.usedBy != null && t.difference(inv.usedAt!) <= const Duration(minutes: 10)) {
+      for (final d in liveDevices(inv.usedBy!)) {
+        if (d.cert.toString() == cert.toString()) {
+          d.refresh = refresh;
+          return _redeemed(inv.usedBy!, d.id, refresh);
+        }
+      }
+    }
+    return _err('invite_invalid');
+  }
+
+  http.Response _redeemed(String userId, String deviceId, String refresh) {
+    final adm = users[userId]!.isAdmin;
+    if (dropNextRedeemResponse) {
+      dropNextRedeemResponse = false;
+      throw http.ClientException('connection reset');
+    }
+    return _json({
+      'userId': userId,
+      'deviceId': deviceId,
+      'isAdmin': adm,
+      'accessToken': _access(userId, deviceId, adm),
+      'refreshToken': refresh,
+    }, 201);
+  }
+
+  http.Response _refresh(Map<String, Object?> b) {
+    refreshCalls++;
+    if (failNext5xx > 0) {
+      failNext5xx--;
+      return _err('internal');
+    }
+    final old = b['refreshToken'] as String;
+    final next = _token();
+    final t = now();
+    FakeDevice? d;
+    for (final x in devices.values) {
+      if (x.revokedAt == null && x.refresh == old) {
+        d = x
+          ..prevRefresh = old
+          ..refresh = next
+          ..refreshedAt = t;
+        break;
+      }
+    }
+    if (d == null) {
+      for (final x in devices.values) {
+        if (x.revokedAt == null &&
+            x.prevRefresh == old &&
+            t.difference(x.refreshedAt!) <= const Duration(seconds: 60)) {
+          d = x..refresh = next;
+          break;
+        }
+      }
+    }
+    if (d == null) {
+      for (final x in devices.values) {
+        if (x.revokedAt == null && x.prevRefresh == old) revoke(x.id);
+      }
+      return _err('unauthorized');
+    }
+    if (dropNextRefreshResponse) {
+      dropNextRefreshResponse = false;
+      throw http.ClientException('connection reset');
+    }
+    final u = users[d.userId]!;
+    return _json({'accessToken': _access(u.id, d.id, u.isAdmin), 'refreshToken': next});
+  }
+}
