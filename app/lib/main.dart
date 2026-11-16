@@ -9,6 +9,7 @@ import 'audio_init.dart';
 import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
+import 'theme/app_theme.dart';
 import 'voice/voice_io.dart';
 
 void main() {
@@ -28,6 +29,9 @@ void main() {
   ));
 }
 
+final _light = buildTheme(Brightness.light);
+final _dark = buildTheme(Brightness.dark);
+
 class FamChatApp extends ConsumerWidget {
   const FamChatApp({super.key});
 
@@ -35,8 +39,9 @@ class FamChatApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       title: 'FamChat',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo),
-      darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
+      debugShowCheckedModeBanner: false,
+      theme: _light,
+      darkTheme: _dark,
       routerConfig: ref.watch(routerProvider),
     );
   }

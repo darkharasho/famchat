@@ -33,6 +33,7 @@ dependencies:
   flutter_web_plugins:
     sdk: flutter
   material_ui: ^1.1.0
+  cupertino_ui: ^1.1.6
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -85,6 +86,28 @@ dev_dependencies:
 flutter:
   assets:
     - assets/spike/
+
+  # Bundled, never fetched at runtime. Both are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
+  fonts:
+    - family: FamiljenGrotesk
+      fonts:
+        - asset: assets/fonts/FamiljenGrotesk-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/FamiljenGrotesk-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/FamiljenGrotesk-Bold.ttf
+          weight: 700
+    - family: AtkinsonHyperlegibleNext
+      fonts:
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf
+          weight: 700
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
