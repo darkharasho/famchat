@@ -125,6 +125,9 @@ class FakeChatBackend {
     return TestDevice(this, me, FakeChatApi(this, userId, d.id), hub);
   }
 
+  /// The user's identity key pair (a device that holds it, for pairing tests).
+  SimpleKeyPair identityOf(String userId) => _users[userId]!.identity;
+
   /// Like an admin reset: a new identity key; the user's old devices are revoked.
   Future<TestDevice> resetUser(String userId) async {
     final u = _users[userId]!;

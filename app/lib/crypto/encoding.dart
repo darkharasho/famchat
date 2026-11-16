@@ -2,6 +2,26 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+// Domain strings. Every byte string FamChat signs, MACs or derives a key from starts with its own
+// domain string, so a signature or key made for one purpose can never be read as another.
+// RULE: no domain string may be a prefix of another (a prefix would let one kind's bytes parse as
+// the other's). Add every new one to [famchatDomains]; a test checks the rule.
+const domainDeviceCert = 'famchat-device-cert-v1';
+const domainWrap = 'famchat-wrap-v1';
+const domainEnvelope = 'famchat-envelope-v1';
+const domainSealedBox = 'famchat-sealed-box-v1';
+const domainPairKeys = 'famchat-pair-keys-v1';
+const domainPairBundle = 'famchat-pair-bundle-v1';
+
+const famchatDomains = [
+  domainDeviceCert,
+  domainWrap,
+  domainEnvelope,
+  domainSealedBox,
+  domainPairKeys,
+  domainPairBundle,
+];
+
 /// Thrown for every failure to verify, open, decrypt or parse crypto data.
 class CryptoFailure implements Exception {
   const CryptoFailure(this.reason);
