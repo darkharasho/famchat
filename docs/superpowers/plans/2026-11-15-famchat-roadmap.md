@@ -17,7 +17,7 @@ interfaces instead of guesses.
 | 6 | Device pairing & key rotation | QR pairing, history handover, revocation creates new epochs, missing-wrap repair | 5 |
 | 7 | Photos & media quota | Encrypted upload and download, thumbnails, 8 GB cap with eviction | 5 |
 | 8 | Voice messages | Record, waveform, playback; AAC-LC `.m4a`, record button hidden where the recorder can't do AAC (plan 2) | 7 |
-| 9 | Push notifications | `flutterfire configure` (moved here from plan 2), Queue + FCM HTTP v1 consumer, client token registration, deep links | 5, 0 |
+| 9 | Push notifications (`2026-11-16-push-notifications.md`) | Queue + FCM HTTP v1 consumer, client token registration, deep links, desktop notifications; Firebase config via `scripts/setup-firebase.sh` (replaces `flutterfire configure`) | 5, 0 |
 | 10 | Admin & recovery | Admin-signed reset, reset banners, second admin, admin recovery code, usage screen | 6 |
 | 11 | UI design pass | Visual identity, responsive two-pane layout polish, motion, dark mode | 5–8 |
 | 12 | Release pipelines | Web deploy, TestFlight, Play internal, notarized DMG, signed Windows installer, AppImage | 2 |

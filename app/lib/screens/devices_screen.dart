@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../api/models.dart';
+import '../push/providers.dart';
+import '../push/push_messaging.dart';
 import '../session/session_controller.dart';
 import 'account_providers.dart';
 import 'sign_out.dart';
@@ -55,6 +57,18 @@ class DevicesScreen extends ConsumerWidget {
     ref.invalidate(devicesProvider);
   }
 
+  Future<void> _testPush(BuildContext context, WidgetRef ref) async {
+    String text;
+    try {
+      // Make sure this device's token is registered first (permission may have been granted since).
+      await ref.read(pushControllerProvider)?.enable();
+      text = pushTestSummary(await ref.read(apiClientProvider).authedJson('POST', '/devices/me/push/test'));
+    } catch (e) {
+      text = apiErrorMessage(e);
+    }
+    if (context.mounted) _snack(context, text);
+  }
+
   static void _snack(BuildContext context, String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
@@ -99,6 +113,14 @@ class DevicesScreen extends ConsumerWidget {
                       : TextButton(onPressed: () => _revoke(context, ref, d), child: const Text('Revoke')),
                 ),
               const SizedBox(height: 24),
+              if (ref.watch(pushMessagingProvider) != null)
+                Center(
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Send a test notification'),
+                    onPressed: () => _testPush(context, ref),
+                  ),
+                ),
               Center(
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.logout),
@@ -112,4 +134,16 @@ class DevicesScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// One line about the answer of `POST /devices/me/push/test`.
+String pushTestSummary(Map<String, Object?>? body) {
+  if (body == null || body['configured'] != true) return "Push isn't set up on the server yet.";
+  if (body['error'] != null) return "The server couldn't reach Firebase.";
+  final devices = (body['devices'] as List? ?? const []).cast<Map<String, Object?>>();
+  if (devices.isEmpty) return 'None of your devices has notifications turned on.';
+  final ok = devices.where((d) => d['result'] == 'ok').length;
+  final failed = [for (final d in devices) if (d['result'] != 'ok') d['name'] ?? 'a device'];
+  final sent = 'Sent to $ok of ${devices.length} device${devices.length == 1 ? '' : 's'}.';
+  return failed.isEmpty ? sent : '$sent Not delivered: ${failed.join(', ')}.';
 }

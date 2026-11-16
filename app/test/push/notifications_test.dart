@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/push/firebase_options.dart';
+import 'package:famchat/screens/devices_screen.dart' show pushTestSummary;
 import 'package:famchat/push/local_notifier.dart';
 import 'package:famchat/push/notifications.dart';
 import 'package:famchat/push/push_messaging.dart';
@@ -108,14 +109,15 @@ Map<String, Object?> msg(String chatId, String sender) => {
 
 void main() {
   group('push stays off', () {
-    test('the committed firebase_options is a placeholder: no options', () {
-      expect(() => DefaultFirebaseOptions.currentPlatform, throwsUnsupportedError);
-      expect(firebaseOptions(), isNull);
+    test('options that throw UnsupportedError (the placeholder, or a platform without push) mean none', () {
+      expect(firebaseOptions(() => throw UnsupportedError('not configured')), isNull);
+      // The committed placeholder, or (after scripts/setup-firebase.sh) real options on Android.
+      expect(() => firebaseOptions(() => DefaultFirebaseOptions.currentPlatform), returnsNormally);
     });
 
     test('initPush without options never starts Firebase', () async {
       var started = false;
-      final p = await initPush(pushPlatform: true, initialize: (_) async => started = true);
+      final p = await initPush(pushPlatform: true, options: () => null, initialize: (_) async => started = true);
       expect(p, isNull);
       expect(started, isFalse);
     });
@@ -249,5 +251,22 @@ void main() {
       await n.stop();
       await events.close();
     });
+  });
+
+  test('pushTestSummary', () {
+    expect(pushTestSummary(null), "Push isn't set up on the server yet.");
+    expect(pushTestSummary({'configured': false, 'devices': []}), "Push isn't set up on the server yet.");
+    expect(pushTestSummary({'configured': true, 'devices': []}), 'None of your devices has notifications turned on.');
+    expect(
+      pushTestSummary({
+        'configured': true,
+        'devices': [
+          {'id': 'a', 'name': 'Pixel', 'result': 'ok'},
+          {'id': 'b', 'name': 'iPad', 'result': 'stale'},
+        ],
+      }),
+      'Sent to 1 of 2 devices. Not delivered: iPad.',
+    );
+    expect(pushTestSummary({'configured': true, 'error': 'oauth_failed', 'devices': []}), "The server couldn't reach Firebase.");
   });
 }

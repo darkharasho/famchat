@@ -149,6 +149,17 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" -allowProvisioningUpdates \
             -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          # Push needs aps-environment in the signed app. The archive is unsigned, so check what the
+          # export signed (only an exported IPA can be inspected; an upload leaves none here).
+          for ipa in "$RUNNER_TEMP"/export/*.ipa; do
+            [ -f "$ipa" ] || continue
+            rm -rf "$RUNNER_TEMP/ipa-check" && unzip -q "$ipa" -d "$RUNNER_TEMP/ipa-check"
+            if codesign -d --entitlements :- "$RUNNER_TEMP"/ipa-check/Payload/*.app 2>/dev/null | grep -q aps-environment; then
+              echo "aps-environment entitlement present"
+            else
+              echo "::warning::The signed IPA has no aps-environment entitlement: iOS push notifications won't arrive. Check that the App ID has Push Notifications and the profile includes it."
+            fi
+          done
           if [ "$DESTINATION" = upload ]; then
             echo "Uploaded FamChat $NAME ($NUMBER) to App Store Connect; it shows in TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"
           else
