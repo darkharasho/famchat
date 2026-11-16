@@ -45,5 +45,11 @@ void main() {
     expect(sessionRedirect(user, '/spikes'), isNull);
     expect(sessionRedirect(user, '/invite'), '/');
     expect(sessionRedirect(admin, '/invite'), isNull);
+    expect(sessionRedirect(out, '/recover'), isNull);
+    expect(sessionRedirect(user, '/recover'), '/');
+    expect(sessionRedirect(user, '/family'), '/');
+    expect(sessionRedirect(user, '/family/recovery-code'), '/');
+    expect(sessionRedirect(admin, '/family'), isNull);
+    expect(sessionRedirect(admin, '/family/recovery-code'), isNull);
   });
 }

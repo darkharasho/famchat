@@ -64,7 +64,8 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
 
   static String _message(Object e) => switch (e) {
         ApiException(code: 'invite_invalid') => 'This invite has expired or was already used. Ask for a new one.',
-        ApiException(code: 'invalid_request') => 'FamChat refused this request. Check the link and the device name.',
+        ApiException(code: 'invalid_request') =>
+          'FamChat refused this request. Check that you used the whole link, and the device name.',
         ApiException(:final code) => 'Something went wrong ($code). Please try again.',
         NetworkException() => "Couldn't reach FamChat. Check your connection and try again.",
         _ => "Couldn't save your keys on this device. Please try again.",
@@ -163,7 +164,13 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    key: const Key('recover-link'),
+                    onPressed: _busy ? null : () => context.go('/recover'),
+                    child: const Text('Recover admin account'),
+                  ),
+                  const SizedBox(height: 16),
                   TextButton(
                     onPressed: () => context.go('/spikes'),
                     child: const Text('Platform spikes'),

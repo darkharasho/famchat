@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
+import 'screens/family_screen.dart';
+import 'screens/recover_screen.dart';
+import 'screens/recovery_code_screen.dart';
 import 'screens/chats/chats_shell.dart';
 import 'screens/chats/group_info_screen.dart';
 import 'screens/chats/new_chat_screen.dart';
@@ -21,10 +24,10 @@ String? sessionRedirect(SessionState s, String location) {
     case SessionLoading() || SessionUnavailable():
       return location == '/loading' ? null : '/loading';
     case SignedOut():
-      return location == '/join' || location == '/pair' || location == '/spikes' ? null : '/join';
+      return location == '/join' || location == '/pair' || location == '/recover' || location == '/spikes' ? null : '/join';
     case SignedIn(:final session):
-      if (location == '/join' || location == '/pair' || location == '/loading') return '/';
-      if ((location == '/invite' || location == '/storage') && !session.isAdmin) return '/';
+      if (location == '/join' || location == '/pair' || location == '/recover' || location == '/loading') return '/';
+      if ((location == '/invite' || location == '/storage' || location.startsWith('/family')) && !session.isAdmin) return '/';
       return null;
   }
 }
@@ -63,6 +66,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),
       GoRoute(path: '/storage', builder: (context, state) => const StorageScreen()),
+      GoRoute(path: '/family', builder: (context, state) => const FamilyScreen()),
+      GoRoute(path: '/family/recovery-code', builder: (context, state) => const RecoveryCodeScreen()),
+      GoRoute(path: '/recover', builder: (context, state) => const RecoverScreen()),
     ],
   );
   ref.onDispose(() {

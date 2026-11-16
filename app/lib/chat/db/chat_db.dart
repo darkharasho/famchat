@@ -423,12 +423,16 @@ class ChatDb extends _$ChatDb {
 
   Future<List<ResetRow>> allResets() => select(localResets).get();
 
-  /// Resets of [userIds] whose banner wasn't dismissed in [chatId], oldest first.
-  Stream<List<ResetRow>> watchResetBanners(String chatId, Iterable<String> userIds) => (select(localResets)
-        ..where((r) => r.userId.isIn(userIds))
-        ..orderBy([(r) => OrderingTerm(expression: r.createdAt)]))
-      .watch()
-      .map((rows) => [for (final r in rows) if (!_ids(r.dismissedChats).contains(chatId)) r]);
+  /// Resets of [chatId]'s members other than [myUserId] whose banner wasn't dismissed there, oldest first.
+  Stream<List<ResetRow>> watchResetBanners(String chatId, String myUserId) => customSelect(
+        'SELECT * FROM local_resets WHERE user_id != ? AND user_id IN '
+        '(SELECT user_id FROM local_members WHERE chat_id = ?) ORDER BY created_at',
+        variables: [Variable.withString(myUserId), Variable.withString(chatId)],
+        readsFrom: {localResets, localMembers},
+      ).watch().map((rows) => [
+            for (final q in rows)
+              if (!_ids(q.read<String>('dismissed_chats')).contains(chatId)) localResets.map(q.data),
+          ]);
 
   Future<void> dismissResetBanner(String resetId, String chatId) => transaction(() async {
         final row = await (select(localResets)..where((r) => r.id.equals(resetId))).getSingleOrNull();

@@ -142,6 +142,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final subtitle = group
         ? '${members.length} members'
         : (other != null && online.contains(other) ? 'Online' : null);
+    final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
     final changed = [
       for (final m in members)
         if (m.userId != me && users[m.userId] != null && users[m.userId]!.identityPub != users[m.userId]!.trustedIdentityPub)
@@ -186,6 +187,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         ],
       ),
       body: Column(children: [
+        for (final r in resets)
+          MaterialBanner(
+            key: Key('reset-banner-${r.id}'),
+            leading: Icon(Icons.restart_alt_rounded, color: theme.colorScheme.primary),
+            content: Text(resetBannerText(r, users)),
+            actions: [
+              TextButton(
+                key: Key('dismiss-reset-${r.id}'),
+                onPressed: () => ref.read(chatDbProvider).dismissResetBanner(r.id, chatId),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         for (final u in changed)
           MaterialBanner(
             leading: Icon(Icons.gpp_maybe_outlined, color: theme.colorScheme.error),
@@ -266,6 +280,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       ]),
     );
   }
+}
+
+/// "Mom's account was reset by Michael." (spec "Admin recovery"), or the recovery-code variant.
+String resetBannerText(ResetRow r, Map<String, UserRow> users) {
+  final who = users[r.userId]?.name ?? 'Someone';
+  if (r.signerKind == 'recovery') {
+    return '$who recovered their admin account with the recovery code. Their old devices were signed out.';
+  }
+  return "$who's account was reset by ${users[r.signerUserId]?.name ?? 'an admin'}. Their old devices were signed out.";
 }
 
 final _none = MessageRow(
