@@ -24,7 +24,7 @@ class Harness {
     final server = FakeServer();
     final h = Harness(server);
     server.now = () => h.clock;
-    h.api = ApiClient(http: server.client, base: Uri.parse('https://famchat.dev'));
+    h.api = ApiClient(client: server.client, base: Uri.parse('https://famchat.dev'));
     h.tokens = TokenManager(
       refreshCall: h.api.refresh,
       readRefreshToken: () async => h.stored,

@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 ApiClient clientFor(Future<http.Response> Function(http.Request) handler) {
-  final api = ApiClient(http: MockClient(handler), base: Uri.parse('https://famchat.dev'));
+  final api = ApiClient(client: MockClient(handler), base: Uri.parse('https://famchat.dev'));
   api.tokens = TokenManager(
     refreshCall: api.refresh,
     readRefreshToken: () async => 'r',

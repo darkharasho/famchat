@@ -9,12 +9,12 @@ import 'models.dart';
 import 'token_manager.dart';
 
 class ApiClient {
-  ApiClient({required http.Client http, required Uri base, this.tokens})
-      : _http = http,
-        _base = base;
+  ApiClient({required this.client, required this.base, this.tokens});
 
-  final http.Client _http;
-  final Uri _base;
+  final http.Client client;
+
+  /// Server origin, e.g. https://famchat.dev; paths go under /api.
+  final Uri base;
 
   /// Needed for authed calls; set once the session exists.
   TokenManager? tokens;
@@ -108,7 +108,7 @@ class ApiClient {
   /// The decoded JSON object, or null for an empty body. Errors throw [ApiException] or
   /// [NetworkException].
   Future<Map<String, Object?>?> _send(String method, String path, {Object? body, String? bearer}) async {
-    final req = http.Request(method, _base.replace(path: '/api$path'));
+    final req = http.Request(method, base.replace(path: '/api$path'));
     if (bearer != null) req.headers['authorization'] = 'Bearer $bearer';
     if (body != null) {
       req.headers['content-type'] = 'application/json';
@@ -116,7 +116,7 @@ class ApiClient {
     }
     final http.Response res;
     try {
-      res = await http.Response.fromStream(await _http.send(req).timeout(timeout)).timeout(timeout);
+      res = await http.Response.fromStream(await client.send(req).timeout(timeout)).timeout(timeout);
     } on http.ClientException catch (e) {
       throw NetworkException(e);
     } on TimeoutException catch (e) {
