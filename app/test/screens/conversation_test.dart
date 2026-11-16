@@ -147,6 +147,25 @@ void main() {
     expect(find.textContaining('account was reset'), findsNothing);
   });
 
+  chatTestWidgets('a new message eases in once; earlier ones stay put', (tester) async {
+    await open(tester, messages: [row('m1', 1, bob.userId, 'first')]);
+    double opacityOf(String text) => tester
+        .widget<FadeTransition>(find.ancestor(of: find.text(text), matching: find.byType(FadeTransition)).first)
+        .opacity
+        .value;
+    expect(opacityOf('first'), 1, reason: 'history on screen when the chat opens does not animate');
+    await inApp(tester, () => alice.db.insertMessageIfAbsent(row('m2', 2, bob.userId, 'second')));
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(opacityOf('second'), lessThan(1));
+    await settle(tester);
+    expect(opacityOf('second'), 1);
+    await inApp(tester, () => alice.db.insertMessageIfAbsent(row('m3', 3, bob.userId, 'third')));
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(opacityOf('third'), lessThan(1));
+    expect(opacityOf('second'), 1, reason: 'an earlier arrival does not replay its entrance');
+    await settle(tester);
+  });
+
   chatTestWidgets('a failed message can be retried', (tester) async {
     await open(tester, messages: [row('m9', null, alice.userId, 'oops', state: 'failed').copyWith(senderDeviceId: alice.deviceId)]);
     await tester.tap(find.text('Not sent. Tap to retry'));

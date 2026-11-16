@@ -2,7 +2,7 @@
 """Draws FamChat's mark (a gable-roofed speech bubble with a lit window) as SVGs and renders PNGs.
 
 Run from app/:  python3 tool/brand/make_brand.py
-Needs rsvg-convert (librsvg). Then regenerate the platform files:
+Needs rsvg-convert (librsvg) and ImageMagick (magick). Then regenerate the platform files:
   dart run flutter_launcher_icons
   dart run flutter_native_splash:create
 The in-app BrandMark (lib/widgets/brand_mark.dart) paints the same geometry; keep them in step.
@@ -59,6 +59,13 @@ def main() -> None:
         src.write_text(content)
         subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024", "-o", str(OUT / f"{name}.png"), str(src)], check=True)
         print("wrote", src, "and .png")
+    # Windows wants every size in the .ico (flutter_launcher_icons writes only one).
+    subprocess.run(
+        ["magick", str(OUT / "famchat-icon.png"), "-define", "icon:auto-resize=256,64,48,32,24,16",
+         "windows/runner/resources/app_icon.ico"],
+        check=True,
+    )
+    print("wrote windows/runner/resources/app_icon.ico")
 
 
 if __name__ == "__main__":

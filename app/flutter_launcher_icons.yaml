@@ -5,6 +5,7 @@ flutter_launcher_icons:
   android: true
   adaptive_icon_background: "#2E2550"
   adaptive_icon_foreground: "assets/brand/famchat-foreground.png"
+  adaptive_icon_foreground_inset: 0
   min_sdk_android: 21
   ios: true
   remove_alpha_ios: true
@@ -12,12 +13,9 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: "assets/brand/famchat-icon.png"
-    background_color: "#F6F4FA"
+    background_color: "#2E2550"
     theme_color: "#2E2550"
-  windows:
-    generate: true
-    image_path: "assets/brand/famchat-icon.png"
-    icon_size: 256
+  # Windows: tool/brand/make_brand.py writes a multi-size .ico instead.
   macos:
     generate: true
     image_path: "assets/brand/famchat-icon-macos.png"

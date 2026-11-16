@@ -114,7 +114,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     ringColor: theme.cardTheme.color,
                   ),
                   title: Text(m.userId == me ? '${users[m.userId]?.name ?? 'You'} (you)' : users[m.userId]?.name ?? 'Unknown'),
-                  subtitle: group && m.userId == chat.createdBy ? const Text('Created the group') : null,
+                  subtitle: m.userId == chat.createdBy ? const Text('Created the group') : null,
                   trailing: group && creator && m.userId != me
                       ? IconButton(
                           tooltip: 'Remove ${users[m.userId]?.name ?? ''}',

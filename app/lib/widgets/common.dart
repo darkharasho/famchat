@@ -186,6 +186,7 @@ class AppearIn extends StatefulWidget {
 
 class _AppearInState extends State<AppearIn> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(vsync: this, duration: Motion.medium);
+  late final CurvedAnimation _curved = CurvedAnimation(parent: _c, curve: Motion.enter);
   bool _started = false;
 
   @override
@@ -202,13 +203,14 @@ class _AppearInState extends State<AppearIn> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    _curved.dispose();
     _c.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final curved = CurvedAnimation(parent: _c, curve: Motion.enter);
+    final curved = _curved;
     return FadeTransition(
       opacity: curved,
       child: SlideTransition(

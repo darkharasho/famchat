@@ -36,12 +36,12 @@ class ChatsShell extends ConsumerWidget {
     ref.watch(chatSyncProvider); // starts the chat engine
     ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
     final id = chatId;
+    // Cmd on Apple platforms (where Ctrl+K and Ctrl+N edit text), Ctrl elsewhere.
+    final apple = {TargetPlatform.macOS, TargetPlatform.iOS}.contains(defaultTargetPlatform);
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => showQuickSwitcher(context),
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => showQuickSwitcher(context),
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => context.go('/new'),
-        const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => context.go('/new'),
+        SingleActivator(LogicalKeyboardKey.keyK, control: !apple, meta: apple): () => showQuickSwitcher(context),
+        SingleActivator(LogicalKeyboardKey.keyN, control: !apple, meta: apple): () => context.go('/new'),
         if (id != null) const SingleActivator(LogicalKeyboardKey.escape): () => context.go('/'),
       },
       child: Focus(

@@ -23,7 +23,8 @@ int personHueIndex(String key) {
   var h = 0x811c9dc5;
   for (final unit in key.codeUnits) {
     h ^= unit;
-    h = (h * 0x01000193) & 0xFFFFFFFF;
+    // h * 0x01000193 mod 2^32, split so every intermediate stays exact on the web.
+    h = (h * 0x193 + ((h << 24) & 0xFFFFFFFF)) & 0xFFFFFFFF;
   }
   return h % personHues.length;
 }

@@ -56,8 +56,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _recording.addListener(() {
       if (_recording.status != _recStatus && mounted) setState(() => _recStatus = _recording.status);
     });
-    // Desktop and web: type straight away. Phones wait for a tap (focus would raise the keyboard).
-    if (_enterSends) {
+    // Desktop (and web on a desktop OS): type straight away. Phones and tablets wait for a tap, since
+    // focus would raise the on-screen keyboard.
+    if ({TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focus.requestFocus();
       });
@@ -219,6 +220,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         child: CallbackShortcuts(
           bindings: {
             if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
+            // With a draft, Esc only leaves the field; a second Esc (the shell's) closes the chat.
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                _text.text.isEmpty ? context.go('/') : _focus.unfocus(),
           },
           child: TextField(
             key: const Key('composer'),
@@ -272,6 +276,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Ids on screen when the conversation opened: those don't animate in, later ones do.
   Set<String>? _initialIds;
+
+  /// Ids that have already played their entrance (rows are rebuilt as the list shifts or scrolls).
+  final _animated = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -336,7 +343,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
           MessageEntry(message: final m, :final firstInGroup, :final lastInGroup) => AppearIn(
               key: ValueKey(m.id),
-              animate: !(_initialIds?.contains(m.id) ?? true),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
               child: MessageBubble(
                 message: m,
                 mine: m.senderUserId == me,
@@ -435,6 +442,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, Space.sm),
                       itemCount: entries.length,
                       itemBuilder: (context, i) => entry(entries[i]),
+                      // New messages go in at index 0 of this bottom-up list; matching keys to their new
+                      // index keeps every other row (and its state) instead of rebuilding them all.
+                      findChildIndexCallback: (key) {
+                        final id = (key as ValueKey<Object?>).value;
+                        final i = entries.indexWhere((e) => switch (e) {
+                              MessageEntry(:final message) => message.id == id,
+                              DayEntry(:final day) => 'day-${day.millisecondsSinceEpoch}' == id,
+                            });
+                        return i < 0 ? null : i;
+                      },
                     ),
             ),
             if (typingNames.isNotEmpty)

@@ -87,6 +87,7 @@ class _ChatTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(Radii.md),
           onTap: () => context.go('/chats/${item.chat.id}'),
           child: Semantics(
+            button: true,
             selected: selected,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 10),
