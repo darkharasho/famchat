@@ -15,6 +15,7 @@ import 'package:famchat/crypto/device_cert.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/crypto/wrap.dart';
+import 'package:famchat/media/media_api.dart';
 
 class _User {
   _User(this.id, this.name, this.identity, this.identityPub);
@@ -84,6 +85,9 @@ class TestDevice {
 
   String get userId => me.userId;
   String get deviceId => me.deviceId;
+
+  FakeMediaApi? _media;
+  FakeMediaApi get media => _media ??= FakeMediaApi(backend, userId, deviceId);
 
   Future<void> dispose() async {
     await hub.stop();
@@ -167,6 +171,29 @@ class FakeChatBackend {
       }
     }
     return m;
+  }
+
+  // --- media (server/src/routes/media.ts) ---
+
+  final _media = <String, _Blob>{};
+
+  /// Stored media keys.
+  Iterable<String> get mediaKeys => _media.keys;
+  Uint8List? mediaBlob(String key) => _media[key]?.bytes;
+
+  /// Replaces a stored blob (a malicious or broken server).
+  void tamperMedia(String key, Uint8List bytes) => _media[key]!.bytes = bytes;
+
+  /// Expires media like quota eviction: members of each blob's chat get `media_expired`.
+  void expireMedia(List<String> keys) {
+    final byChat = <String, List<String>>{};
+    for (final k in keys) {
+      final m = _media[k]!..expired = true;
+      (byChat[m.chatId] ??= []).add(k);
+    }
+    for (final e in byChat.entries) {
+      _notify(_chats[e.key]!.members.keys, {'type': 'media_expired', 'chatId': e.key, 'keys': e.value});
+    }
   }
 
   ChatDto chatDto(String id) => _chats[id]!.dto();
@@ -512,6 +539,82 @@ class FakeChatApi implements ChatApi {
 
   @override
   Future<String> wsTicket() => _run('POST /ws/ticket', () => 'ticket-$deviceId');
+}
+
+class _Blob {
+  _Blob(this.bytes, this.chatId, this.deviceId);
+  Uint8List bytes;
+  final String chatId, deviceId;
+  bool expired = false;
+}
+
+/// [MediaApi] for one device, with the server's rules (caps, membership, idempotent re-upload).
+class FakeMediaApi implements MediaApi {
+  FakeMediaApi(this.b, this.userId, this.deviceId);
+  final FakeChatBackend b;
+  final String userId, deviceId;
+
+  /// The next [failUploads] uploads throw [failWith] before storing anything.
+  int failUploads = 0;
+  Object failWith = const NetworkException('offline');
+
+  /// While set, uploads wait for it (after reporting half their progress).
+  Completer<void>? hold;
+
+  /// Keys uploaded / downloaded, in order.
+  final uploads = <String>[];
+  final downloads = <String>[];
+
+  @override
+  Future<void> upload({
+    required String key,
+    required String chatId,
+    required String kind,
+    String? messageId,
+    required Uint8List bytes,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    await Future<void>.delayed(Duration.zero);
+    if (failUploads > 0) {
+      failUploads--;
+      throw failWith;
+    }
+    final limit = mediaKindLimits[kind];
+    if (limit == null || bytes.isEmpty) b._err('invalid_request');
+    b._memberChat(chatId, userId);
+    if (bytes.length > limit) throw const ApiException(413, 'too_large');
+    onProgress?.call(bytes.length ~/ 2, bytes.length);
+    final h = hold;
+    if (h != null) await h.future;
+    final prior = b._media[key];
+    if (prior != null) {
+      if (prior.deviceId == deviceId && prior.chatId == chatId && prior.bytes.length == bytes.length && !prior.expired) return;
+      throw const ApiException(409, 'conflict');
+    }
+    b._media[key] = _Blob(Uint8List.fromList(bytes), chatId, deviceId);
+    uploads.add(key);
+    onProgress?.call(bytes.length, bytes.length);
+  }
+
+  @override
+  Future<Uint8List> download(String key) async {
+    await Future<void>.delayed(Duration.zero);
+    final m = b._media[key];
+    if (m == null) b._err('not_found');
+    b._memberChat(m.chatId, userId);
+    if (m.expired) throw const ApiException(410, 'media_expired');
+    downloads.add(key);
+    return Uint8List.fromList(m.bytes);
+  }
+
+  @override
+  Future<MediaUsage> usage() async => MediaUsage(
+        usedBytes: b._media.values.where((m) => !m.expired).fold(0, (a, m) => a + m.bytes.length),
+        capBytes: 8 * 1024 * 1024 * 1024,
+        evictToBytes: 7680 * 1024 * 1024,
+        files: b._media.values.where((m) => !m.expired).length,
+        expiredFiles: b._media.values.where((m) => m.expired).length,
+      );
 }
 
 /// A device's socket to the fake hub. [start] connects; [drop] simulates a lost connection

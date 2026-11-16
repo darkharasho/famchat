@@ -6,6 +6,7 @@ import { auth } from "./routes/auth";
 import { chats } from "./routes/chats";
 import { devices } from "./routes/devices";
 import { keys } from "./routes/keys";
+import { media } from "./routes/media";
 import { me } from "./routes/me";
 import { users } from "./routes/users";
 import { ws } from "./routes/ws";
@@ -20,6 +21,7 @@ app.route("/me", me);
 app.route("/users", users);
 app.route("/chats", chats);
 app.route("/keys", keys);
+app.route("/media", media);
 app.route("/ws", ws);
 
 app.notFound(() => errorResponse("not_found"));

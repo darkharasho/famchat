@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/providers.dart';
+import '../../media/providers.dart';
 import '../../session/session_controller.dart';
 import '../account_providers.dart';
 import '../sign_out.dart';
@@ -23,6 +24,7 @@ class ChatsShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(meProvider); // keeps the stored name and admin flag current
     ref.watch(chatSyncProvider); // starts the chat engine
+    ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
     return LayoutBuilder(builder: (context, c) {
       final wide = c.maxWidth >= twoPaneWidth;
       if (!wide) {
@@ -69,11 +71,13 @@ class _ListPane extends ConsumerWidget {
           PopupMenuButton<String>(
             onSelected: (v) => switch (v) {
               'spikes' => context.go('/spikes'),
+              'storage' => context.go('/storage'),
               _ => confirmSignOut(context, ref),
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'spikes', child: Text('Platform spikes')),
-              PopupMenuItem(value: 'signout', child: Text('Sign out')),
+            itemBuilder: (context) => [
+              if (admin) const PopupMenuItem(value: 'storage', child: Text('Storage')),
+              const PopupMenuItem(value: 'spikes', child: Text('Platform spikes')),
+              const PopupMenuItem(value: 'signout', child: Text('Sign out')),
             ],
           ),
         ],

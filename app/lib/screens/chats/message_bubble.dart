@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/plaintext.dart';
 import 'chat_list.dart' show shortTime;
+import 'photo_view.dart';
 
 const reactionEmoji = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -87,17 +89,32 @@ class _MessageBubbleState extends State<MessageBubble> {
     };
   }
 
+  /// The photo in this message, or null (not a photo, or a body this version can't read).
+  PhotoBody? get _photo {
+    final m = widget.message;
+    if (m.kind != 'photo' || m.body == null) return null;
+    try {
+      final p = Plaintext.decode(utf8.encode(m.body!));
+      return p is PhotoBody ? p : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  bool get _reactable => (widget.message.kind == 'text' || widget.message.kind == 'photo') && widget.message.seq != null;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final m = widget.message;
+    final photo = _photo;
     final special = m.kind != 'text';
     final bubble = GestureDetector(
-      onLongPress: m.kind == 'text' && m.seq != null ? _pick : null,
+      onLongPress: _reactable ? _pick : null,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 480),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: photo != null ? const EdgeInsets.fromLTRB(4, 4, 4, 6) : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: widget.mine ? scheme.primaryContainer : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.only(
@@ -109,13 +126,20 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (widget.senderName != null)
-            Text(widget.senderName!, style: theme.textTheme.labelMedium?.copyWith(color: scheme.primary)),
-          Text(
-            _text,
-            style: special ? theme.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic, color: scheme.onSurfaceVariant) : null,
-          ),
+            Padding(
+              padding: photo != null ? const EdgeInsets.fromLTRB(8, 2, 8, 4) : EdgeInsets.zero,
+              child: Text(widget.senderName!, style: theme.textTheme.labelMedium?.copyWith(color: scheme.primary)),
+            ),
+          if (photo != null)
+            PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo))
+          else
+            Text(
+              _text,
+              style: special ? theme.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic, color: scheme.onSurfaceVariant) : null,
+            ),
           const SizedBox(height: 2),
           Row(mainAxisSize: MainAxisSize.min, children: [
+            if (photo != null) const SizedBox(width: 8),
             Text(shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)), style: theme.textTheme.labelSmall),
             if (m.state == 'pending') ...[
               const SizedBox(width: 4),
@@ -180,7 +204,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           tooltip: 'React',
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.add_reaction_outlined, size: 18),
-          onPressed: widget.message.kind == 'text' && widget.message.seq != null ? _pick : null,
+          onPressed: _reactable ? _pick : null,
         ),
       );
 }

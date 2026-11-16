@@ -150,6 +150,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me) {
   final who = m.senderUserId == me ? 'You: ' : '';
   return switch (m.kind) {
     'text' => '$who${(jsonDecode(m.body!) as Map)['text']}',
+    'photo' => '$who📷 Photo',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',

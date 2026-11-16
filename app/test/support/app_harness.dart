@@ -4,6 +4,8 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/hub_link.dart';
 import 'package:famchat/chat/providers.dart';
 import 'package:famchat/main.dart';
+import 'package:famchat/media/media_db.dart';
+import 'package:famchat/media/providers.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +51,13 @@ List<Override> quietChatOverrides() {
       ref.onDispose(db.close);
       return db;
     }),
+    mediaDbProvider.overrideWith((ref) {
+      final db = MediaDb(NativeDatabase.memory());
+      ref.onDispose(db.close);
+      return db;
+    }),
+    expiredMediaProvider.overrideWith((ref) => Stream.value(const <String>{})),
+    mediaOffloadProvider.overrideWithValue(null),
     hubLinkProvider.overrideWith((ref) => _IdleHub()),
     // No drift stream queries: their close timers would trip the pending-timer check.
     chatListProvider.overrideWith((ref) => Stream.value(const <ChatListItem>[])),

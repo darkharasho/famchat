@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/crypto/media.dart';
 import 'package:famchat/crypto/wrap.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -52,5 +53,14 @@ void main() {
     expect(jsonEncode(e.toJson()), vectorsV1['envelope.json']);
     final stored = Envelope.fromJson(jsonDecode(vectorsV1['envelope.json']!) as Map<String, Object?>);
     expect(utf8.decode(await i.decrypt(stored)), plaintext);
+  });
+
+  test('media vector', () async {
+    expect(hexOf(mediaAad(MediaPurpose.thumb)), vectorsV1['media.aad.thumb']);
+    final blob = await i.mediaBlob();
+    expect(b64url(blob), vectorsV1['media.blob']);
+    expect(b64url(await sha256Of(blob)), vectorsV1['media.sha256']);
+    final stored = b64urlDecode(vectorsV1['media.blob']!);
+    expect(utf8.decode(await decryptMedia(key: mediaKey, blob: stored, purpose: MediaPurpose.file)), mediaPlaintext);
   });
 }
