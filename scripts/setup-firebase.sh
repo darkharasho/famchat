@@ -4,10 +4,10 @@
 #   scripts/setup-firebase.sh                       # everything below
 #   scripts/setup-firebase.sh --key-file key.json   # use a key downloaded from the Firebase console
 #   scripts/setup-firebase.sh --no-git              # only write the files; commit them yourself
-#   FIREBASE_PROJECT=<id> scripts/setup-firebase.sh # another Firebase project id (default famchat)
+#   FIREBASE_PROJECT=<id> scripts/setup-firebase.sh # another Firebase project id (default famchat-da329)
 #
 # 1. Logs in to Firebase (browser) if needed.
-# 2. Makes sure the Firebase project "famchat" has Android, iOS and web apps (bundle id
+# 2. Makes sure the Firebase project "famchat-da329" has Android, iOS and web apps (bundle id
 #    dev.famchat.app) and writes their public config to app/lib/push/firebase_options.dart and
 #    app/web/firebase-config.js. Until those exist, push is off everywhere.
 # 3. Creates a key for the project's firebase-adminsdk service account and stores it as the Worker
@@ -48,7 +48,7 @@ if [ -n "$key_file" ]; then
 elif ! python3 "$root/scripts/firebase-setup.py" key; then
   cat >&2 <<EOF
 Could not create the key automatically. Download one instead:
-  https://console.firebase.google.com/project/${FIREBASE_PROJECT:-famchat}/settings/serviceaccounts/adminsdk
+  https://console.firebase.google.com/project/${FIREBASE_PROJECT:-famchat-da329}/settings/serviceaccounts/adminsdk
   -> "Generate new private key", then run:
   scripts/setup-firebase.sh --key-file <downloaded file>
 EOF
