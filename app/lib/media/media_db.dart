@@ -18,7 +18,8 @@ class CachedMedia extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// Encrypted blobs of this device's unsent media messages. A row is deleted once uploaded.
+/// Encrypted blobs of this device's unsent media messages. Once uploaded a row keeps `done = true`
+/// (and drops its bytes) until the message is sent: the outbox needs positive evidence of upload.
 @DataClassName('PendingUploadRow')
 class PendingUploads extends Table {
   TextColumn get key => text()();
@@ -31,6 +32,9 @@ class PendingUploads extends Table {
 
   /// Upload order within a message (thumbnail first).
   IntColumn get position => integer()();
+
+  BoolColumn get done => boolean().withDefault(const Constant(false))();
+  IntColumn get createdAt => integer()();
 
   @override
   Set<Column> get primaryKey => {key};
@@ -112,32 +116,60 @@ class MediaDb extends _$MediaDb {
     return (await q.getSingle()).read(cachedMedia.size.sum()) ?? 0;
   }
 
-  Future<void> cacheDrop(Iterable<String> keys) => (delete(cachedMedia)..where((c) => c.key.isIn(keys))).go();
+  /// Drops every cached entry whose key starts with one of [prefixes] (cache keys are
+  /// `"<mediaKey>|<sha256>|<purpose>"`).
+  Future<void> cacheDropPrefixed(Iterable<String> prefixes) => transaction(() async {
+        for (final p in prefixes) {
+          final prefix = '$p|';
+          await (delete(cachedMedia)..where((c) => c.key.substr(1, prefix.length).equals(prefix))).go();
+        }
+      });
 
   // --- uploads ---
 
-  Future<void> putUpload(PendingUploadRow r) => into(pendingUploads).insertOnConflictUpdate(r);
+  Future<void> putUpload({
+    required String key,
+    required String messageId,
+    required String chatId,
+    required String kind,
+    required Uint8List cipher,
+    required int position,
+    int? createdAt,
+  }) =>
+      into(pendingUploads).insertOnConflictUpdate(PendingUploadsCompanion.insert(
+        key: key,
+        messageId: messageId,
+        chatId: chatId,
+        kind: kind,
+        cipher: cipher,
+        position: position,
+        createdAt: createdAt ?? _now().millisecondsSinceEpoch,
+      ));
 
+  /// Every blob of [messageId] (uploaded or not), in upload order.
   Future<List<PendingUploadRow>> uploadsFor(String messageId) => (select(pendingUploads)
         ..where((u) => u.messageId.equals(messageId))
         ..orderBy([(u) => OrderingTerm(expression: u.position)]))
       .get();
 
+  /// Whether [messageId] has blobs not uploaded yet.
   Future<bool> hasUploads(String messageId) async =>
       (await (selectOnly(pendingUploads)
                 ..addColumns([pendingUploads.key])
-                ..where(pendingUploads.messageId.equals(messageId))
+                ..where(pendingUploads.messageId.equals(messageId) & pendingUploads.done.not())
                 ..limit(1))
               .getSingleOrNull()) !=
       null;
 
-  /// Message ids with blobs still to upload.
+  /// Message ids with upload rows (done or not).
   Future<Set<String>> uploadMessageIds() async {
     final q = selectOnly(pendingUploads, distinct: true)..addColumns([pendingUploads.messageId]);
     return {for (final r in await q.get()) r.read(pendingUploads.messageId)!};
   }
 
-  Future<void> deleteUpload(String key) => (delete(pendingUploads)..where((u) => u.key.equals(key))).go();
+  /// The blob reached the server: keep the row as evidence, drop the bytes.
+  Future<void> markUploaded(String key) => (update(pendingUploads)..where((u) => u.key.equals(key)))
+      .write(PendingUploadsCompanion(done: const Value(true), cipher: Value(Uint8List(0))));
 
   Future<void> deleteUploadsFor(String messageId) =>
       (delete(pendingUploads)..where((u) => u.messageId.equals(messageId))).go();

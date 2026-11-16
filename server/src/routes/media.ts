@@ -23,8 +23,8 @@ media.post("/", async (c) => {
   const key = c.req.query("key");
   const kind = c.req.query("kind") ?? "";
   const messageId = c.req.query("messageId");
-  const limit = KIND_LIMITS[kind];
-  if (!isUlid(chatId) || !isUlid(key) || !limit || (messageId !== undefined && !isUlid(messageId))) {
+  const limit = KIND_LIMITS.get(kind);
+  if (!isUlid(chatId) || !isUlid(key) || limit === undefined || (messageId !== undefined && !isUlid(messageId))) {
     throw new ApiError("invalid_request");
   }
   const lengthHeader = c.req.header("content-length");
@@ -38,18 +38,25 @@ media.post("/", async (c) => {
   if (!(await isMember(db, chatId, userId))) throw new ApiError("not_found");
   if (length > limit) throw new ApiError("too_large");
 
-  const prior = await db.prepare("SELECT uploader_device_id, chat_id, bytes, expired_at FROM media WHERE key = ?")
-    .bind(key).first<MediaRow>();
-  if (prior) {
-    // A retry after a lost response: the object was stored before the row was written.
-    if (prior.uploader_device_id === deviceId && prior.chat_id === chatId && prior.bytes === length && prior.expired_at === null) {
-      return c.json({ key, bytes: length }, 200);
-    }
-    throw new ApiError("conflict");
-  }
-
   const body = c.req.raw.body;
   if (!body) throw new ApiError("invalid_request");
+
+  // Reserve the key first, so the bytes count toward the quota before they reach R2.
+  // (RETURNING, not meta.changes: that would also count the usage trigger's update.)
+  const created = !!(await db.prepare(
+    `INSERT INTO media (key, uploader_id, uploader_device_id, chat_id, message_id, kind, bytes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO NOTHING RETURNING key`,
+  ).bind(key, userId, deviceId, chatId, messageId ?? null, kind, length, Date.now()).first());
+  if (!created) {
+    // The same upload again (a retry after a lost response, or one still in flight): store the
+    // body again and answer 200. Anything else claiming this key is a conflict.
+    const prior = await db.prepare("SELECT uploader_device_id, chat_id, bytes, expired_at FROM media WHERE key = ?")
+      .bind(key).first<MediaRow>();
+    const same = prior && prior.uploader_device_id === deviceId && prior.chat_id === chatId &&
+      prior.bytes === length && prior.expired_at === null;
+    if (!same) throw new ApiError("conflict");
+  }
+
   // FixedLengthStream makes R2 refuse a body that doesn't match Content-Length.
   const fixed = new FixedLengthStream(length);
   try {
@@ -58,16 +65,13 @@ media.post("/", async (c) => {
       c.env.MEDIA.put(key, fixed.readable, { httpMetadata: { contentType: "application/octet-stream" } }),
     ]);
   } catch {
-    await c.env.MEDIA.delete(key).catch(() => {});
+    if (created) {
+      await c.env.MEDIA.delete(key).catch(() => {});
+      await db.prepare("DELETE FROM media WHERE key = ?").bind(key).run();
+    }
     throw new ApiError("invalid_request");
   }
-
-  const inserted = await db.prepare(
-    `INSERT INTO media (key, uploader_id, uploader_device_id, chat_id, message_id, kind, bytes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO NOTHING RETURNING key`,
-  ).bind(key, userId, deviceId, chatId, messageId ?? null, kind, length, Date.now()).first();
-  // (meta.changes would also count the usage trigger's update.)
-  if (!inserted) throw new ApiError("conflict");
+  if (!created) return c.json({ key, bytes: length }, 200);
 
   if ((await mediaUsage(db)) > MEDIA_CAP) {
     try {

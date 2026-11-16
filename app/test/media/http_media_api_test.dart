@@ -74,6 +74,20 @@ void main() {
     );
   });
 
+  test('download refuses a body over 16 MiB', () async {
+    const limit = 16 * 1024 * 1024;
+    final api = HttpMediaApi(client((r, _) async {
+      if (r.url.path == '/api/media/DECLARED') {
+        return http.StreamedResponse(Stream.value([1]), 200, contentLength: limit + 1);
+      }
+      // No length declared: the body itself runs over.
+      return http.StreamedResponse(Stream.fromIterable([Uint8List(limit), Uint8List(1)]), 200);
+    }));
+    for (final key in ['DECLARED', 'STREAMED']) {
+      await expectLater(api.download(key), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'too_large')), reason: key);
+    }
+  });
+
   test('usage parses the admin endpoint', () async {
     final api = HttpMediaApi(client((r, _) async {
       expect(r.url.path, '/api/admin/usage');

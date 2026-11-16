@@ -57,6 +57,7 @@ List<Override> quietChatOverrides() {
       return db;
     }),
     expiredMediaProvider.overrideWith((ref) => Stream.value(const <String>{})),
+    mediaOffloadProvider.overrideWithValue(null),
     hubLinkProvider.overrideWith((ref) => _IdleHub()),
     // No drift stream queries: their close timers would trip the pending-timer check.
     chatListProvider.overrideWith((ref) => Stream.value(const <ChatListItem>[])),

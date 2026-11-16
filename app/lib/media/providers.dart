@@ -21,6 +21,9 @@ final mediaDbProvider = Provider<MediaDb>((ref) {
   return db;
 });
 
+/// Where encryption and hashing run (null: inline). Tests under fake time use inline.
+final mediaOffloadProvider = Provider<Offload?>((ref) => kIsWeb ? null : _isolateOffload);
+
 final mediaApiProvider = Provider<MediaApi>((ref) => HttpMediaApi(ref.watch(apiClientProvider)));
 
 final photoProcessorProvider = Provider<PhotoProcessor>((ref) => PlatformPhotoProcessor());
@@ -43,11 +46,16 @@ final mediaServiceProvider = Provider<MediaService?>((ref) {
     sync: sync,
     processor: ref.watch(photoProcessorProvider),
     cacheBytes: mediaCacheBytes,
+    offload: ref.watch(mediaOffloadProvider),
   );
   unawaited(media.start());
   ref.onDispose(() => unawaited(media.stop()));
   return media;
 });
+
+/// Encryption and hashing in a background isolate (pure-Dart crypto there). `compute` runs inline on
+/// the web, which has no isolates.
+Future<R> _isolateOffload<R>(FutureOr<R> Function() task) => compute((_) => task(), null);
 
 /// A blob's decrypted bytes; null when it expired. Errors (hash mismatch, network) surface as errors.
 final mediaBytesProvider = FutureProvider.autoDispose.family<Uint8List?, MediaRef>(

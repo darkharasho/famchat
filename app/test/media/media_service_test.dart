@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:famchat/api/models.dart';
@@ -132,7 +133,7 @@ void main() {
     final seen = <double>[];
     alice.d.media.hold = Completer<void>();
     final id = await alice.media.sendPhoto(chatId, photoBytes(400));
-    final sub = alice.media.progress(id).listen(seen.add);
+    final sub = alice.media.progress(id).listen((v) => seen.add(v!));
     await until(() => alice.media.progressNow(id) != null);
     alice.d.media.hold!.complete();
     alice.d.media.hold = null;
@@ -204,6 +205,106 @@ void main() {
     await until(() async => (await alice.row(id))!.state == 'sent', reason: 'sent after retry');
   });
 
+  test('a failed upload clears its progress', () async {
+    final (alice, _, chatId) = await pair();
+    alice.d.media.failUploads = 1;
+    alice.d.media.failWith = const ApiException(413, 'too_large');
+    final seen = <double?>[];
+    final id = await alice.media.sendPhoto(chatId, photoBytes(300));
+    final sub = alice.media.progress(id).listen(seen.add);
+    await until(() async => (await alice.row(id))!.state == 'failed');
+    await pump();
+    await sub.cancel();
+    expect(alice.media.progressNow(id), isNull);
+    expect(seen.last, isNull);
+  });
+
+  test('a photo whose blobs are gone is failed, never sent', () async {
+    final (alice, bob, chatId) = await pair();
+    alice.d.media.hold = Completer<void>();
+    final id = await alice.media.sendPhoto(chatId, photoBytes(300));
+    await until(() => alice.media.progressNow(id) != null);
+    await alice.media.stop();
+    // The media database is lost (browser storage cleared) while the chat database survives.
+    await alice.db.wipe();
+    alice.d.media.hold!.complete();
+    alice.d.media.hold = null;
+    final restarted = MediaService(db: alice.db, api: alice.d.media, sync: alice.sync, processor: alice.processor);
+    await restarted.start();
+    await until(() async => (await alice.row(id))!.state == 'failed', reason: 'failed, not sent');
+    await alice.sync.idle;
+    expect(alice.d.hub.sent.where((f) => f['type'] == 'send'), isEmpty);
+    expect(await bob.photos(chatId), isEmpty);
+    await restarted.stop();
+  });
+
+  test('a stopped service does not fail an upload that was in flight', () async {
+    final (alice, _, chatId) = await pair();
+    alice.d.media.hold = Completer<void>();
+    final id = await alice.media.sendPhoto(chatId, photoBytes(300));
+    await until(() => alice.media.progressNow(id) != null);
+    await alice.media.stop();
+    alice.d.media.failWith = const ApiException(409, 'conflict');
+    alice.d.media.hold!.completeError(const ApiException(409, 'conflict'));
+    alice.d.media.hold = null;
+    await pump();
+    await alice.sync.idle;
+    expect((await alice.row(id))!.state, 'pending');
+  });
+
+  test('a cached blob is served only for the hash it was verified against', () async {
+    final (alice, bob, chatId) = await pair();
+    await sentPhoto(alice, chatId, photoBytes(300));
+    await until(() async => (await bob.photos(chatId)).isNotEmpty);
+    final p = (await bob.photos(chatId)).single;
+    expect(await bob.media.load(p.fullRef), isNotNull);
+    // Another message names the same media key with a different hash (and key).
+    final forged = MediaRef(id: p.mediaKey, key: newMediaKey(), sha256: Uint8List(32), purpose: MediaPurpose.file);
+    expect(forged == p.fullRef, isFalse);
+    await expectLater(bob.media.load(forged), throwsA(isA<CryptoFailure>()));
+    expect(bob.d.media.downloads.where((k) => k == p.mediaKey), hasLength(2));
+    expect(await bob.media.load(p.fullRef), isNotNull);
+  });
+
+  test('encryption, hashing and decryption go through the offload hook', () async {
+    final alice = Node(await backend.addUser('Alice'));
+    var calls = 0;
+    final media = MediaService(
+      db: alice.db,
+      api: alice.d.media,
+      sync: alice.sync,
+      processor: alice.processor,
+      offload: <R>(FutureOr<R> Function() task) async {
+        calls++;
+        return task();
+      },
+    );
+    await media.stage(
+        chatId: 'C', messageId: 'M', kind: 'photo', purpose: MediaPurpose.file, key: newMediaKey(), plaintext: photoBytes(10), position: 0);
+    expect(calls, 1);
+    await alice.db.close();
+    await alice.d.dispose();
+  });
+
+  test('sending and loading work with a real isolate offload', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    Future<R> isolate<R>(FutureOr<R> Function() task) => Isolate.run(task);
+    final aliceMedia = MediaService(db: alice.db, api: alice.d.media, sync: alice.sync, processor: alice.processor, offload: isolate);
+    final bobMedia = MediaService(db: bob.db, api: bob.d.media, sync: bob.sync, processor: bob.processor, offload: isolate);
+    await alice.media.stop();
+    await bob.media.stop();
+    await aliceMedia.start();
+    await bobMedia.start();
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final id = await aliceMedia.sendPhoto(chatId, photoBytes(5000));
+    await until(() async => (await alice.row(id))?.state == 'sent');
+    await until(() async => (await bob.photos(chatId)).isNotEmpty);
+    expect(await bobMedia.load((await bob.photos(chatId)).single.fullRef), photoBytes(5000));
+    await aliceMedia.stop();
+    await bobMedia.stop();
+  });
+
   test('an image that does not decode throws and queues nothing', () async {
     final (alice, _, chatId) = await pair();
     await expectLater(alice.media.sendPhoto(chatId, Uint8List.fromList([0xff, 0x00, 1])), throwsA(isA<Exception>()));
@@ -220,7 +321,7 @@ void main() {
     backend.tamperMedia(
         p.mediaKey, await encryptMedia(key: p.key, plaintext: photoBytes(300, 99), purpose: MediaPurpose.file));
     await expectLater(bob.media.load(p.fullRef), throwsA(isA<CryptoFailure>()));
-    expect(await bob.db.cacheGet(p.mediaKey), isNull);
+    expect(await bob.db.cacheGet(p.fullRef.cacheKey), isNull);
     // The thumbnail's blob in the photo's place doesn't open either.
     backend.tamperMedia(p.mediaKey, backend.mediaBlob(p.thumbKey)!);
     await expectLater(bob.media.load(p.fullRef), throwsA(isA<CryptoFailure>()));
@@ -247,7 +348,7 @@ void main() {
     expect(await bob.media.load(p.fullRef), isNotNull);
     backend.expireMedia([p.mediaKey, p.thumbKey]);
     await until(() async => await alice.db.isExpired(p.mediaKey) && await bob.db.isExpired(p.mediaKey));
-    await until(() async => await bob.db.cacheGet(p.mediaKey) == null);
+    await until(() async => await bob.db.cacheGet(p.fullRef.cacheKey) == null);
     expect(await bob.media.expired.first, containsAll([p.mediaKey, p.thumbKey]));
     expect(await bob.media.load(p.fullRef), isNull);
   });
@@ -278,12 +379,16 @@ void main() {
     expect(bob.d.media.downloads, [p.mediaKey]);
   });
 
-  test('start drops uploads whose message is gone', () async {
+  test('start drops old uploads whose message is gone, keeps fresh ones', () async {
     final alice = await start(await backend.addUser('Alice'));
-    await alice.db.putUpload(PendingUploadRow(
-        key: 'K1', messageId: 'GONE', chatId: 'C', kind: 'photo', cipher: Uint8List(3), position: 0));
+    await alice.db.putUpload(
+        key: 'K1', messageId: 'GONE', chatId: 'C', kind: 'photo', cipher: Uint8List(3), position: 0, createdAt: 0);
+    // Staged a moment ago by a sendPhoto that hasn't queued its message yet.
+    await alice.db.putUpload(
+        key: 'K2', messageId: 'SOON', chatId: 'C', kind: 'photo', cipher: Uint8List(3), position: 0);
     await alice.media.start();
     expect(await alice.db.hasUploads('GONE'), isFalse);
+    expect(await alice.db.hasUploads('SOON'), isTrue);
   });
 
   test('bindDevice to another device wipes media data', () async {

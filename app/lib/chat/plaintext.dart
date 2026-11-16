@@ -6,6 +6,8 @@ import '../crypto/encoding.dart';
 
 const maxTextLength = 4000;
 
+final _ulid = RegExp(r'^[0-9A-HJKMNP-TV-Z]{26}$');
+
 /// The trimmed text if it can be sent (1–4000 characters), else null.
 String? validMessageText(String s) {
   final t = s.trim();
@@ -119,7 +121,8 @@ class PhotoBody extends Plaintext {
   factory PhotoBody._fromJson(Map<String, Object?> j) {
     String id(String k) {
       final v = j[k];
-      if (v is! String || v.isEmpty || v.length > 64) throw FormatException('bad $k');
+      // Media keys are ULIDs (they become URL path segments).
+      if (v is! String || !_ulid.hasMatch(v)) throw FormatException('bad $k');
       return v;
     }
 

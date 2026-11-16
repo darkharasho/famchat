@@ -84,6 +84,24 @@ describe("upload and download", () => {
     }
   });
 
+  it("prototype names are not kinds", async () => {
+    for (const kind of ["constructor", "__proto__", "toString", "valueOf", "hasOwnProperty"]) {
+      const res = await upload(alice, { chatId, kind }, randomBytes(10));
+      expect(res.status, kind).toBe(400);
+    }
+    expect((await env.MEDIA.list()).objects).toHaveLength(0);
+    expect(await usage()).toBe(0);
+  });
+
+  it("concurrent uploads of the same key both succeed and count once", async () => {
+    const key = newId();
+    const bytes = randomBytes(200_000);
+    const [a, b] = await Promise.all([upload(alice, { chatId, key }, bytes), upload(alice, { chatId, key }, bytes)]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(await usage()).toBe(200_000);
+    expect(new Uint8Array(await (await download(bob, key)).arrayBuffer())).toEqual(bytes);
+  });
+
   it("empty body → invalid_request", async () => {
     expect((await upload(alice, { chatId }, new Uint8Array(0))).status).toBe(400);
   });
@@ -156,6 +174,18 @@ describe("quota", () => {
     // 9000 MiB: dropping two 900 MiB rows leaves 7200 MiB + 10 B < 7680 MiB.
     const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM media WHERE expired_at IS NOT NULL").first<{ n: number }>();
     expect(n!.n).toBe(2);
+  });
+
+  it("message groups don't reach into other chats or uploaders", async () => {
+    const other = (await createGroup(eve, [bob], "Other")).id;
+    const shared = newId();
+    const t0 = Date.now() - 100_000;
+    const old = await insertMedia({ chatId, uploader: alice, bytes: 8 * GiB, createdAt: t0, messageId: shared });
+    const foreign = await insertMedia({ chatId: other, uploader: eve, bytes: 10, createdAt: t0 + 5, messageId: shared });
+    await upload(alice, { chatId }, randomBytes(10));
+    const rows = (await env.DB.prepare("SELECT key, expired_at FROM media").all<{ key: string; expired_at: number | null }>()).results;
+    expect(rows.find((r) => r.key === old)!.expired_at).not.toBeNull();
+    expect(rows.find((r) => r.key === foreign)!.expired_at).toBeNull();
   });
 
   it("under the cap nothing is evicted", async () => {

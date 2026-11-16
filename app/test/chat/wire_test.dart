@@ -167,8 +167,8 @@ void main() {
     });
 
     PhotoBody photo() => PhotoBody(
-          mediaKey: '01JMEDIA000000000000000000',
-          thumbKey: '01JTHUMB000000000000000000',
+          mediaKey: '01JMEDAA000000000000000000',
+          thumbKey: '01JTHMB0000000000000000000',
           key: Uint8List.fromList(List.filled(32, 1)),
           sha256: Uint8List.fromList(List.filled(32, 2)),
           thumbSha256: Uint8List.fromList(List.filled(32, 3)),
@@ -181,8 +181,8 @@ void main() {
     test('photo round-trips', () {
       expect(photo().toJson(), {
         'kind': 'photo',
-        'mediaKey': '01JMEDIA000000000000000000',
-        'thumbKey': '01JTHUMB000000000000000000',
+        'mediaKey': '01JMEDAA000000000000000000',
+        'thumbKey': '01JTHMB0000000000000000000',
         'key': b64url(List.filled(32, 1)),
         'sha256': b64url(List.filled(32, 2)),
         'thumbSha256': b64url(List.filled(32, 3)),
@@ -205,6 +205,8 @@ void main() {
         {'height': '10'},
         {'bytes': -1},
         {'mediaKey': ''},
+        {'mediaKey': '..'},
+        {'thumbKey': '01jthmb0000000000000000000'},
         {'thumbKey': null},
         {'mime': 7},
       ]) {

@@ -26,11 +26,17 @@ class MediaRef {
   final Uint8List key, sha256;
   final MediaPurpose purpose;
 
-  @override
-  bool operator ==(Object other) => other is MediaRef && other.id == id && other.purpose == purpose;
+  /// What the local cache stores this blob's plaintext under: the same media key named with another
+  /// hash (a forged message) never gets this entry.
+  String get cacheKey => '$id|${b64url(sha256)}|${purpose.name}';
 
   @override
-  int get hashCode => Object.hash(id, purpose);
+  bool operator ==(Object other) =>
+      other is MediaRef && other.id == id && other.purpose == purpose && b64url(other.sha256) == b64url(sha256) &&
+      b64url(other.key) == b64url(key);
+
+  @override
+  int get hashCode => Object.hash(id, purpose, b64url(sha256));
 }
 
 extension PhotoRefs on PhotoBody {
@@ -41,6 +47,22 @@ extension PhotoRefs on PhotoBody {
 /// A staged blob: its media key and the SHA-256 of its ciphertext.
 typedef StagedBlob = ({String id, Uint8List sha256});
 
+/// Runs CPU-heavy work (encryption, hashing) elsewhere: a background isolate off the web.
+typedef Offload = Future<R> Function<R>(FutureOr<R> Function() task);
+
+Future<R> _inline<R>(FutureOr<R> Function() task) async => task();
+
+Future<(Uint8List, Uint8List)> _encryptAndHash(Uint8List key, Uint8List plaintext, MediaPurpose purpose) async {
+  final blob = await encryptMedia(key: key, plaintext: plaintext, purpose: purpose);
+  return (blob, await sha256Of(blob));
+}
+
+/// The plaintext, or null when [blob] doesn't hash to [sha256] (decryption failures throw).
+Future<Uint8List?> _verifyAndDecrypt(Uint8List key, Uint8List blob, Uint8List sha256, MediaPurpose purpose) async {
+  if (!await sha256Matches(blob, sha256)) return null;
+  return decryptMedia(key: key, blob: blob, purpose: purpose);
+}
+
 class MediaService {
   MediaService({
     required this.db,
@@ -49,7 +71,10 @@ class MediaService {
     required this.processor,
     this.cacheBytes = 256 * 1024 * 1024,
     this.retryDelays = const [Duration(seconds: 5), Duration(seconds: 15), Duration(minutes: 1)],
-  });
+    Offload? offload,
+    DateTime Function()? now,
+  })  : _offload = offload ?? _inline,
+        _now = now ?? DateTime.now;
 
   final MediaDb db;
   final MediaApi api;
@@ -62,11 +87,18 @@ class MediaService {
   /// Waits before re-trying an upload that failed for a transient reason (the last repeats).
   final List<Duration> retryDelays;
 
+  final Offload _offload;
+  final DateTime Function() _now;
+
+  /// Upload rows of a message that isn't in the chat database are left alone this long: a send may
+  /// be between staging its blobs and queueing its message.
+  static const orphanGrace = Duration(minutes: 10);
+
   final _uploading = <String>{};
   final _failures = <String, int>{};
   final _retryTimers = <String, Timer>{};
   final _progress = <String, double>{};
-  final _progressCtl = StreamController<(String, double)>.broadcast();
+  final _progressCtl = StreamController<(String, double?)>.broadcast();
   final _loads = <String, Future<Uint8List?>>{};
   StreamSubscription<Map<String, Object?>>? _events;
   bool _stopped = false;
@@ -75,10 +107,13 @@ class MediaService {
     await db.bindDevice(sync.me.deviceId);
     sync.beforeSend = _beforeSend;
     _events = sync.hub.events.listen(_onEvent);
-    // Blobs of messages that are gone (chat left, data wiped) or already sent are never needed.
+    // Upload rows of sent messages, and of messages long gone (chat left, data wiped), aren't needed.
+    final cutoff = _now().subtract(orphanGrace).millisecondsSinceEpoch;
     for (final id in await db.uploadMessageIds()) {
       final row = await sync.db.messageById(id);
-      if (row == null || row.state == 'sent') await db.deleteUploadsFor(id);
+      if (row?.state == 'sent' || (row == null && (await db.uploadsFor(id)).every((u) => u.createdAt < cutoff))) {
+        await db.deleteUploadsFor(id);
+      }
     }
     sync.flushSoon();
   }
@@ -124,7 +159,8 @@ class MediaService {
 
   /// Encrypts [plaintext] under [key], caches the plaintext (so the sender sees it at once) and keeps
   /// the blob for upload before message [messageId] is sent. For new kinds (voice): stage each blob,
-  /// then `sync.enqueueMessage(chatId, body, id: messageId)`.
+  /// then `sync.enqueueMessage(chatId, body, id: messageId)` (and add the kind to
+  /// `ChatSync.mediaKinds`).
   Future<StagedBlob> stage({
     required String chatId,
     required String messageId,
@@ -134,18 +170,19 @@ class MediaService {
     required Uint8List plaintext,
     required int position,
   }) async {
-    final blob = await encryptMedia(key: key, plaintext: plaintext, purpose: purpose);
     final limit = mediaKindLimits[kind];
-    if (limit == null || blob.length > limit) throw ArgumentError.value(blob.length, 'plaintext', 'too large for $kind');
+    if (limit == null || plaintext.length + mediaOverhead > limit) {
+      throw ArgumentError.value(plaintext.length, 'plaintext', 'too large for $kind');
+    }
+    final (blob, sha) = await _offload(() => _encryptAndHash(key, plaintext, purpose));
     final id = newUlid();
-    await db.cachePut(id, plaintext, maxBytes: cacheBytes);
-    await db.putUpload(PendingUploadRow(
-        key: id, messageId: messageId, chatId: chatId, kind: kind, cipher: blob, position: position));
-    return (id: id, sha256: await sha256Of(blob));
+    await db.cachePut(MediaRef(id: id, key: key, sha256: sha, purpose: purpose).cacheKey, plaintext, maxBytes: cacheBytes);
+    await db.putUpload(key: id, messageId: messageId, chatId: chatId, kind: kind, cipher: blob, position: position);
+    return (id: id, sha256: sha);
   }
 
-  /// Upload progress (0–1) of [messageId]'s blobs; nothing while it isn't uploading.
-  Stream<double> progress(String messageId) =>
+  /// Upload progress (0–1) of [messageId]'s blobs; null once it isn't uploading (failed or stopped).
+  Stream<double?> progress(String messageId) =>
       _progressCtl.stream.where((e) => e.$1 == messageId).map((e) => e.$2);
 
   double? progressNow(String messageId) => _progress[messageId];
@@ -156,12 +193,19 @@ class MediaService {
     } else {
       _progress[messageId] = v;
     }
-    _progressCtl.add((messageId, v ?? 0));
+    _progressCtl.add((messageId, v));
   }
 
-  /// The outbox gate: a message with blobs still to upload isn't sent; its upload starts instead.
+  /// The outbox gate. A media message is sent only with positive evidence that its blobs are on the
+  /// server; one whose blobs are gone (local media storage lost) can never be sent and fails.
   Future<bool> _beforeSend(MessageRow row) async {
-    if (!await db.hasUploads(row.id)) return true;
+    final rows = await db.uploadsFor(row.id);
+    if (rows.isEmpty) {
+      if (!ChatSync.mediaKinds.contains(row.kind)) return true;
+      await sync.db.setMessageState(row.id, 'failed');
+      return false;
+    }
+    if (rows.every((r) => r.done)) return true;
     if (!_stopped && !_retryTimers.containsKey(row.id) && _uploading.add(row.id)) unawaited(_upload(row.id));
     return false;
   }
@@ -169,27 +213,32 @@ class MediaService {
   Future<void> _upload(String messageId) async {
     try {
       final rows = await db.uploadsFor(messageId);
-      final total = rows.fold<int>(0, (a, r) => a + r.cipher.length);
+      final todo = rows.where((r) => !r.done).toList();
+      final total = todo.fold<int>(0, (a, r) => a + r.cipher.length);
       var done = 0;
       _setProgress(messageId, 0);
-      for (final r in rows) {
+      for (final r in todo) {
         await api.upload(
           key: r.key,
           chatId: r.chatId,
           kind: r.kind,
           messageId: messageId,
           bytes: r.cipher,
-          onProgress: (sent, _) => _setProgress(messageId, total == 0 ? 1 : (done + sent) / total),
+          onProgress: (sent, _) {
+            if (!_stopped) _setProgress(messageId, total == 0 ? 1 : (done + sent) / total);
+          },
         );
         done += r.cipher.length;
-        await db.deleteUpload(r.key);
+        await db.markUploaded(r.key);
       }
-      _failures.remove(messageId);
-      _setProgress(messageId, 1);
       _uploading.remove(messageId);
-      if (!_stopped) sync.flushSoon();
+      _failures.remove(messageId);
+      if (_stopped) return;
+      _setProgress(messageId, 1);
+      sync.flushSoon();
     } on ApiException catch (e) {
       _uploading.remove(messageId);
+      if (_stopped) return; // a newer service owns this message now
       if (e.status >= 400 && e.status < 500 && e.status != 408 && e.status != 429) {
         // Too large, not a member any more, key conflict: retrying won't help until the user asks.
         _failures.remove(messageId);
@@ -202,7 +251,7 @@ class MediaService {
       _uploading.remove(messageId);
     } catch (_) {
       _uploading.remove(messageId);
-      _retryLater(messageId);
+      if (!_stopped) _retryLater(messageId);
     }
   }
 
@@ -227,14 +276,14 @@ class MediaService {
   /// The decrypted blob, from the cache or downloaded (once, however many callers ask), or null if it
   /// expired. Throws [CryptoFailure] when the blob doesn't match the message (hash or MAC), and
   /// `ApiException`/`NetworkException` when it can't be fetched.
-  Future<Uint8List?> load(MediaRef ref) => _loads[ref.id] ??= _load(ref).whenComplete(() {
+  Future<Uint8List?> load(MediaRef ref) => _loads[ref.cacheKey] ??= _load(ref).whenComplete(() {
         // A block body: returning the removed future would make this future wait on itself.
-        _loads.remove(ref.id);
+        _loads.remove(ref.cacheKey);
       });
 
   Future<Uint8List?> _load(MediaRef ref) async {
     if (await db.isExpired(ref.id)) return null;
-    final cached = await db.cacheGet(ref.id);
+    final cached = await db.cacheGet(ref.cacheKey);
     if (cached != null) return cached;
     final Uint8List blob;
     try {
@@ -244,9 +293,9 @@ class MediaService {
       await db.markExpired([ref.id]);
       return null;
     }
-    if (!await sha256Matches(blob, ref.sha256)) throw const CryptoFailure('media hash mismatch');
-    final plain = await decryptMedia(key: ref.key, blob: blob, purpose: ref.purpose);
-    await db.cachePut(ref.id, plain, maxBytes: cacheBytes);
+    final plain = await _offload(() => _verifyAndDecrypt(ref.key, blob, ref.sha256, ref.purpose));
+    if (plain == null) throw const CryptoFailure('media hash mismatch');
+    await db.cachePut(ref.cacheKey, plain, maxBytes: cacheBytes);
     return plain;
   }
 
@@ -256,7 +305,7 @@ class MediaService {
     if (keys.isEmpty) return;
     unawaited(() async {
       await db.markExpired(keys);
-      await db.cacheDrop(keys);
+      await db.cacheDropPrefixed(keys);
     }());
   }
 }

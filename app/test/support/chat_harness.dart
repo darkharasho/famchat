@@ -97,6 +97,7 @@ Future<ScriptedHubLink> pumpChatApp(
       mediaDbProvider.overrideWithValue(mediaDb ?? memoryMediaDb()),
       mediaApiProvider.overrideWithValue(me.media),
       photoProcessorProvider.overrideWithValue(FakeProcessor()),
+      mediaOffloadProvider.overrideWithValue(null), // isolates never answer under fake time
       if (picker != null) photoPickerProvider.overrideWithValue(picker),
     ],
     child: const FamChatApp(),

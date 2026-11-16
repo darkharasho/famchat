@@ -18,8 +18,18 @@ const _thumbQuality = 75;
 class PlatformPhotoProcessor implements PhotoProcessor {
   @override
   Future<ProcessedPhoto> process(Uint8List original) async {
+    if (kIsWeb) {
+      // No isolates on the web: let the browser decode and scale (image_picker's canvas resize has
+      // already applied orientation); only the JPEG encode runs in Dart.
+      try {
+        return await _processWithPlatformCodec(original);
+      } on UnsupportedImageException {
+        // Try the image package below.
+      }
+    }
     final viaImage = await compute(_processWithImagePackage, original);
     if (viaImage != null) return viaImage;
+    if (kIsWeb) throw const UnsupportedImageException();
     return _processWithPlatformCodec(original);
   }
 }
@@ -29,7 +39,8 @@ ProcessedPhoto? _processWithImagePackage(Uint8List bytes) {
   final decoder = img.findDecoderForData(bytes);
   if (decoder == null) return null;
   final info = decoder.startDecode(bytes);
-  if (info != null && info.width * info.height > maxSourcePixels) {
+  if (info == null) return null; // no size to check: the platform path checks it before decoding
+  if (info.width * info.height > maxSourcePixels) {
     throw const UnsupportedImageException('image too large');
   }
   final img.Image? decoded;

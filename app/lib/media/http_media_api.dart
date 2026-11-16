@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../api/api_client.dart';
+import '../crypto/media.dart';
 import 'media_api.dart';
 
 class HttpMediaApi implements MediaApi {
@@ -25,7 +26,8 @@ class HttpMediaApi implements MediaApi {
       }, bytes: bytes, onProgress: onProgress);
 
   @override
-  Future<Uint8List> download(String key) => _api.authedBytes('/media/${Uri.encodeComponent(key)}');
+  Future<Uint8List> download(String key) =>
+      _api.authedBytes('/media/${Uri.encodeComponent(key)}', maxBytes: maxMediaBlobBytes);
 
   @override
   Future<MediaUsage> usage() async =>

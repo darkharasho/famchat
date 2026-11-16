@@ -11,18 +11,18 @@ export const MEDIA_CAP = 8 * GiB;
 export const MEDIA_TARGET = 7.5 * GiB;
 
 /** Largest ciphertext per kind. Voice: 10 minutes of ~48 kbps AAC is about 3.6 MB (the client checks duration). */
-export const KIND_LIMITS: Record<string, number> = {
-  photo: 15 * MiB,
-  thumb: 1 * MiB,
-  voice: 8 * MiB,
-};
+export const KIND_LIMITS: ReadonlyMap<string, number> = new Map([
+  ["photo", 15 * MiB],
+  ["thumb", 1 * MiB],
+  ["voice", 8 * MiB],
+]);
 
 export async function mediaUsage(db: D1Database): Promise<number> {
   const row = await db.prepare("SELECT bytes FROM media_usage WHERE id = 1").first<{ bytes: number }>();
   return row?.bytes ?? 0;
 }
 
-type Row = { key: string; chat_id: string; message_id: string | null; bytes: number };
+type Row = { key: string; chat_id: string; uploader_id: string; message_id: string | null; bytes: number };
 
 export type Notify = (userIds: string[], event: Record<string, unknown>) => Promise<void>;
 
@@ -50,7 +50,7 @@ export async function evictOldest(env: Env, notify: Notify, cap = MEDIA_CAP, tar
   let freed = 0;
   for (let offset = 0; usage - freed >= target; offset += PAGE) {
     const { results } = await db.prepare(
-      `SELECT key, chat_id, message_id, bytes FROM media WHERE expired_at IS NULL
+      `SELECT key, chat_id, uploader_id, message_id, bytes FROM media WHERE expired_at IS NULL
        ORDER BY created_at, key LIMIT ? OFFSET ?`,
     ).bind(PAGE, offset).all<Row>();
     if (results.length === 0) break;
@@ -60,14 +60,16 @@ export async function evictOldest(env: Env, notify: Notify, cap = MEDIA_CAP, tar
       freed += r.bytes;
     }
   }
-  // A photo and its thumbnail go together.
+  // A photo and its thumbnail go together: same (client-supplied) message id, chat and uploader.
+  const group = (r: Row) => `${r.message_id}|${r.chat_id}|${r.uploader_id}`;
+  const groups = new Set([...taken.values()].filter((r) => r.message_id).map(group));
   const messageIds = [...new Set([...taken.values()].map((r) => r.message_id).filter((m): m is string => !!m))];
   for (const ids of chunks(messageIds, PARAM_CHUNK)) {
     const { results } = await db.prepare(
-      `SELECT key, chat_id, message_id, bytes FROM media WHERE expired_at IS NULL
+      `SELECT key, chat_id, uploader_id, message_id, bytes FROM media WHERE expired_at IS NULL
        AND message_id IN (${ids.map(() => "?").join(",")})`,
     ).bind(...ids).all<Row>();
-    for (const r of results) taken.set(r.key, r);
+    for (const r of results) if (groups.has(group(r))) taken.set(r.key, r);
   }
   const keys = [...taken.keys()];
   if (keys.length === 0) return [];

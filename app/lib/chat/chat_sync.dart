@@ -446,7 +446,11 @@ class ChatSync {
   Future<void> _sendRow(MessageRow row) async {
     if (row.state != 'pending' || !hub.connected) return;
     final gate = beforeSend;
-    if (gate == null ? mediaKinds.contains(row.kind) : !await gate(row)) return; // media not uploaded yet
+    try {
+      if (gate == null ? mediaKinds.contains(row.kind) : !await gate(row)) return; // media not uploaded yet
+    } catch (_) {
+      return; // the gate's storage failed: keep the row pending, don't stall the rest of the outbox
+    }
     final ok = await keys.ensureCurrentEpoch(row.chatId);
     final chat = await db.chatById(row.chatId);
     if (chat == null) {

@@ -28,6 +28,12 @@ BEGIN
   UPDATE media_usage SET bytes = bytes + NEW.bytes WHERE id = 1;
 END;
 
+-- An upload's row is reserved before its object is stored and deleted if storing fails.
+CREATE TRIGGER media_usage_delete AFTER DELETE ON media WHEN OLD.expired_at IS NULL
+BEGIN
+  UPDATE media_usage SET bytes = bytes - OLD.bytes WHERE id = 1;
+END;
+
 CREATE TRIGGER media_usage_expire AFTER UPDATE OF expired_at ON media
   WHEN OLD.expired_at IS NULL AND NEW.expired_at IS NOT NULL
 BEGIN

@@ -116,9 +116,10 @@ class ApiClient {
         return _json(res);
       });
 
-  /// Authed GET of a raw body (media downloads).
-  Future<Uint8List> authedBytes(String path) => _authed((t) async {
-        final res = await _raw('GET', path, bearer: t, timeout: downloadTimeout);
+  /// Authed GET of a raw body (media downloads). A body over [maxBytes] is abandoned with
+  /// `ApiException(status, 'too_large')`.
+  Future<Uint8List> authedBytes(String path, {int? maxBytes}) => _authed((t) async {
+        final res = await _raw('GET', path, bearer: t, timeout: downloadTimeout, maxResponseBytes: maxBytes);
         return res.bodyBytes;
       });
 
@@ -131,6 +132,7 @@ class ApiClient {
     Uint8List? upload,
     void Function(int sent, int total)? onProgress,
     required Duration timeout,
+    int? maxResponseBytes,
   }) async {
     final abort = Completer<void>();
     final url = base.replace(path: '/api$path', queryParameters: query == null || query.isEmpty ? null : query);
@@ -138,9 +140,27 @@ class ApiClient {
         ? http.AbortableRequest(method, url, abortTrigger: abort.future)
         : _UploadRequest(method, url, upload, onProgress, abort.future);
     req.headers['authorization'] = 'Bearer $bearer';
+    Future<http.Response> fetch() async {
+      final s = await client.send(req);
+      final max = maxResponseBytes;
+      if (max == null) return http.Response.fromStream(s);
+      Never tooLarge() {
+        if (!abort.isCompleted) abort.complete();
+        throw ApiException(s.statusCode, 'too_large');
+      }
+
+      if ((s.contentLength ?? 0) > max) tooLarge();
+      final b = BytesBuilder(copy: false);
+      await for (final chunk in s.stream) {
+        b.add(chunk);
+        if (b.length > max) tooLarge();
+      }
+      return http.Response.bytes(b.takeBytes(), s.statusCode, headers: s.headers, request: s.request);
+    }
+
     final http.Response res;
     try {
-      res = await (() async => http.Response.fromStream(await client.send(req)))().timeout(timeout, onTimeout: () {
+      res = await fetch().timeout(timeout, onTimeout: () {
         if (!abort.isCompleted) abort.complete();
         throw TimeoutException('request timed out', timeout);
       });

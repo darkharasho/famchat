@@ -377,6 +377,30 @@ class $PendingUploadsTable extends PendingUploads
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _doneMeta = const VerificationMeta('done');
+  @override
+  late final GeneratedColumn<bool> done = GeneratedColumn<bool>(
+    'done',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("done" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     key,
@@ -385,6 +409,8 @@ class $PendingUploadsTable extends PendingUploads
     kind,
     cipher,
     position,
+    done,
+    createdAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -446,6 +472,20 @@ class $PendingUploadsTable extends PendingUploads
     } else if (isInserting) {
       context.missing(_positionMeta);
     }
+    if (data.containsKey('done')) {
+      context.handle(
+        _doneMeta,
+        done.isAcceptableOrUnknown(data['done']!, _doneMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
     return context;
   }
 
@@ -479,6 +519,14 @@ class $PendingUploadsTable extends PendingUploads
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      done: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}done'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
     );
   }
 
@@ -500,6 +548,8 @@ class PendingUploadRow extends DataClass
 
   /// Upload order within a message (thumbnail first).
   final int position;
+  final bool done;
+  final int createdAt;
   const PendingUploadRow({
     required this.key,
     required this.messageId,
@@ -507,6 +557,8 @@ class PendingUploadRow extends DataClass
     required this.kind,
     required this.cipher,
     required this.position,
+    required this.done,
+    required this.createdAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -517,6 +569,8 @@ class PendingUploadRow extends DataClass
     map['kind'] = Variable<String>(kind);
     map['cipher'] = Variable<Uint8List>(cipher);
     map['position'] = Variable<int>(position);
+    map['done'] = Variable<bool>(done);
+    map['created_at'] = Variable<int>(createdAt);
     return map;
   }
 
@@ -528,6 +582,8 @@ class PendingUploadRow extends DataClass
       kind: Value(kind),
       cipher: Value(cipher),
       position: Value(position),
+      done: Value(done),
+      createdAt: Value(createdAt),
     );
   }
 
@@ -543,6 +599,8 @@ class PendingUploadRow extends DataClass
       kind: serializer.fromJson<String>(json['kind']),
       cipher: serializer.fromJson<Uint8List>(json['cipher']),
       position: serializer.fromJson<int>(json['position']),
+      done: serializer.fromJson<bool>(json['done']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
     );
   }
   @override
@@ -555,6 +613,8 @@ class PendingUploadRow extends DataClass
       'kind': serializer.toJson<String>(kind),
       'cipher': serializer.toJson<Uint8List>(cipher),
       'position': serializer.toJson<int>(position),
+      'done': serializer.toJson<bool>(done),
+      'createdAt': serializer.toJson<int>(createdAt),
     };
   }
 
@@ -565,6 +625,8 @@ class PendingUploadRow extends DataClass
     String? kind,
     Uint8List? cipher,
     int? position,
+    bool? done,
+    int? createdAt,
   }) => PendingUploadRow(
     key: key ?? this.key,
     messageId: messageId ?? this.messageId,
@@ -572,6 +634,8 @@ class PendingUploadRow extends DataClass
     kind: kind ?? this.kind,
     cipher: cipher ?? this.cipher,
     position: position ?? this.position,
+    done: done ?? this.done,
+    createdAt: createdAt ?? this.createdAt,
   );
   PendingUploadRow copyWithCompanion(PendingUploadsCompanion data) {
     return PendingUploadRow(
@@ -581,6 +645,8 @@ class PendingUploadRow extends DataClass
       kind: data.kind.present ? data.kind.value : this.kind,
       cipher: data.cipher.present ? data.cipher.value : this.cipher,
       position: data.position.present ? data.position.value : this.position,
+      done: data.done.present ? data.done.value : this.done,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
 
@@ -592,7 +658,9 @@ class PendingUploadRow extends DataClass
           ..write('chatId: $chatId, ')
           ..write('kind: $kind, ')
           ..write('cipher: $cipher, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('done: $done, ')
+          ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
@@ -605,6 +673,8 @@ class PendingUploadRow extends DataClass
     kind,
     $driftBlobEquality.hash(cipher),
     position,
+    done,
+    createdAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -615,7 +685,9 @@ class PendingUploadRow extends DataClass
           other.chatId == this.chatId &&
           other.kind == this.kind &&
           $driftBlobEquality.equals(other.cipher, this.cipher) &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.done == this.done &&
+          other.createdAt == this.createdAt);
 }
 
 class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
@@ -625,6 +697,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
   final Value<String> kind;
   final Value<Uint8List> cipher;
   final Value<int> position;
+  final Value<bool> done;
+  final Value<int> createdAt;
   final Value<int> rowid;
   const PendingUploadsCompanion({
     this.key = const Value.absent(),
@@ -633,6 +707,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
     this.kind = const Value.absent(),
     this.cipher = const Value.absent(),
     this.position = const Value.absent(),
+    this.done = const Value.absent(),
+    this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PendingUploadsCompanion.insert({
@@ -642,13 +718,16 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
     required String kind,
     required Uint8List cipher,
     required int position,
+    this.done = const Value.absent(),
+    required int createdAt,
     this.rowid = const Value.absent(),
   }) : key = Value(key),
        messageId = Value(messageId),
        chatId = Value(chatId),
        kind = Value(kind),
        cipher = Value(cipher),
-       position = Value(position);
+       position = Value(position),
+       createdAt = Value(createdAt);
   static Insertable<PendingUploadRow> custom({
     Expression<String>? key,
     Expression<String>? messageId,
@@ -656,6 +735,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
     Expression<String>? kind,
     Expression<Uint8List>? cipher,
     Expression<int>? position,
+    Expression<bool>? done,
+    Expression<int>? createdAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -665,6 +746,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
       if (kind != null) 'kind': kind,
       if (cipher != null) 'cipher': cipher,
       if (position != null) 'position': position,
+      if (done != null) 'done': done,
+      if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -676,6 +759,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
     Value<String>? kind,
     Value<Uint8List>? cipher,
     Value<int>? position,
+    Value<bool>? done,
+    Value<int>? createdAt,
     Value<int>? rowid,
   }) {
     return PendingUploadsCompanion(
@@ -685,6 +770,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
       kind: kind ?? this.kind,
       cipher: cipher ?? this.cipher,
       position: position ?? this.position,
+      done: done ?? this.done,
+      createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -710,6 +797,12 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (done.present) {
+      map['done'] = Variable<bool>(done.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -725,6 +818,8 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUploadRow> {
           ..write('kind: $kind, ')
           ..write('cipher: $cipher, ')
           ..write('position: $position, ')
+          ..write('done: $done, ')
+          ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1314,6 +1409,8 @@ typedef $$PendingUploadsTableCreateCompanionBuilder =
       required String kind,
       required Uint8List cipher,
       required int position,
+      Value<bool> done,
+      required int createdAt,
       Value<int> rowid,
     });
 typedef $$PendingUploadsTableUpdateCompanionBuilder =
@@ -1324,6 +1421,8 @@ typedef $$PendingUploadsTableUpdateCompanionBuilder =
       Value<String> kind,
       Value<Uint8List> cipher,
       Value<int> position,
+      Value<bool> done,
+      Value<int> createdAt,
       Value<int> rowid,
     });
 
@@ -1363,6 +1462,16 @@ class $$PendingUploadsTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get done => $composableBuilder(
+    column: $table.done,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -1405,6 +1514,16 @@ class $$PendingUploadsTableOrderingComposer
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get done => $composableBuilder(
+    column: $table.done,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PendingUploadsTableAnnotationComposer
@@ -1433,6 +1552,12 @@ class $$PendingUploadsTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<bool> get done =>
+      $composableBuilder(column: $table.done, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
 
 class $$PendingUploadsTableTableManager
@@ -1472,6 +1597,8 @@ class $$PendingUploadsTableTableManager
                 Value<String> kind = const Value.absent(),
                 Value<Uint8List> cipher = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<bool> done = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PendingUploadsCompanion(
                 key: key,
@@ -1480,6 +1607,8 @@ class $$PendingUploadsTableTableManager
                 kind: kind,
                 cipher: cipher,
                 position: position,
+                done: done,
+                createdAt: createdAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1490,6 +1619,8 @@ class $$PendingUploadsTableTableManager
                 required String kind,
                 required Uint8List cipher,
                 required int position,
+                Value<bool> done = const Value.absent(),
+                required int createdAt,
                 Value<int> rowid = const Value.absent(),
               }) => PendingUploadsCompanion.insert(
                 key: key,
@@ -1498,6 +1629,8 @@ class $$PendingUploadsTableTableManager
                 kind: kind,
                 cipher: cipher,
                 position: position,
+                done: done,
+                createdAt: createdAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
