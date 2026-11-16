@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { b64urlEncode } from "../src/lib/encoding";
 import { CLAIM_RETRY_MS, PAIR_TTL_MS } from "../src/routes/pairing";
 import { api, createDirect, type TestUser } from "./chat-helpers";
+import { closeSockets, socket } from "./ws-helpers";
 import { BASE, certMessage, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
 
 type Start = { sessionId: string; code: string; secret: string; deviceId: string; expiresAt: number; expiresIn: number };
@@ -70,16 +71,7 @@ async function age(sessionId: string, ms: number) {
   ).bind(ms, ms, ms, ms, sessionId).run();
 }
 
-const open: WebSocket[] = [];
-afterEach(() => {
-  for (const ws of open.splice(0)) {
-    try {
-      ws.close(1000, "done");
-    } catch {
-      /* closed */
-    }
-  }
-});
+afterEach(closeSockets);
 beforeEach(resetDb);
 
 describe("POST /api/devices/pair/start", () => {
@@ -286,27 +278,3 @@ describe("pairing", () => {
     await carolWs.none("device");
   });
 });
-
-async function socket(u: TestUser) {
-  const t = await (await api(u.accessToken, "POST", "/ws/ticket")).json<{ ticket: string }>();
-  const res = await SELF.fetch(`${BASE}/api/ws?ticket=${encodeURIComponent(t.ticket)}`, { headers: { upgrade: "websocket" } });
-  const ws = res.webSocket!;
-  ws.accept();
-  open.push(ws);
-  const inbox: Record<string, unknown>[] = [];
-  ws.addEventListener("message", (e) => inbox.push(JSON.parse(e.data as string)));
-  return {
-    async next(type: string) {
-      for (let i = 0; i < 100; i++) {
-        const j = inbox.findIndex((m) => m.type === type);
-        if (j >= 0) return inbox.splice(j, 1)[0];
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      throw new Error(`no ${type}: ${JSON.stringify(inbox)}`);
-    },
-    async none(type: string) {
-      await new Promise((r) => setTimeout(r, 150));
-      expect(inbox.filter((m) => m.type === type)).toEqual([]);
-    },
-  };
-}

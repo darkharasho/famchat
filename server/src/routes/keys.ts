@@ -24,7 +24,8 @@ keys.get("/wraps", async (c) => {
 /**
  * Member devices without a usable wrap for an epoch, limited to existing (chat, epoch) pairs this
  * device holds a wrap for, so it can add them ("missing-wrap repair"). A wrap made by a device of
- * someone who has since left counts as missing: members only accept wraps from current members.
+ * someone who has since left, or by a device since revoked, counts as missing: members only accept
+ * wraps from live devices of current members.
  */
 keys.get("/missing", async (c) => {
   const { results } = await c.env.DB.prepare(
@@ -36,7 +37,7 @@ keys.get("/missing", async (c) => {
      WHERE w.device_id = ?
        AND NOT EXISTS (
          SELECT 1 FROM chat_key_wraps x
-         JOIN devices wd ON wd.id = x.wrapper_device_id
+         JOIN devices wd ON wd.id = x.wrapper_device_id AND wd.revoked_at IS NULL
          JOIN chat_members wm ON wm.chat_id = x.chat_id AND wm.user_id = wd.user_id
          WHERE x.chat_id = w.chat_id AND x.epoch = w.epoch AND x.device_id = d.id)
      ORDER BY w.chat_id, w.epoch, d.id`,
@@ -46,7 +47,7 @@ keys.get("/missing", async (c) => {
 
 /**
  * Adds wraps for devices that lack them. A wrap is replaced only when its wrapper's user has left
- * the chat. Entries for epochs that don't exist or devices that aren't live members (races with a
+ * the chat or its wrapper device was revoked. Entries for epochs that don't exist or devices that aren't live members (races with a
  * leave or a revocation) are skipped; a wrong wrapper or a chat the caller isn't in is a 400.
  */
 keys.put("/wraps", async (c) => {
@@ -92,7 +93,7 @@ keys.put("/wraps", async (c) => {
          created_at = excluded.created_at
        WHERE NOT EXISTS (
          SELECT 1 FROM devices wd JOIN chat_members wm ON wm.user_id = wd.user_id AND wm.chat_id = chat_key_wraps.chat_id
-         WHERE wd.id = chat_key_wraps.wrapper_device_id)`,
+         WHERE wd.id = chat_key_wraps.wrapper_device_id AND wd.revoked_at IS NULL)`,
     ).bind(w.chatId, w.epoch, w.recipientDeviceId, w.wrapperDeviceId, w.sealed, w.sig, now),
   ));
   const added = results.filter((r) => r.meta.changes === 1).length;
