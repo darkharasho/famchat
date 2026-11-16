@@ -172,8 +172,11 @@ What this does and doesn't protect:
 
 ## Voice messages
 
-AAC-LC in `.m4a` at about 48 kbps mono (about 360 KB per minute). Phase 1 includes a spike that records
-and plays this format on all six targets. Fallback: Opus in `.ogg` with a platform player where needed.
+AAC-LC in `.m4a` at about 48 kbps mono (about 360 KB per minute). Decided by the plan 2 spikes
+(`docs/spikes/2026-11-platform-spikes.md`): the format plays on all six targets and records everywhere
+except Chrome. Browsers whose recorder can't produce AAC are playback-only for voice in v1. The app checks
+`isEncoderSupported(aacLc)` at runtime and hides the record button there. Opus was ruled out because
+Chrome records it as WebM, which iOS and macOS can't play, and Windows can't record it.
 
 ## Client
 
