@@ -70,4 +70,22 @@ void main() {
     final api = clientFor((_) async => http.Response('{"devices": "nope"}', 200));
     await expectLater(api.listDevices(), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'bad_response')));
   });
+
+  test('a 401 from refresh without the server error code does not sign out', () async {
+    var revoked = 0;
+    final api = ApiClient(
+      client: MockClient((r) async => r.url.path == '/api/auth/refresh'
+          ? http.Response('<html>login to wifi</html>', 401)
+          : http.Response('{"error":"unauthorized"}', 401)),
+      base: Uri.parse('https://famchat.dev'),
+    );
+    api.tokens = TokenManager(
+      refreshCall: api.refresh,
+      readRefreshToken: () async => 'r',
+      saveRefreshToken: (_) async {},
+      onRevoked: () async => revoked++,
+    )..setAccessToken('opaque-token');
+    await expectLater(api.me(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)));
+    expect(revoked, 0);
+  });
 }

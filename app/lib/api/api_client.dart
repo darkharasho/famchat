@@ -19,7 +19,13 @@ class ApiClient {
   /// Needed for authed calls; set once the session exists.
   TokenManager? tokens;
 
+  /// Whole-request deadline (send and body). On expiry the request is aborted, so a stalled
+  /// request can't reach the server after its retry.
   static const timeout = Duration(seconds: 20);
+
+  /// Shorter for refresh: with TokenManager's default retry delays (1, 3, 8 s), four attempts
+  /// end within 44 s, inside the server's 60 s grace for a refresh whose response was lost.
+  static const refreshTimeout = Duration(seconds: 8);
 
   Future<RedeemResult> redeemInvite({
     required String token,
@@ -43,7 +49,7 @@ class ApiClient {
   }
 
   Future<TokenPair> refresh(String refreshToken) async {
-    final j = await _send('POST', '/auth/refresh', body: {'refreshToken': refreshToken});
+    final j = await _send('POST', '/auth/refresh', body: {'refreshToken': refreshToken}, timeout: refreshTimeout);
     return _parse(200, () => TokenPair(j!['accessToken'] as String, j['refreshToken'] as String));
   }
 
@@ -107,16 +113,27 @@ class ApiClient {
 
   /// The decoded JSON object, or null for an empty body. Errors throw [ApiException] or
   /// [NetworkException].
-  Future<Map<String, Object?>?> _send(String method, String path, {Object? body, String? bearer}) async {
-    final req = http.Request(method, base.replace(path: '/api$path'));
+  Future<Map<String, Object?>?> _send(
+    String method,
+    String path, {
+    Object? body,
+    String? bearer,
+    Duration timeout = timeout,
+  }) async {
+    final abort = Completer<void>();
+    final req = http.AbortableRequest(method, base.replace(path: '/api$path'), abortTrigger: abort.future);
     if (bearer != null) req.headers['authorization'] = 'Bearer $bearer';
     if (body != null) {
       req.headers['content-type'] = 'application/json';
       req.body = jsonEncode(body);
     }
+    Future<http.Response> fetch() async => http.Response.fromStream(await client.send(req));
     final http.Response res;
     try {
-      res = await http.Response.fromStream(await client.send(req).timeout(timeout)).timeout(timeout);
+      res = await fetch().timeout(timeout, onTimeout: () {
+        if (!abort.isCompleted) abort.complete();
+        throw TimeoutException('request timed out', timeout);
+      });
     } on http.ClientException catch (e) {
       throw NetworkException(e);
     } on TimeoutException catch (e) {

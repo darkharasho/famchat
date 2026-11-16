@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:famchat/api/api_client.dart';
 import 'package:famchat/api/models.dart';
 import 'package:famchat/api/token_manager.dart';
@@ -164,5 +166,21 @@ void main() {
     h.server.expireAccessTokens();
     expect((await h.api.me()).name, 'Mom');
     expect(h.revokedCalls, 0);
+  });
+
+  test('a refresh that started before reset cannot save into the next session', () async {
+    final gate = Completer<TokenPair>();
+    final saved = <String>[];
+    final tm = TokenManager(
+      refreshCall: (_) => gate.future,
+      readRefreshToken: () async => 'old',
+      saveRefreshToken: (t) async => saved.add(t),
+      onRevoked: () async {},
+    );
+    final pending = tm.accessToken();
+    tm.reset();
+    gate.complete(const TokenPair('a', 'r2'));
+    await expectLater(pending, throwsA(isA<SignedOutException>()));
+    expect(saved, isEmpty);
   });
 }

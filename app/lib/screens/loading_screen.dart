@@ -26,11 +26,31 @@ class LoadingScreen extends ConsumerWidget {
                       onPressed: () => ref.read(sessionProvider.notifier).retryRestore(),
                       child: const Text('Try again'),
                     ),
+                    const SizedBox(height: 8),
+                    TextButton(onPressed: () => _startOver(context, ref), child: const Text('Start over')),
                   ]),
                 ),
               )
             : const CircularProgressIndicator(),
       ),
     );
+  }
+
+  Future<void> _startOver(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Start over?'),
+        content: const Text(
+          "This deletes what FamChat saved on this device, including its keys. You'll need a new "
+          'invite to sign in again.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Start over')),
+        ],
+      ),
+    );
+    if (ok == true) await ref.read(sessionProvider.notifier).startOver();
   }
 }

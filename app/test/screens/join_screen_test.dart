@@ -1,6 +1,7 @@
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
-import 'package:flutter/widgets.dart';
+import 'package:famchat/session/stored_session.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/app_harness.dart';
@@ -90,13 +91,22 @@ void main() {
     expect(find.text(storageUnavailableMessage), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
   });
+
+  testWidgets('storage failure offers to start over', (tester) async {
+    final broken = _BrokenKv()..values[SessionStore.key] = 'unreadable';
+    await pumpApp(tester, server: server, kv: broken);
+    await tester.tap(find.text('Start over'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Start over'));
+    await tester.pumpAndSettle();
+    expect(find.text('Join FamChat'), findsOneWidget);
+    expect(broken.values, isEmpty);
+  });
 }
 
-class _BrokenKv implements SecureKv {
+class _BrokenKv extends MemorySecureKv {
   @override
   Future<String?> read(String key) async => throw StateError('no keyring');
   @override
   Future<void> write(String key, String value) async => throw StateError('no keyring');
-  @override
-  Future<void> delete(String key) async {}
 }

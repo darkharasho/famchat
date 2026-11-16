@@ -32,6 +32,31 @@ class HangingKv implements SecureKv {
   Future<void> delete(String key) => Completer<void>().future;
 }
 
+/// Memory storage whose writes can be held, failed or hung on demand.
+class ControlledKv extends MemorySecureKv {
+  Completer<void>? holdNextWrite;
+  int failWrites = 0;
+  bool hangNextWrite = false;
+
+  @override
+  Future<void> write(String key, String value) async {
+    final hold = holdNextWrite;
+    if (hold != null) {
+      holdNextWrite = null;
+      await hold.future;
+    }
+    if (hangNextWrite) {
+      hangNextWrite = false;
+      return Completer<void>().future;
+    }
+    if (failWrites > 0) {
+      failWrites--;
+      throw PlatformException(code: 'keyring locked');
+    }
+    return super.write(key, value);
+  }
+}
+
 void main() {
   late FakeServer server;
   late MemorySecureKv kv;
@@ -169,5 +194,72 @@ void main() {
     await ctl.updateProfile(await c.read(apiClientProvider).me());
     expect((c.read(sessionProvider) as SignedIn).session.name, 'Gran');
     expect(jsonDecode(kv.values[SessionStore.key]!)['name'], 'Gran');
+  });
+
+  Future<(ProviderContainer, ControlledKv, DateTime Function())> signedInWithControlledKv({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final ckv = ControlledKv();
+    var now = DateTime(2026, 11, 16, 12);
+    server.now = () => now;
+    final c = make(store: ckv, timeout: timeout);
+    await settledSession(c);
+    await c.read(sessionProvider.notifier).join(token: server.addInvite(name: 'Gran'), deviceName: 'Pixel');
+    return (c, ckv, () => now = now.add(const Duration(minutes: 2)));
+  }
+
+  String serverRefresh() => server.devices.values.single.refresh!;
+
+  test('a profile save racing a refresh keeps the new refresh token', () async {
+    final (c, ckv, _) = await signedInWithControlledKv();
+    final hold = ckv.holdNextWrite = Completer<void>();
+    final profile = c.read(sessionProvider.notifier).updateProfile(
+          Me(userId: (c.read(sessionProvider) as SignedIn).session.userId, deviceId: 'd', name: 'Gran', isAdmin: false),
+        );
+    server.expireAccessTokens();
+    final me = c.read(apiClientProvider).me();
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    hold.complete();
+    await profile;
+    await me;
+    final stored = jsonDecode(ckv.values[SessionStore.key]!) as Map<String, Object?>;
+    expect(stored['refreshToken'], serverRefresh());
+    expect(stored['name'], 'Gran');
+    expect((c.read(sessionProvider) as SignedIn).session.refreshToken, serverRefresh());
+  });
+
+  test('a failed save during refresh keeps the new token in memory', () async {
+    final (c, ckv, advance) = await signedInWithControlledKv();
+    ckv.failWrites = 1;
+    server.expireAccessTokens();
+    await c.read(apiClientProvider).me();
+    advance(); // past the grace window: only the new token works now
+    server.expireAccessTokens();
+    await c.read(apiClientProvider).me();
+    expect(c.read(sessionProvider), isA<SignedIn>());
+    expect(server.devices.values.single.revokedAt, isNull);
+    final stored = jsonDecode(ckv.values[SessionStore.key]!) as Map<String, Object?>;
+    expect(stored['refreshToken'], serverRefresh());
+  });
+
+  test('a hung save during refresh does not block requests', () async {
+    final (c, ckv, _) = await signedInWithControlledKv(timeout: const Duration(milliseconds: 50));
+    ckv.hangNextWrite = true;
+    server.expireAccessTokens();
+    expect((await c.read(apiClientProvider).me().timeout(const Duration(seconds: 2))).name, 'Gran');
+  });
+
+  test('revocation does not wipe a session another tab stored for a different device', () async {
+    final c = make();
+    await settledSession(c);
+    await c.read(sessionProvider.notifier).join(token: server.addInvite(), deviceName: 'Pixel');
+    final mine = (c.read(sessionProvider) as SignedIn).session;
+    final other = jsonEncode({...mine.toJson(), 'deviceId': 'other-device', 'refreshToken': 'other'});
+    kv.values[SessionStore.key] = other;
+    server.revoke(mine.deviceId);
+    server.expireAccessTokens();
+    await expectLater(c.read(apiClientProvider).me(), throwsA(isA<SignedOutException>()));
+    expect(c.read(sessionProvider), isA<SignedOut>());
+    expect(kv.values[SessionStore.key], other);
   });
 }

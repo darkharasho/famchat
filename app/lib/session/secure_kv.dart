@@ -21,8 +21,9 @@ class MemorySecureKv implements SecureKv {
   Future<void> delete(String key) async => values.remove(key);
 }
 
-/// The OS keychain/keystore (Keychain, Android Keystore, libsecret, Credential Manager;
-/// WebCrypto-wrapped localStorage on the web, which the spec's "Known limits" accepts).
+/// The OS keychain/keystore (Keychain, Android Keystore, libsecret, Credential Manager).
+/// On the web it is WebCrypto-wrapped localStorage, readable by any script on the origin;
+/// see the spec's "Known limits".
 class FlutterSecureKv implements SecureKv {
   FlutterSecureKv([FlutterSecureStorage? storage]) : _s = storage ?? _default;
 

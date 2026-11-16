@@ -44,8 +44,8 @@ class SessionUnavailable extends SessionState {
 
 const revokedMessage = 'This device was signed out. Ask for a new invite to sign in again.';
 const storageUnavailableMessage = "FamChat couldn't open this device's secure storage, where it keeps "
-    'your keys. On Linux, make sure a keyring such as GNOME Keyring or KWallet is installed and '
-    'unlocked, then try again.';
+    'your keys. Try again in a moment. On Linux, check that a keyring such as GNOME Keyring or '
+    'KWallet is installed and unlocked.';
 
 final secureKvProvider = Provider<SecureKv>((ref) => FlutterSecureKv());
 
@@ -100,7 +100,22 @@ class SessionController extends Notifier<SessionState> {
   /// response hits the server's same-keys idempotency instead of `invite_invalid`.
   _PendingJoin? _pending;
 
+  /// Every change to the stored session runs here, one at a time, on the latest state, so a
+  /// slow save can't write back an older refresh token or bring back a wiped session.
+  Future<void> _writes = Future.value();
+
+  /// The refresh token in memory is newer than the stored one (its save failed).
+  bool _unsaved = false;
+
   SessionStore get _store => ref.read(sessionStoreProvider);
+  Duration get _timeout => ref.read(storageTimeoutProvider);
+  TokenManager? get _tokens => ref.read(apiClientProvider).tokens;
+
+  Future<T> _serial<T>(Future<T> Function() f) {
+    final r = _writes.then((_) => f());
+    _writes = r.then((_) {}, onError: (_) {});
+    return r;
+  }
 
   @override
   SessionState build() {
@@ -117,7 +132,7 @@ class SessionController extends Notifier<SessionState> {
     await Future<void>.value(); // let build() return first
     SessionState next;
     try {
-      final s = await _store.load().timeout(ref.read(storageTimeoutProvider));
+      final s = await _store.load().timeout(_timeout);
       next = s == null ? const SignedOut() : SignedIn(s);
     } catch (_) {
       next = const SessionUnavailable(storageUnavailableMessage);
@@ -154,21 +169,26 @@ class SessionController extends Notifier<SessionState> {
       encSeed: seeds['encSeed']!,
       signSeed: seeds['signSeed']!,
     );
-    await _store.save(session).timeout(ref.read(storageTimeoutProvider));
-    _pending = null;
-    api.tokens!.setAccessToken(r.accessToken);
-    state = SignedIn(session);
+    await _serial(() async {
+      await _store.save(session).timeout(_timeout);
+      _pending = null;
+      _unsaved = false;
+      api.tokens!
+        ..reset() // a refresh left over from an earlier session must not save into this one
+        ..setAccessToken(r.accessToken);
+      state = SignedIn(session);
+    });
   }
 
   /// Keeps the stored name and admin flag in step with `GET /api/me`.
-  Future<void> updateProfile(Me me) async {
-    final s = state;
-    if (s is! SignedIn || s.session.userId != me.userId) return;
-    if (s.session.name == me.name && s.session.isAdmin == me.isAdmin) return;
-    final next = s.session.copyWith(name: me.name, isAdmin: me.isAdmin);
-    await _store.save(next);
-    if (ref.mounted && state is SignedIn) state = SignedIn(next);
-  }
+  Future<void> updateProfile(Me me) => _serial(() async {
+        final s = state;
+        if (s is! SignedIn || s.session.userId != me.userId) return;
+        if (s.session.name == me.name && s.session.isAdmin == me.isAdmin) return;
+        final next = s.session.copyWith(name: me.name, isAdmin: me.isAdmin);
+        state = SignedIn(next);
+        await _store.save(next).timeout(_timeout);
+      });
 
   /// Revokes this device on the server (best effort) and wipes its keys and tokens.
   Future<void> signOut() async {
@@ -180,16 +200,27 @@ class SessionController extends Notifier<SessionState> {
         // Offline or already revoked: the local wipe still happens.
       }
     }
-    await _clearLocal();
-    state = const SignedOut();
+    await _endSession(const SignedOut());
   }
+
+  /// From the storage error screen, after the user confirmed: delete whatever is stored.
+  Future<void> startOver() => _serial(() async {
+        _detach();
+        try {
+          await _store.clear().timeout(_timeout);
+        } catch (_) {
+          // Storage is broken anyway; a new join overwrites the blob if it can.
+        }
+        state = const SignedOut();
+      });
 
   Future<String?> _readRefreshToken() async {
     final s = state;
     if (s is! SignedIn) return null;
+    if (_unsaved) return s.session.refreshToken;
     try {
       // Another tab may have rotated the token since this one loaded it.
-      final stored = await _store.load().timeout(ref.read(storageTimeoutProvider));
+      final stored = await _store.load().timeout(_timeout);
       if (stored != null && stored.deviceId == s.session.deviceId) return stored.refreshToken;
     } catch (_) {
       // Fall back to the token in memory.
@@ -197,26 +228,45 @@ class SessionController extends Notifier<SessionState> {
     return s.session.refreshToken;
   }
 
-  Future<void> _saveRefreshToken(String token) async {
-    final s = state;
-    if (s is! SignedIn) throw const SignedOutException();
-    final next = s.session.copyWith(refreshToken: token);
-    await _store.save(next);
-    if (ref.mounted && state is SignedIn) state = SignedIn(next);
-  }
+  /// The new token goes into memory first; if storage then fails or hangs, it stays there
+  /// (and is used for the next refresh) rather than being lost.
+  Future<void> _saveRefreshToken(String token) => _serial(() async {
+        final s = state;
+        if (s is! SignedIn) throw const SignedOutException();
+        final next = s.session.copyWith(refreshToken: token);
+        state = SignedIn(next);
+        _unsaved = true;
+        try {
+          await _store.save(next).timeout(_timeout);
+          _unsaved = false;
+        } catch (_) {
+          // Kept in memory; the next save retries.
+        }
+      });
 
-  Future<void> _revoked() async {
-    await _clearLocal();
-    if (ref.mounted) state = const SignedOut(message: revokedMessage);
-  }
+  Future<void> _revoked() => _endSession(const SignedOut(message: revokedMessage));
 
-  Future<void> _clearLocal() async {
+  void _detach() {
     _pending = null;
-    ref.read(apiClientProvider).tokens?.setAccessToken(null);
-    try {
-      await _store.clear().timeout(ref.read(storageTimeoutProvider));
-    } catch (_) {
-      // Nothing more to do; the server side is already revoked or will reject the token.
-    }
+    _unsaved = false;
+    _tokens?.reset();
   }
+
+  /// Wipes this session's stored blob (only if it is still this device's: on the web another
+  /// tab may have stored a newer session) and moves to [next].
+  Future<void> _endSession(SignedOut next) => _serial(() async {
+        final s = state;
+        _detach();
+        if (s is SignedIn) {
+          try {
+            final stored = await _store.load().timeout(_timeout);
+            if (stored == null || stored.deviceId == s.session.deviceId) {
+              await _store.clear().timeout(_timeout);
+            }
+          } catch (_) {
+            // Nothing more to do; the server side is already revoked or will reject the token.
+          }
+        }
+        if (ref.mounted) state = next;
+      });
 }
