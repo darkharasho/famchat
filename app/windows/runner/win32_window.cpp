@@ -31,10 +31,22 @@ static int g_active_window_count = 0;
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
+// The smallest window the phone layout still fits in, in logical pixels.
+constexpr int kMinWidth = 380;
+constexpr int kMinHeight = 500;
+
 // Scale helper to convert logical scaler values to physical using passed in
 // scale factor
 int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
+}
+
+// The height of the resize border above a window's title bar, which a
+// maximized window pushes off the top of the screen.
+int MaximizedTopInset(HWND hwnd) {
+  UINT dpi = GetDpiForWindow(hwnd);
+  return GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+         GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 }
 
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
@@ -145,6 +157,10 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
+  // Recalculate the frame now that WM_NCCALCSIZE drops the title bar.
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                   SWP_NOACTIVATE);
 
   return OnCreate();
 }
@@ -179,6 +195,35 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    // FamChat draws its own title bar (lib/window/title_bar.dart). The client
+    // area takes the system title bar's place; the left, right and bottom
+    // resize borders stay the system's, and the app resizes from the top edge
+    // itself (startResize in flutter_window.cpp).
+    case WM_NCCALCSIZE: {
+      if (wparam == FALSE) {
+        break;
+      }
+      auto params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+      const LONG top = params->rgrc[0].top;
+      LRESULT result = DefWindowProc(hwnd, message, wparam, lparam);
+      if (result != 0) {
+        return result;
+      }
+      params->rgrc[0].top = top;
+      if (IsZoomed(hwnd)) {
+        params->rgrc[0].top += MaximizedTopInset(hwnd);
+      }
+      return 0;
+    }
+
+    case WM_GETMINMAXINFO: {
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      double scale_factor = GetDpiForWindow(hwnd) / 96.0;
+      info->ptMinTrackSize.x = Scale(kMinWidth, scale_factor);
+      info->ptMinTrackSize.y = Scale(kMinHeight, scale_factor);
+      return 0;
+    }
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
