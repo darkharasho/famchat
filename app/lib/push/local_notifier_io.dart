@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'chat_route.dart';
 import 'local_notifier.dart';
 
 LocalNotifier? createLocalNotifier() => switch (defaultTargetPlatform) {
@@ -36,10 +37,14 @@ class DesktopLocalNotifier implements LocalNotifier {
             ),
             onDidReceiveNotificationResponse: (r) {
               final route = r.payload;
-              if (route != null && route.startsWith('/')) onTap(route);
+              if (isChatRoute(route)) onTap(route!);
             },
           ) ??
           false;
+      // A tap on a notification left in the notification center that launched the app.
+      final launch = _ready ? await _plugin.getNotificationAppLaunchDetails() : null;
+      final route = launch?.notificationResponse?.payload;
+      if (launch?.didNotificationLaunchApp == true && isChatRoute(route)) onTap(route!);
     } catch (e) {
       // No notification service (a Linux desktop without one, say): the app works without.
       debugPrint('desktop notifications unavailable: $e');

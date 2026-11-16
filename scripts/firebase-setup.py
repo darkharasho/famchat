@@ -4,8 +4,10 @@
   apps   Makes sure the Firebase project has an Android, an iOS and a web app for FamChat, then writes
          app/lib/push/firebase_options.dart and app/web/firebase-config.js from their configs.
          (These identify the project; they are not secret and are committed.)
-  key    Creates a new key for the project's firebase-adminsdk service account and writes the key
-         file (JSON) to stdout, which must be a pipe (into `wrangler secret put`). Never to a terminal.
+  key    Creates a new key for the project's firebase-adminsdk service account and stores it as the
+         Worker secret FCM_SERVICE_ACCOUNT (`wrangler secret put`, run in server/). The key is
+         handed over on stdin, never printed or written to disk; if storing fails, the new key is
+         deleted again so no unheld key stays valid.
 
 Uses the Firebase CLI (FIREBASE env: the command to run it) and its stored login.
 """
@@ -177,8 +179,6 @@ def google(method, url, token, body=None):
 
 
 def cmd_key():
-    if sys.stdout.isatty():
-        raise SystemExit("refusing to print a private key to a terminal; pipe it into `wrangler secret put`")
     token = access_token()
     # FCM HTTP v1 is on for new projects; make sure.
     try:
@@ -189,10 +189,20 @@ def cmd_key():
     admin = next((a["email"] for a in accounts if a["email"].startswith("firebase-adminsdk-")), None)
     if not admin:
         raise SystemExit("no firebase-adminsdk service account in the project")
+    base = f"https://iam.googleapis.com/v1/projects/{PROJECT}/serviceAccounts/{admin}/keys"
+    older = google("GET", base + "?keyTypes=USER_MANAGED", token).get("keys", [])
     log(f"creating a key for {admin}")
-    key = google("POST", f"https://iam.googleapis.com/v1/projects/{PROJECT}/serviceAccounts/{admin}/keys", token, {})
-    sys.stdout.write(base64.b64decode(key["privateKeyData"]).decode())
-    sys.stdout.flush()
+    key = google("POST", base, token, {})
+    secret = base64.b64decode(key["privateKeyData"])
+    put = subprocess.run(["npx", "wrangler", "secret", "put", "FCM_SERVICE_ACCOUNT"], input=secret, cwd=os.path.join(ROOT, "server"))
+    del secret
+    if put.returncode != 0:
+        google("DELETE", f"https://iam.googleapis.com/v1/{key['name']}", token)
+        raise SystemExit("wrangler secret put failed; the new key was deleted again")
+    log("stored FCM_SERVICE_ACCOUNT")
+    if older:
+        log(f"note: {admin} has {len(older)} older key(s). If none is used elsewhere, delete them at\n"
+            f"  https://console.cloud.google.com/iam-admin/serviceaccounts?project={PROJECT}")
 
 
 if __name__ == "__main__":

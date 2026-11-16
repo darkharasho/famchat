@@ -37,7 +37,12 @@ Client: `lib/push/` — `firebase_options.dart` is a committed stub whose `curre
 11. **Retries:** per-token 429/5xx/network errors re-enqueue a job restricted to those device ids (`deviceIds`, `attempt`, delay 10 s × attempt, up to 3 attempts); unexpected exceptions `msg.retry()`. Successful tokens never get a duplicate. Cost if wrong: a dropped notification after 3 failures.
 12. **`device` events are not pushed** (pairing happens with both devices open; revocation is visible next launch). Cost if wrong: small follow-up.
 13. **Web permission is asked from a user gesture** (a "Turn on notifications" banner in the chat list); iOS/Android/macOS ask on the first signed-in home screen; Windows/Linux need none.
-14. **iOS entitlements:** `aps-environment` added via `Runner.entitlements`; the release workflow archives unsigned and signs at export, so it warns when the exported IPA lacks `aps-environment` rather than guessing. Cost if wrong: iOS pushes don't arrive until the profile/export is fixed (visible as a release warning).
+14. **iOS entitlements:** `aps-environment` added via `Runner.entitlements`. The release archives unsigned and signs at export, so it now always exports an IPA first and warns when the signed app lacks `aps-environment`, then exports again for the upload. Cost if wrong: iOS pushes don't arrive until the profile/export is fixed (visible as a release warning); an extra export (~1 min) per release.
+15. **Push per device, not per user** (review I-1): a job lists every token-holding device without an open socket, so a phone is pushed while the same person's desktop app sits connected at home. Cost if wrong: a desktop user at their desk also gets a phone buzz.
+16. **Only `UNREGISTERED` clears a token** (review M-3): a bare 404 or `SENDER_ID_MISMATCH` means our project/key is wrong and would otherwise wipe every token. Cost if wrong: a really dead token lingers until FCM says UNREGISTERED.
+17. **A token moves to whichever device registers it, across users** (review M-6 declined): sign-out and revoke clear tokens, so the only cross-user case is a shared, reinstalled device, where the new user should get the pushes. A malicious family member would need another device's FCM token. Cost if wrong: one user could redirect another device's pushes (names/titles only).
+18. **Classic FCM tokens** (`getToken`, deprecated in firebase_messaging 17 in favour of FID registration), because FCM HTTP v1's `token` target is what the server sends to. Cost if wrong: migrate both sides when the FID send API is documented.
+19. **Stale-socket window 90 s**, not 60 (review M-5): Chrome throttles timers in long-hidden tabs to once a minute.
 
 ## Review Focus
 

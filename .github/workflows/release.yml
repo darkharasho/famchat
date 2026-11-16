@@ -130,13 +130,15 @@ jobs:
         env:
           DESTINATION: ${{ steps.store.outputs.upload == 'true' && 'upload' || 'export' }}
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          # export DESTINATION OUTDIR: sign the archive for the App Store (automatic, cloud-managed).
+          export_to() {
+            cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>$DESTINATION</string>
+            <key>destination</key><string>$1</string>
             <key>teamID</key><string>$TEAM_ID</string>
             <key>signingStyle</key><string>automatic</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
@@ -144,23 +146,23 @@ jobs:
           </dict>
           </plist>
           EOF
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/export" -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-          # Push needs aps-environment in the signed app. The archive is unsigned, so check what the
-          # export signed (only an exported IPA can be inspected; an upload leaves none here).
-          for ipa in "$RUNNER_TEMP"/export/*.ipa; do
-            [ -f "$ipa" ] || continue
-            rm -rf "$RUNNER_TEMP/ipa-check" && unzip -q "$ipa" -d "$RUNNER_TEMP/ipa-check"
-            if codesign -d --entitlements :- "$RUNNER_TEMP"/ipa-check/Payload/*.app 2>/dev/null | grep -q aps-environment; then
-              echo "aps-environment entitlement present"
-            else
-              echo "::warning::The signed IPA has no aps-environment entitlement: iOS push notifications won't arrive. Check that the App ID has Push Notifications and the profile includes it."
-            fi
-          done
+            xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+              -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+              -exportPath "$2" -allowProvisioningUpdates \
+              -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          }
+          # Always export an IPA first, so the signed entitlements can be checked: push needs
+          # aps-environment, and the archive itself is unsigned.
+          export_to export "$RUNNER_TEMP/export"
+          rm -rf "$RUNNER_TEMP/ipa-check" && unzip -q "$RUNNER_TEMP"/export/*.ipa -d "$RUNNER_TEMP/ipa-check"
+          if codesign -d --entitlements :- "$RUNNER_TEMP"/ipa-check/Payload/*.app 2>/dev/null | grep -q aps-environment; then
+            echo "aps-environment entitlement present"
+          else
+            echo "::warning::The signed IPA has no aps-environment entitlement: iOS push notifications won't arrive. Check that the App ID has Push Notifications and the profile includes it."
+          fi
           if [ "$DESTINATION" = upload ]; then
+            export_to upload "$RUNNER_TEMP/upload"
             echo "Uploaded FamChat $NAME ($NUMBER) to App Store Connect; it shows in TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"
           else
             mkdir -p ../dist && cp "$RUNNER_TEMP"/export/*.ipa "../dist/FamChat-$NAME-$NUMBER.ipa"

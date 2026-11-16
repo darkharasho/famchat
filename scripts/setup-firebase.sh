@@ -4,6 +4,7 @@
 #   scripts/setup-firebase.sh                       # everything below
 #   scripts/setup-firebase.sh --key-file key.json   # use a key downloaded from the Firebase console
 #   scripts/setup-firebase.sh --no-git              # only write the files; commit them yourself
+#   FIREBASE_PROJECT=<id> scripts/setup-firebase.sh # another Firebase project id (default famchat)
 #
 # 1. Logs in to Firebase (browser) if needed.
 # 2. Makes sure the Firebase project "famchat" has Android, iOS and web apps (bundle id
@@ -44,14 +45,10 @@ cd "$root/server"
 if [ -n "$key_file" ]; then
   npx wrangler secret put FCM_SERVICE_ACCOUNT < "$key_file"
   echo "Stored. Delete $key_file now; the Worker has its own copy."
-elif key="$(python3 "$root/scripts/firebase-setup.py" key)" && [ -n "$key" ]; then
-  # Held in memory only, then piped (not an argument, so it never shows in a process list).
-  printf '%s' "$key" | npx wrangler secret put FCM_SERVICE_ACCOUNT
-  unset key
-else
+elif ! python3 "$root/scripts/firebase-setup.py" key; then
   cat >&2 <<EOF
 Could not create the key automatically. Download one instead:
-  https://console.firebase.google.com/project/famchat/settings/serviceaccounts/adminsdk
+  https://console.firebase.google.com/project/${FIREBASE_PROJECT:-famchat}/settings/serviceaccounts/adminsdk
   -> "Generate new private key", then run:
   scripts/setup-firebase.sh --key-file <downloaded file>
 EOF

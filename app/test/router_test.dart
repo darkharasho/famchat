@@ -1,3 +1,4 @@
+import 'package:famchat/push/chat_route.dart';
 import 'package:famchat/router.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:famchat/session/stored_session.dart';
@@ -77,5 +78,9 @@ void main() {
     expect(chatRoute(null), isNull);
     expect(chatRoute('../devices'), isNull);
     expect(chatRoute('01arz3ndektsv4rrffq69g5fav'), isNull);
+    expect(isChatRoute('/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV'), isTrue);
+    for (final r in [null, '/devices', '/chats/x', '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV/info']) {
+      expect(isChatRoute(r), isFalse, reason: '$r');
+    }
   });
 }
