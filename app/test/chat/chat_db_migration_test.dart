@@ -1,0 +1,34 @@
+import 'dart:io';
+
+import 'package:drift/native.dart';
+import 'package:famchat/chat/db/chat_db.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('schema 1 to 2: reset banners table, and the admins this device knew are pinned', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+
+    // Make a current database, then (before the next open migrates it) turn it back into schema 1:
+    // no local_resets, no pinned_admin.
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('DROP TABLE local_resets')
+        ..execute('ALTER TABLE local_users DROP COLUMN pinned_admin')
+        ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
+        ..execute('PRAGMA user_version = 1');
+    }));
+    addTearDown(db.close);
+    expect((await db.userById('A'))!.pinnedAdmin, isTrue);
+    expect((await db.userById('B'))!.pinnedAdmin, isFalse);
+    expect(await db.metaValue(ChatDb.adminsPinnedKey), '1');
+    await db.recordReset(id: 'R', userId: 'B', signerUserId: 'A', signerKind: 'admin', createdAt: 1);
+    expect((await db.allResets()).single.id, 'R');
+  });
+}

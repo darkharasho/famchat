@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
+import 'screens/family_screen.dart';
+import 'screens/recover_screen.dart';
+import 'screens/recovery_code_screen.dart';
 import 'screens/chats/chats_shell.dart';
 import 'screens/chats/group_info_screen.dart';
 import 'screens/chats/new_chat_screen.dart';
@@ -25,7 +28,7 @@ class PendingLocation {
 
 final pendingLocationProvider = Provider<PendingLocation>((ref) => PendingLocation());
 
-const _signInPages = {'/join', '/pair', '/loading'};
+const _signInPages = {'/join', '/pair', '/recover', '/loading'};
 
 /// Where [location] must go for session state [s], or null to stay. With [pending], a location
 /// sent to the loading screen is remembered and returned to once signed in.
@@ -37,7 +40,7 @@ String? sessionRedirect(SessionState s, String location, {PendingLocation? pendi
       return '/loading';
     case SignedOut():
       pending?.value = null;
-      return location == '/join' || location == '/pair' || location == '/spikes' ? null : '/join';
+      return location == '/join' || location == '/pair' || location == '/recover' || location == '/spikes' ? null : '/join';
     case SignedIn(:final session):
       if (_signInPages.contains(location)) {
         final back = pending?.value;
@@ -45,7 +48,7 @@ String? sessionRedirect(SessionState s, String location, {PendingLocation? pendi
         if (back == null) return '/';
         return sessionRedirect(s, back) ?? back;
       }
-      if ((location == '/invite' || location == '/storage') && !session.isAdmin) return '/';
+      if ((location == '/invite' || location == '/storage' || location.startsWith('/family')) && !session.isAdmin) return '/';
       return null;
   }
 }
@@ -85,6 +88,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),
       GoRoute(path: '/storage', builder: (context, state) => const StorageScreen()),
+      GoRoute(path: '/family', builder: (context, state) => const FamilyScreen()),
+      GoRoute(path: '/family/recovery-code', builder: (context, state) => const RecoveryCodeScreen()),
+      GoRoute(path: '/recover', builder: (context, state) => const RecoverScreen()),
     ],
   );
   ref.onDispose(() {

@@ -100,7 +100,7 @@ ChatDto chat(String id, String kind, {String? title, List<String> members = cons
     );
 
 UserRow user(String id, String name) =>
-    UserRow(id: id, name: name, isAdmin: false, identityPub: 'x', trustedIdentityPub: 'x', knownIdentityPubs: '[]');
+    UserRow(id: id, name: name, isAdmin: false, identityPub: 'x', trustedIdentityPub: 'x', knownIdentityPubs: '[]', pinnedAdmin: false);
 
 Map<String, Object?> msg(String chatId, String sender) => {
       'type': 'msg',

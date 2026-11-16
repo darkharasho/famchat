@@ -70,6 +70,13 @@ final messagesProvider =
 final membersProvider =
     StreamProvider.family<List<MemberRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMembers(id));
 
+/// Verified account resets of the chat's other members whose banner wasn't dismissed in this chat.
+final resetBannersProvider = StreamProvider.family<List<ResetRow>, String>((ref, chatId) {
+  final me = ref.watch(myUserIdProvider);
+  if (me == null) return Stream.value(const []);
+  return ref.watch(chatDbProvider).watchResetBanners(chatId, me);
+});
+
 /// Every family member, by id.
 final usersProvider = StreamProvider<Map<String, UserRow>>(
   (ref) => ref.watch(chatDbProvider).watchUsers().map((us) => {for (final u in us) u.id: u}),

@@ -11,8 +11,11 @@ import '../api/token_manager.dart';
 import '../config.dart';
 import '../crypto/device_cert.dart';
 import '../crypto/encoding.dart';
+import '../chat/ulid.dart';
 import '../crypto/keys.dart';
+import '../crypto/reset.dart';
 import '../platform_info.dart';
+import 'invite_link.dart';
 import 'secure_kv.dart';
 import 'stored_session.dart';
 
@@ -95,6 +98,14 @@ class _PendingJoin {
   final DeviceCert cert;
 }
 
+class _PendingRecovery {
+  _PendingRecovery(this.code, this.deviceName, this.identity, this.device, this.body);
+  final String code, deviceName;
+  final SimpleKeyPair identity;
+  final DeviceKeys device;
+  final Map<String, Object?> body;
+}
+
 class SessionController extends Notifier<SessionState> {
   /// Keys generated for an invite whose redeem hasn't succeeded yet. Reused on retry so a lost
   /// response hits the server's same-keys idempotency instead of `invite_invalid`.
@@ -151,24 +162,87 @@ class SessionController extends Notifier<SessionState> {
       p = _pending = _PendingJoin(token, identity, device, cert);
     }
     final api = ref.read(apiClientProvider);
+    // A reset link carries a claim key: it signs the new identity key, which is how the family's
+    // devices know this key is the one the admin's reset was for.
+    final invite = splitInvite(token);
+    final seed = invite.claimSeed;
+    final claimSig = seed == null
+        ? null
+        : b64url(await signResetClaim(await newIdentityKey(seed: seed), newIdentityPub: p.cert.identityPub));
     final r = await api.redeemInvite(
-      token: token,
+      token: invite.token,
       deviceName: deviceName.trim(),
       platform: serverPlatform(),
       cert: p.cert,
+      resetClaimSig: claimSig,
     );
-    final seeds = await p.device.toStorage();
-    await _signIn(StoredSession(
+    await _signIn(await _session(r, deviceName.trim(), p.identity, p.device), r.accessToken);
+  }
+
+  static Future<StoredSession> _session(RedeemResult r, String deviceName, SimpleKeyPair identity, DeviceKeys device) async {
+    final seeds = await device.toStorage();
+    return StoredSession(
       userId: r.userId,
       deviceId: r.deviceId,
-      deviceName: deviceName.trim(),
+      deviceName: deviceName,
       refreshToken: r.refreshToken,
       isAdmin: r.isAdmin,
       name: null,
-      identitySeed: b64url(await seedOf(p.identity)),
+      identitySeed: b64url(await seedOf(identity)),
       encSeed: seeds['encSeed']!,
       signSeed: seeds['signSeed']!,
-    ), r.accessToken);
+    );
+  }
+
+  /// A recovery attempt whose response may have been lost: retried with the same statement and keys.
+  _PendingRecovery? _recovery;
+
+  /// Signs in to the admin account whose printed recovery [code] this is, with a new identity key.
+  /// Every old device of that account is signed out and the code is used up. Throws
+  /// [ApiException] (`unauthorized`: no admin has this code) or [NetworkException].
+  Future<void> recover({required RecoveryCode code, required String deviceName}) async {
+    final api = ref.read(apiClientProvider);
+    var p = _recovery;
+    if (p == null || p.code != code.compact || p.deviceName != deviceName.trim()) {
+      final rk = await recoveryKeyFrom(code);
+      final rkPub = b64url(await publicKeyOf(rk));
+      final who = await api.recoverLookup(rkPub);
+      final identity = await newIdentityKey();
+      final device = await DeviceKeys.generate();
+      final cert = await signDeviceCert(identity: identity, device: device);
+      final claim = await newIdentityKey();
+      final now = ref.read(clockProvider)();
+      final st = ResetStatement(
+        resetId: newUlid(now),
+        userId: who.userId,
+        signerUserId: who.userId,
+        signerKind: 'recovery',
+        oldIdentityPub: b64urlDecode(who.identityPub),
+        claimPub: await publicKeyOf(claim),
+        createdAt: now.millisecondsSinceEpoch,
+      );
+      p = _recovery = _PendingRecovery(code.compact, deviceName.trim(), identity, device, {
+        'recoveryPub': rkPub,
+        'resetId': st.resetId,
+        'oldIdentityPub': who.identityPub,
+        'claimPub': b64url(st.claimPub),
+        'createdAt': st.createdAt,
+        'sig': b64url(await signReset(st, rk)),
+        'claimSig': b64url(await signResetClaim(claim, newIdentityPub: cert.identityPub)),
+        'deviceName': deviceName.trim(),
+        'platform': serverPlatform(),
+        ...cert.toJson(),
+      });
+    }
+    final RedeemResult r;
+    try {
+      r = await api.recover(p.body);
+    } on ApiException {
+      _recovery = null; // refused: the next try signs a fresh statement
+      rethrow;
+    }
+    _recovery = null;
+    await _signIn(await _session(r, p.deviceName, p.identity, p.device), r.accessToken);
   }
 
   /// Saves [session] (from a join or a pairing) and signs in with [accessToken].

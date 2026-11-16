@@ -75,7 +75,9 @@ The client keeps a local SQLite cache (drift; wasm on web) plus an outbox for me
 - `POST /api/devices/pair/*` starts and completes QR pairing of a new device
 - `GET/DELETE /api/devices` lists or revokes your devices
 - `GET /api/me` returns the signed-in user's id, device id, name and admin flag
-- `POST /api/admin/invites`, `POST /api/admin/users/:id/reset` (admin only)
+- `POST /api/admin/invites`, `POST /api/admin/users/:id/reset`, `POST /api/admin/users/:id/admin`,
+  `POST /api/admin/recovery-key` (admin only); `POST /api/auth/recover/lookup`, `POST /api/auth/recover`
+  (admin recovery code; details in `docs/protocol.md` "Account resets")
 - `GET /api/users` lists the family with every device's public keys and certificate
 - `GET/POST /api/chats`, `GET /api/chats/:id`, `POST/DELETE /api/chats/:id/members`, `POST /api/chats/:id/epochs`, `GET /api/chats/:id/messages`
 - `GET/PUT /api/keys/*` fetches and adds wrapped chat keys (`/keys/wraps`, `/keys/missing`); device public keys come from `/api/users`
@@ -92,7 +94,8 @@ The client keeps a local SQLite cache (drift; wasm on web) plus an outbox for me
 - `chat_key_wraps(chat_id, epoch, device_id, wrapped_key, wrapped_by_device)`
 - `messages(chat_id, seq, id, sender_device_id, envelope BLOB, created_at)`
 - `media(key, uploader_id, chat_id, message_id, bytes, created_at, expired_at)`
-- `events(id, kind, payload, created_at)` for the audit log (resets, device adds and revocations)
+- `events(id, kind, user_id, actor_id, payload, created_at)` for the audit log (resets, device adds and revocations)
+- `resets(id, user_id, signer_user_id, signer_kind, signer_pub, old_identity_pub, claim_pub, sig, new_identity_pub, claim_sig, …)`: signed resets, which double as each user's identity key history
 
 ## End-to-end encryption
 

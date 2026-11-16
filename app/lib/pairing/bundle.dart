@@ -20,11 +20,14 @@ class HandoverKey {
 
 /// Another user's identity key as the approving device trusts it.
 class TrustedIdentity {
-  const TrustedIdentity({required this.userId, required this.trustedIdentityPub, required this.known});
+  const TrustedIdentity({required this.userId, required this.trustedIdentityPub, required this.known, this.admin});
   final String userId, trustedIdentityPub;
 
   /// Every identity key trusted for the user so far (base64url).
   final List<String> known;
+
+  /// The approving device trusts the user as an admin (null from a bundle that doesn't say).
+  final bool? admin;
 }
 
 class PairBundle {
@@ -54,7 +57,8 @@ class PairBundle {
           for (final k in keys) {'chatId': k.chatId, 'epoch': k.epoch, 'key': b64url(k.key)},
         ],
         'trust': [
-          for (final t in trust) {'userId': t.userId, 'trustedIdentityPub': t.trustedIdentityPub, 'known': t.known},
+          for (final t in trust)
+            {'userId': t.userId, 'trustedIdentityPub': t.trustedIdentityPub, 'known': t.known, 'admin': ?t.admin},
         ],
       }));
 
@@ -92,6 +96,11 @@ class PairBundle {
               final List<Object?> l when l.every((x) => x is String) => l.cast<String>(),
               _ => throw const CryptoFailure('bad known'),
             },
+            admin: switch (t['admin']) {
+              final bool b => b,
+              null => null,
+              _ => throw const CryptoFailure('bad admin'),
+            },
           ),
       ],
     );
@@ -116,7 +125,7 @@ Future<PairBundle> buildHandover({
       trust: [
         for (final u in await db.allUsers())
           if (u.id != userId)
-            TrustedIdentity(userId: u.id, trustedIdentityPub: u.trustedIdentityPub, known: _known(u)),
+            TrustedIdentity(userId: u.id, trustedIdentityPub: u.trustedIdentityPub, known: _known(u), admin: u.pinnedAdmin),
       ],
     );
 
@@ -164,7 +173,12 @@ Future<void> installHandover(ChatDb db, PairBundle b) async {
     for (final t in b.trust) {
       final existing = await db.userById(t.userId);
       final known = {...t.known, t.trustedIdentityPub}.toList();
-      await db.putUser(existing?.copyWith(trustedIdentityPub: t.trustedIdentityPub, knownIdentityPubs: jsonEncode(known)) ??
+      final admin = t.admin ?? false;
+      await db.putUser(existing?.copyWith(
+            trustedIdentityPub: t.trustedIdentityPub,
+            knownIdentityPubs: jsonEncode(known),
+            pinnedAdmin: admin,
+          ) ??
           UserRow(
             id: t.userId,
             name: '',
@@ -172,7 +186,10 @@ Future<void> installHandover(ChatDb db, PairBundle b) async {
             identityPub: t.trustedIdentityPub,
             trustedIdentityPub: t.trustedIdentityPub,
             knownIdentityPubs: jsonEncode(known),
+            pinnedAdmin: admin,
           ));
     }
+    // The approving device's admins replace this device's first-sight pinning (when it said).
+    if (b.trust.any((t) => t.admin != null)) await db.setMeta(ChatDb.adminsPinnedKey, '1');
   });
 }

@@ -13,7 +13,10 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:famchat/admin/admin_service.dart';
 import 'package:famchat/api/api_client.dart';
+import 'package:famchat/api/models.dart';
+import 'package:famchat/crypto/reset.dart';
 import 'package:famchat/api/token_manager.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
@@ -26,6 +29,7 @@ import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/pairing/approver.dart';
 import 'package:famchat/pairing/bundle.dart';
 import 'package:famchat/pairing/new_device_pairing.dart';
+import 'package:famchat/session/invite_link.dart';
 import 'package:famchat/session/stored_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -100,15 +104,21 @@ void main() {
     return d;
   }
 
+  /// Redeems an invite (or a reset link's `token.seed`, claiming the reset with the seed's key).
   Future<Device> join(String inviteToken, String deviceName) async {
     final identity = await newIdentityKey();
     final keys = await DeviceKeys.generate();
     final api = ApiClient(client: client, base: base!);
+    final invite = splitInvite(inviteToken);
+    final seed = invite.claimSeed;
     final r = await api.redeemInvite(
-      token: inviteToken,
+      token: invite.token,
       deviceName: deviceName,
       platform: 'linux',
       cert: await signDeviceCert(identity: identity, device: keys),
+      resetClaimSig: seed == null
+          ? null
+          : b64url(await signResetClaim(await newIdentityKey(seed: seed), newIdentityPub: await publicKeyOf(identity))),
     );
     final seeds = await keys.toStorage();
     return run(
@@ -134,10 +144,10 @@ void main() {
       body: jsonEncode({'name': 'Alice'}),
     );
     expect(res.statusCode, 201, reason: res.body);
-    final alice = await join((jsonDecode(res.body) as Map)['inviteToken'] as String, 'Alice phone');
-    final bob = await join((await alice.api.createInvite('Bob')).inviteToken, 'Bob phone');
+    final alice = aliceDevice = await join((jsonDecode(res.body) as Map)['inviteToken'] as String, 'Alice phone');
+    final bob = bobDevice = await join((await alice.api.createInvite('Bob')).inviteToken, 'Bob phone');
 
-    final chatId = await alice.sync.openDirect(bob.session.userId);
+    final chatId = directId = await alice.sync.openDirect(bob.session.userId);
     await alice.sync.sendText(chatId, 'before pairing');
     await until(() async => (await bob.texts(chatId)).contains('before pairing'), 'Bob to get the first message');
 
@@ -183,5 +193,43 @@ void main() {
     expect(last.envelope['epoch'], 2);
     final wraps = await HttpChatApi(alice.api).missingWraps();
     expect(wraps.where((w) => w.deviceId == laptop.session.deviceId), isEmpty);
-  }, skip: _api == null || _bootstrap == null ? 'set FAMCHAT_E2E_API and FAMCHAT_E2E_BOOTSTRAP (scripts/e2e-pairing.sh)' : false);
+  }, skip: _skip);
+
+  // Continues from the test above (same Worker and family).
+  test('admin resets Bob, whose new device gets the history from Alice', () async {
+    final alice = aliceDevice!, bob = bobDevice!, chatId = directId!;
+    final admin = AdminService(api: alice.api, userId: alice.session.userId, identity: alice.session.identityKey);
+    final bobNow = (await HttpChatApi(alice.api).users()).firstWhere((u) => u.id == bob.session.userId);
+    final link = await admin.resetUser(bob.session.userId, currentIdentityPub: bobNow.identityPub);
+
+    // Bob's old phone is signed out at once.
+    await until(() async {
+      try {
+        await bob.api.me();
+        return false;
+      } on SignedOutException {
+        return true;
+      } on ApiException {
+        return true;
+      }
+    }, "Bob's old phone to be signed out");
+    await bob.stop();
+    running.remove(bob);
+
+    final bob2 = await join(parseInviteToken(link.url)!, 'Bob new phone');
+    expect(bob2.session.userId, bob.session.userId);
+
+    // Alice's device verifies the admin-signed reset, trusts the new key without asking, shows the
+    // banner, and re-wraps the history for the new phone.
+    await until(() async => (await alice.db.allResets()).any((r) => r.id == link.resetId), 'the reset banner');
+    await until(() async => !(await alice.sync.directory.identityChanged(bob.session.userId)), 'automatic acknowledgement');
+    await until(() async => (await bob2.texts(chatId)).contains('before pairing'), "Bob's history on the new phone");
+
+    await bob2.sync.sendText(chatId, 'back again');
+    await until(() async => (await alice.texts(chatId)).contains('back again'), 'Alice to read the new phone');
+  }, skip: _skip);
 }
+
+final _skip = _api == null || _bootstrap == null ? 'set FAMCHAT_E2E_API and FAMCHAT_E2E_BOOTSTRAP (scripts/e2e-pairing.sh)' : false;
+Device? aliceDevice, bobDevice;
+String? directId;

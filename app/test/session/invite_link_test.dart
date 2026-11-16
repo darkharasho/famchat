@@ -17,6 +17,17 @@ void main() {
     }
   });
 
+  test('a reset link keeps its claim seed, which only the device sees', () {
+    final seed = 'A' * 43;
+    expect(parseInviteToken('https://famchat.dev/join#$t.$seed'), '$t.$seed');
+    final parts = splitInvite('$t.$seed');
+    expect(parts.token, t);
+    expect(parts.claimSeed, hasLength(32));
+    expect(splitInvite(t).claimSeed, isNull);
+    expect(parseInviteToken('$t.short'), isNull);
+    expect(inviteTokenFromUri(Uri.parse('https://famchat.dev/join#$t.$seed')), '$t.$seed');
+  });
+
   test('rejects anything that is not a token', () {
     for (final input in [
       '',

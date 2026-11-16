@@ -1992,6 +1992,21 @@ class $LocalUsersTable extends LocalUsers
         requiredDuringInsert: false,
         defaultValue: const Constant('[]'),
       );
+  static const VerificationMeta _pinnedAdminMeta = const VerificationMeta(
+    'pinnedAdmin',
+  );
+  @override
+  late final GeneratedColumn<bool> pinnedAdmin = GeneratedColumn<bool>(
+    'pinned_admin',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("pinned_admin" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2000,6 +2015,7 @@ class $LocalUsersTable extends LocalUsers
     identityPub,
     trustedIdentityPub,
     knownIdentityPubs,
+    pinnedAdmin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2065,6 +2081,15 @@ class $LocalUsersTable extends LocalUsers
         ),
       );
     }
+    if (data.containsKey('pinned_admin')) {
+      context.handle(
+        _pinnedAdminMeta,
+        pinnedAdmin.isAcceptableOrUnknown(
+          data['pinned_admin']!,
+          _pinnedAdminMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -2098,6 +2123,10 @@ class $LocalUsersTable extends LocalUsers
         DriftSqlType.string,
         data['${effectivePrefix}known_identity_pubs'],
       )!,
+      pinnedAdmin: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}pinned_admin'],
+      )!,
     );
   }
 
@@ -2121,6 +2150,11 @@ class UserRow extends DataClass implements Insertable<UserRow> {
   /// JSON list of every key this device has trusted for the user (first seen and acknowledged),
   /// so devices certified by an earlier key still verify their old messages.
   final String knownIdentityPubs;
+
+  /// This device trusts the user as an admin: pinned when it first saw the family (or from a
+  /// pairing handover), or promoted by an admin it trusts (lib/chat/resets.dart). The server's
+  /// [isAdmin] alone doesn't make anyone's reset count.
+  final bool pinnedAdmin;
   const UserRow({
     required this.id,
     required this.name,
@@ -2128,6 +2162,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     required this.identityPub,
     required this.trustedIdentityPub,
     required this.knownIdentityPubs,
+    required this.pinnedAdmin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2138,6 +2173,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     map['identity_pub'] = Variable<String>(identityPub);
     map['trusted_identity_pub'] = Variable<String>(trustedIdentityPub);
     map['known_identity_pubs'] = Variable<String>(knownIdentityPubs);
+    map['pinned_admin'] = Variable<bool>(pinnedAdmin);
     return map;
   }
 
@@ -2149,6 +2185,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       identityPub: Value(identityPub),
       trustedIdentityPub: Value(trustedIdentityPub),
       knownIdentityPubs: Value(knownIdentityPubs),
+      pinnedAdmin: Value(pinnedAdmin),
     );
   }
 
@@ -2166,6 +2203,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
         json['trustedIdentityPub'],
       ),
       knownIdentityPubs: serializer.fromJson<String>(json['knownIdentityPubs']),
+      pinnedAdmin: serializer.fromJson<bool>(json['pinnedAdmin']),
     );
   }
   @override
@@ -2178,6 +2216,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       'identityPub': serializer.toJson<String>(identityPub),
       'trustedIdentityPub': serializer.toJson<String>(trustedIdentityPub),
       'knownIdentityPubs': serializer.toJson<String>(knownIdentityPubs),
+      'pinnedAdmin': serializer.toJson<bool>(pinnedAdmin),
     };
   }
 
@@ -2188,6 +2227,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     String? identityPub,
     String? trustedIdentityPub,
     String? knownIdentityPubs,
+    bool? pinnedAdmin,
   }) => UserRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -2195,6 +2235,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     identityPub: identityPub ?? this.identityPub,
     trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
     knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
+    pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
   );
   UserRow copyWithCompanion(LocalUsersCompanion data) {
     return UserRow(
@@ -2210,6 +2251,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       knownIdentityPubs: data.knownIdentityPubs.present
           ? data.knownIdentityPubs.value
           : this.knownIdentityPubs,
+      pinnedAdmin: data.pinnedAdmin.present
+          ? data.pinnedAdmin.value
+          : this.pinnedAdmin,
     );
   }
 
@@ -2221,7 +2265,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ..write('isAdmin: $isAdmin, ')
           ..write('identityPub: $identityPub, ')
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
-          ..write('knownIdentityPubs: $knownIdentityPubs')
+          ..write('knownIdentityPubs: $knownIdentityPubs, ')
+          ..write('pinnedAdmin: $pinnedAdmin')
           ..write(')'))
         .toString();
   }
@@ -2234,6 +2279,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     identityPub,
     trustedIdentityPub,
     knownIdentityPubs,
+    pinnedAdmin,
   );
   @override
   bool operator ==(Object other) =>
@@ -2244,7 +2290,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           other.isAdmin == this.isAdmin &&
           other.identityPub == this.identityPub &&
           other.trustedIdentityPub == this.trustedIdentityPub &&
-          other.knownIdentityPubs == this.knownIdentityPubs);
+          other.knownIdentityPubs == this.knownIdentityPubs &&
+          other.pinnedAdmin == this.pinnedAdmin);
 }
 
 class LocalUsersCompanion extends UpdateCompanion<UserRow> {
@@ -2254,6 +2301,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
   final Value<String> identityPub;
   final Value<String> trustedIdentityPub;
   final Value<String> knownIdentityPubs;
+  final Value<bool> pinnedAdmin;
   final Value<int> rowid;
   const LocalUsersCompanion({
     this.id = const Value.absent(),
@@ -2262,6 +2310,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.identityPub = const Value.absent(),
     this.trustedIdentityPub = const Value.absent(),
     this.knownIdentityPubs = const Value.absent(),
+    this.pinnedAdmin = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalUsersCompanion.insert({
@@ -2271,6 +2320,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     required String identityPub,
     required String trustedIdentityPub,
     this.knownIdentityPubs = const Value.absent(),
+    this.pinnedAdmin = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2284,6 +2334,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Expression<String>? identityPub,
     Expression<String>? trustedIdentityPub,
     Expression<String>? knownIdentityPubs,
+    Expression<bool>? pinnedAdmin,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2294,6 +2345,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       if (trustedIdentityPub != null)
         'trusted_identity_pub': trustedIdentityPub,
       if (knownIdentityPubs != null) 'known_identity_pubs': knownIdentityPubs,
+      if (pinnedAdmin != null) 'pinned_admin': pinnedAdmin,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2305,6 +2357,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Value<String>? identityPub,
     Value<String>? trustedIdentityPub,
     Value<String>? knownIdentityPubs,
+    Value<bool>? pinnedAdmin,
     Value<int>? rowid,
   }) {
     return LocalUsersCompanion(
@@ -2314,6 +2367,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       identityPub: identityPub ?? this.identityPub,
       trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
       knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
+      pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2339,6 +2393,9 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     if (knownIdentityPubs.present) {
       map['known_identity_pubs'] = Variable<String>(knownIdentityPubs.value);
     }
+    if (pinnedAdmin.present) {
+      map['pinned_admin'] = Variable<bool>(pinnedAdmin.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2354,6 +2411,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
           ..write('identityPub: $identityPub, ')
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
           ..write('knownIdentityPubs: $knownIdentityPubs, ')
+          ..write('pinnedAdmin: $pinnedAdmin, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2926,6 +2984,434 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
   }
 }
 
+class $LocalResetsTable extends LocalResets
+    with TableInfo<$LocalResetsTable, ResetRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalResetsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _signerUserIdMeta = const VerificationMeta(
+    'signerUserId',
+  );
+  @override
+  late final GeneratedColumn<String> signerUserId = GeneratedColumn<String>(
+    'signer_user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _signerKindMeta = const VerificationMeta(
+    'signerKind',
+  );
+  @override
+  late final GeneratedColumn<String> signerKind = GeneratedColumn<String>(
+    'signer_kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _dismissedChatsMeta = const VerificationMeta(
+    'dismissedChats',
+  );
+  @override
+  late final GeneratedColumn<String> dismissedChats = GeneratedColumn<String>(
+    'dismissed_chats',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    userId,
+    signerUserId,
+    signerKind,
+    createdAt,
+    dismissedChats,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_resets';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ResetRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('signer_user_id')) {
+      context.handle(
+        _signerUserIdMeta,
+        signerUserId.isAcceptableOrUnknown(
+          data['signer_user_id']!,
+          _signerUserIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_signerUserIdMeta);
+    }
+    if (data.containsKey('signer_kind')) {
+      context.handle(
+        _signerKindMeta,
+        signerKind.isAcceptableOrUnknown(data['signer_kind']!, _signerKindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_signerKindMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('dismissed_chats')) {
+      context.handle(
+        _dismissedChatsMeta,
+        dismissedChats.isAcceptableOrUnknown(
+          data['dismissed_chats']!,
+          _dismissedChatsMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ResetRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ResetRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      )!,
+      signerUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}signer_user_id'],
+      )!,
+      signerKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}signer_kind'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      dismissedChats: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}dismissed_chats'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalResetsTable createAlias(String alias) {
+    return $LocalResetsTable(attachedDatabase, alias);
+  }
+}
+
+class ResetRow extends DataClass implements Insertable<ResetRow> {
+  final String id;
+  final String userId;
+  final String signerUserId;
+
+  /// `admin` or `recovery`.
+  final String signerKind;
+  final int createdAt;
+
+  /// JSON list of chat ids where the banner was dismissed.
+  final String dismissedChats;
+  const ResetRow({
+    required this.id,
+    required this.userId,
+    required this.signerUserId,
+    required this.signerKind,
+    required this.createdAt,
+    required this.dismissedChats,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['user_id'] = Variable<String>(userId);
+    map['signer_user_id'] = Variable<String>(signerUserId);
+    map['signer_kind'] = Variable<String>(signerKind);
+    map['created_at'] = Variable<int>(createdAt);
+    map['dismissed_chats'] = Variable<String>(dismissedChats);
+    return map;
+  }
+
+  LocalResetsCompanion toCompanion(bool nullToAbsent) {
+    return LocalResetsCompanion(
+      id: Value(id),
+      userId: Value(userId),
+      signerUserId: Value(signerUserId),
+      signerKind: Value(signerKind),
+      createdAt: Value(createdAt),
+      dismissedChats: Value(dismissedChats),
+    );
+  }
+
+  factory ResetRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ResetRow(
+      id: serializer.fromJson<String>(json['id']),
+      userId: serializer.fromJson<String>(json['userId']),
+      signerUserId: serializer.fromJson<String>(json['signerUserId']),
+      signerKind: serializer.fromJson<String>(json['signerKind']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      dismissedChats: serializer.fromJson<String>(json['dismissedChats']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'userId': serializer.toJson<String>(userId),
+      'signerUserId': serializer.toJson<String>(signerUserId),
+      'signerKind': serializer.toJson<String>(signerKind),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'dismissedChats': serializer.toJson<String>(dismissedChats),
+    };
+  }
+
+  ResetRow copyWith({
+    String? id,
+    String? userId,
+    String? signerUserId,
+    String? signerKind,
+    int? createdAt,
+    String? dismissedChats,
+  }) => ResetRow(
+    id: id ?? this.id,
+    userId: userId ?? this.userId,
+    signerUserId: signerUserId ?? this.signerUserId,
+    signerKind: signerKind ?? this.signerKind,
+    createdAt: createdAt ?? this.createdAt,
+    dismissedChats: dismissedChats ?? this.dismissedChats,
+  );
+  ResetRow copyWithCompanion(LocalResetsCompanion data) {
+    return ResetRow(
+      id: data.id.present ? data.id.value : this.id,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      signerUserId: data.signerUserId.present
+          ? data.signerUserId.value
+          : this.signerUserId,
+      signerKind: data.signerKind.present
+          ? data.signerKind.value
+          : this.signerKind,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      dismissedChats: data.dismissedChats.present
+          ? data.dismissedChats.value
+          : this.dismissedChats,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResetRow(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('signerUserId: $signerUserId, ')
+          ..write('signerKind: $signerKind, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('dismissedChats: $dismissedChats')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    userId,
+    signerUserId,
+    signerKind,
+    createdAt,
+    dismissedChats,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ResetRow &&
+          other.id == this.id &&
+          other.userId == this.userId &&
+          other.signerUserId == this.signerUserId &&
+          other.signerKind == this.signerKind &&
+          other.createdAt == this.createdAt &&
+          other.dismissedChats == this.dismissedChats);
+}
+
+class LocalResetsCompanion extends UpdateCompanion<ResetRow> {
+  final Value<String> id;
+  final Value<String> userId;
+  final Value<String> signerUserId;
+  final Value<String> signerKind;
+  final Value<int> createdAt;
+  final Value<String> dismissedChats;
+  final Value<int> rowid;
+  const LocalResetsCompanion({
+    this.id = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.signerUserId = const Value.absent(),
+    this.signerKind = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.dismissedChats = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalResetsCompanion.insert({
+    required String id,
+    required String userId,
+    required String signerUserId,
+    required String signerKind,
+    required int createdAt,
+    this.dismissedChats = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       userId = Value(userId),
+       signerUserId = Value(signerUserId),
+       signerKind = Value(signerKind),
+       createdAt = Value(createdAt);
+  static Insertable<ResetRow> custom({
+    Expression<String>? id,
+    Expression<String>? userId,
+    Expression<String>? signerUserId,
+    Expression<String>? signerKind,
+    Expression<int>? createdAt,
+    Expression<String>? dismissedChats,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (userId != null) 'user_id': userId,
+      if (signerUserId != null) 'signer_user_id': signerUserId,
+      if (signerKind != null) 'signer_kind': signerKind,
+      if (createdAt != null) 'created_at': createdAt,
+      if (dismissedChats != null) 'dismissed_chats': dismissedChats,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalResetsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? userId,
+    Value<String>? signerUserId,
+    Value<String>? signerKind,
+    Value<int>? createdAt,
+    Value<String>? dismissedChats,
+    Value<int>? rowid,
+  }) {
+    return LocalResetsCompanion(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      signerUserId: signerUserId ?? this.signerUserId,
+      signerKind: signerKind ?? this.signerKind,
+      createdAt: createdAt ?? this.createdAt,
+      dismissedChats: dismissedChats ?? this.dismissedChats,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (signerUserId.present) {
+      map['signer_user_id'] = Variable<String>(signerUserId.value);
+    }
+    if (signerKind.present) {
+      map['signer_kind'] = Variable<String>(signerKind.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (dismissedChats.present) {
+      map['dismissed_chats'] = Variable<String>(dismissedChats.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalResetsCompanion(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('signerUserId: $signerUserId, ')
+          ..write('signerKind: $signerKind, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('dismissedChats: $dismissedChats, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -3140,6 +3626,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
   late final $LocalKeysTable localKeys = $LocalKeysTable(this);
   late final $LocalUsersTable localUsers = $LocalUsersTable(this);
   late final $LocalDevicesTable localDevices = $LocalDevicesTable(this);
+  late final $LocalResetsTable localResets = $LocalResetsTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -3156,6 +3643,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localKeys,
     localUsers,
     localDevices,
+    localResets,
     meta,
     localMessagesChatSeq,
   ];
@@ -4164,6 +4652,7 @@ typedef $$LocalUsersTableCreateCompanionBuilder = LocalUsersCompanion Function({
   required String identityPub,
   required String trustedIdentityPub,
   Value<String> knownIdentityPubs,
+  Value<bool> pinnedAdmin,
   Value<int> rowid,
 });
 typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
@@ -4173,6 +4662,7 @@ typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
   Value<String> identityPub,
   Value<String> trustedIdentityPub,
   Value<String> knownIdentityPubs,
+  Value<bool> pinnedAdmin,
   Value<int> rowid,
 });
 
@@ -4212,6 +4702,11 @@ class $$LocalUsersTableFilterComposer
 
   ColumnFilters<String> get knownIdentityPubs => $composableBuilder(
     column: $table.knownIdentityPubs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get pinnedAdmin => $composableBuilder(
+    column: $table.pinnedAdmin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4254,6 +4749,11 @@ class $$LocalUsersTableOrderingComposer
     column: $table.knownIdentityPubs,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get pinnedAdmin => $composableBuilder(
+    column: $table.pinnedAdmin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalUsersTableAnnotationComposer
@@ -4286,6 +4786,11 @@ class $$LocalUsersTableAnnotationComposer
 
   GeneratedColumn<String> get knownIdentityPubs => $composableBuilder(
     column: $table.knownIdentityPubs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get pinnedAdmin => $composableBuilder(
+    column: $table.pinnedAdmin,
     builder: (column) => column,
   );
 }
@@ -4324,6 +4829,7 @@ class $$LocalUsersTableTableManager
                 Value<String> identityPub = const Value.absent(),
                 Value<String> trustedIdentityPub = const Value.absent(),
                 Value<String> knownIdentityPubs = const Value.absent(),
+                Value<bool> pinnedAdmin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion(
                 id: id,
@@ -4332,6 +4838,7 @@ class $$LocalUsersTableTableManager
                 identityPub: identityPub,
                 trustedIdentityPub: trustedIdentityPub,
                 knownIdentityPubs: knownIdentityPubs,
+                pinnedAdmin: pinnedAdmin,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4342,6 +4849,7 @@ class $$LocalUsersTableTableManager
                 required String identityPub,
                 required String trustedIdentityPub,
                 Value<String> knownIdentityPubs = const Value.absent(),
+                Value<bool> pinnedAdmin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion.insert(
                 id: id,
@@ -4350,6 +4858,7 @@ class $$LocalUsersTableTableManager
                 identityPub: identityPub,
                 trustedIdentityPub: trustedIdentityPub,
                 knownIdentityPubs: knownIdentityPubs,
+                pinnedAdmin: pinnedAdmin,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4662,6 +5171,234 @@ typedef $$LocalDevicesTableProcessedTableManager =
       DeviceRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalResetsTableCreateCompanionBuilder =
+    LocalResetsCompanion Function({
+      required String id,
+      required String userId,
+      required String signerUserId,
+      required String signerKind,
+      required int createdAt,
+      Value<String> dismissedChats,
+      Value<int> rowid,
+    });
+typedef $$LocalResetsTableUpdateCompanionBuilder =
+    LocalResetsCompanion Function({
+      Value<String> id,
+      Value<String> userId,
+      Value<String> signerUserId,
+      Value<String> signerKind,
+      Value<int> createdAt,
+      Value<String> dismissedChats,
+      Value<int> rowid,
+    });
+
+class $$LocalResetsTableFilterComposer
+    extends Composer<_$ChatDb, $LocalResetsTable> {
+  $$LocalResetsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get signerUserId => $composableBuilder(
+    column: $table.signerUserId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get signerKind => $composableBuilder(
+    column: $table.signerKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get dismissedChats => $composableBuilder(
+    column: $table.dismissedChats,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalResetsTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalResetsTable> {
+  $$LocalResetsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get signerUserId => $composableBuilder(
+    column: $table.signerUserId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get signerKind => $composableBuilder(
+    column: $table.signerKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get dismissedChats => $composableBuilder(
+    column: $table.dismissedChats,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalResetsTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalResetsTable> {
+  $$LocalResetsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get signerUserId => $composableBuilder(
+    column: $table.signerUserId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get signerKind => $composableBuilder(
+    column: $table.signerKind,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get dismissedChats => $composableBuilder(
+    column: $table.dismissedChats,
+    builder: (column) => column,
+  );
+}
+
+class $$LocalResetsTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalResetsTable,
+          ResetRow,
+          $$LocalResetsTableFilterComposer,
+          $$LocalResetsTableOrderingComposer,
+          $$LocalResetsTableAnnotationComposer,
+          $$LocalResetsTableCreateCompanionBuilder,
+          $$LocalResetsTableUpdateCompanionBuilder,
+          (ResetRow, BaseReferences<_$ChatDb, $LocalResetsTable, ResetRow>),
+          ResetRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalResetsTableTableManager(_$ChatDb db, $LocalResetsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalResetsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalResetsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalResetsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> userId = const Value.absent(),
+                Value<String> signerUserId = const Value.absent(),
+                Value<String> signerKind = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<String> dismissedChats = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalResetsCompanion(
+                id: id,
+                userId: userId,
+                signerUserId: signerUserId,
+                signerKind: signerKind,
+                createdAt: createdAt,
+                dismissedChats: dismissedChats,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String userId,
+                required String signerUserId,
+                required String signerKind,
+                required int createdAt,
+                Value<String> dismissedChats = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalResetsCompanion.insert(
+                id: id,
+                userId: userId,
+                signerUserId: signerUserId,
+                signerKind: signerKind,
+                createdAt: createdAt,
+                dismissedChats: dismissedChats,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalResetsTable, ResetRow>(table),
+                  BaseReferences<_$ChatDb, $LocalResetsTable, ResetRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalResetsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalResetsTable,
+      ResetRow,
+      $$LocalResetsTableFilterComposer,
+      $$LocalResetsTableOrderingComposer,
+      $$LocalResetsTableAnnotationComposer,
+      $$LocalResetsTableCreateCompanionBuilder,
+      $$LocalResetsTableUpdateCompanionBuilder,
+      (ResetRow, BaseReferences<_$ChatDb, $LocalResetsTable, ResetRow>),
+      ResetRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -4805,5 +5542,7 @@ class $ChatDbManager {
       $$LocalUsersTableTableManager(_db, _db.localUsers);
   $$LocalDevicesTableTableManager get localDevices =>
       $$LocalDevicesTableTableManager(_db, _db.localDevices);
+  $$LocalResetsTableTableManager get localResets =>
+      $$LocalResetsTableTableManager(_db, _db.localResets);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }
