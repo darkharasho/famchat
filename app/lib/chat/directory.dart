@@ -56,6 +56,9 @@ class Directory {
   Future<Set<String>> _refresh() async {
     final users = await _api.users();
     final myPub = b64url(_me.identityPub);
+    // The first time this device sees the family, it pins the admins the server lists (trust on
+    // first use, like identity keys); after that only signed promotions add admins.
+    final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
     final inputs = <TrustInput>[];
     for (final u in users) {
       final old = await _db.userById(u.id);
@@ -66,6 +69,8 @@ class Directory {
       inputs.add(TrustInput(
         userId: u.id,
         isAdmin: u.isAdmin,
+        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin),
+        adminProof: u.adminProof,
         serverKey: u.identityPub,
         trustedKey: trusted,
         known: mine ? {myPub, ..._known(old)} : {..._known(old), trusted},
@@ -83,6 +88,7 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
+        pinnedAdmin: t.admins.contains(u.id),
       ));
       for (final d in u.devices) {
         // Which trusted keys certify it: if only keys a verified reset retired, the server signed
@@ -106,6 +112,7 @@ class Directory {
         ));
       }
     }
+    if (firstSight) await _db.setMeta(ChatDb.adminsPinnedKey, '1');
     for (final w in t.witnessed) {
       await _db.recordReset(
         id: w.reset.id,

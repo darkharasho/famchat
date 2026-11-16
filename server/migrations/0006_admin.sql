@@ -45,3 +45,9 @@ ALTER TABLE invites ADD COLUMN reset_id TEXT REFERENCES resets(id);
 ALTER TABLE users ADD COLUMN recovery_pub TEXT;
 ALTER TABLE users ADD COLUMN recovery_sig TEXT;
 CREATE UNIQUE INDEX users_recovery_pub ON users(recovery_pub);
+
+-- A promotion to admin, signed by the promoting admin's identity key, so clients can check who
+-- made someone an admin instead of trusting the server's is_admin flag.
+ALTER TABLE users ADD COLUMN admin_by TEXT REFERENCES users(id);
+ALTER TABLE users ADD COLUMN admin_signer_pub TEXT;
+ALTER TABLE users ADD COLUMN admin_sig TEXT;

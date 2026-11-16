@@ -1,8 +1,10 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addDevice, api, createDirect, createGroup, type ChatOut } from "./chat-helpers";
+import { promotionMessage } from "../src/lib/reset";
+import { resetAccount } from "../src/lib/reset-account";
+import { addDevice, api, createDirect, createGroup, type ChatOut, type TestUser } from "./chat-helpers";
 import { BASE, insertUserWithDevice, jsonReq, makeKeys, resetDb } from "./helpers";
-import { ed25519, postReset, redeemReset, resetUser, signedReset } from "./reset-helpers";
+import { ed25519, postReset, redeemReset, resetUser, sign, signedReset } from "./reset-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
 beforeEach(resetDb);
@@ -12,6 +14,7 @@ type UserOut = {
   id: string;
   isAdmin: boolean;
   identityPub: string;
+  adminProof: { byUserId: string; signerPub: string; sig: string } | null;
   devices: { id: string; revoked: boolean }[];
   resets: {
     id: string;
@@ -264,24 +267,58 @@ describe("redeeming a reset invite", () => {
 });
 
 describe("POST /api/admin/users/:id/admin", () => {
-  it("promotes a member, who can then use admin routes at once", async () => {
+  const promote = async (by: TestUser, userId: string, signer: CryptoKey = by.keys.identityPriv) =>
+    api(by.accessToken, "POST", `/admin/users/${userId}/admin`, { sig: await sign(signer, promotionMessage(userId, by.userId)) });
+
+  it("promotes a member with a signed promotion, who can then use admin routes at once", async () => {
     const admin = await insertUserWithDevice({ admin: true });
     const dad = await insertUserWithDevice({ name: "Dad" });
     expect((await api(dad.accessToken, "POST", "/admin/invites", { name: "X" })).status).toBe(403);
-    expect((await api(admin.accessToken, "POST", `/admin/users/${dad.userId}/admin`)).status).toBe(204);
+    expect((await promote(admin, dad.userId)).status).toBe(204);
     expect((await api(dad.accessToken, "POST", "/admin/invites", { name: "X" })).status).toBe(201);
     const row = (await users(admin.accessToken)).find((u) => u.id === dad.userId)!;
     expect(row.isAdmin).toBe(true);
+    expect(row.adminProof).toMatchObject({ byUserId: admin.userId, signerPub: admin.keys.identityPub });
+    expect((await users(admin.accessToken)).find((u) => u.id === admin.userId)!.adminProof).toBeNull();
     const ev = await env.DB.prepare("SELECT user_id, actor_id FROM events WHERE kind = 'admin_promoted'").first();
     expect(ev).toEqual({ user_id: dad.userId, actor_id: admin.userId });
+  });
+
+  it("an unsigned or wrongly signed promotion -> 400", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const dad = await insertUserWithDevice({ name: "Dad" });
+    expect((await api(admin.accessToken, "POST", `/admin/users/${dad.userId}/admin`)).status).toBe(400);
+    expect((await promote(admin, dad.userId, (await ed25519()).priv)).status).toBe(400);
   });
 
   it("non-admin -> 403, unknown user -> 404", async () => {
     const admin = await insertUserWithDevice({ admin: true });
     const dad = await insertUserWithDevice({ name: "Dad" });
     const kid = await insertUserWithDevice({ name: "Kid" });
-    expect((await api(kid.accessToken, "POST", `/admin/users/${dad.userId}/admin`)).status).toBe(403);
-    expect((await api(admin.accessToken, "POST", "/admin/users/01JNOPE0000000000000000000/admin")).status).toBe(404);
+    expect((await promote(kid, dad.userId)).status).toBe(403);
+    expect((await promote(admin, "01JNOPE0000000000000000000")).status).toBe(404);
+  });
+});
+
+describe("reset races", () => {
+  it("a reset whose old key changed under it is refused and changes nothing", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const mom = await insertUserWithDevice({ name: "Mom" });
+    const r = await signedReset(admin, { userId: mom.userId, identityPub: mom.keys.identityPub });
+    expect((await postReset(admin, mom.userId, { ...r.body, oldIdentityPub: (await makeKeys()).identityPub })).status).toBe(400);
+    // The key moves between the route's check and its batch: run the batch with a stale key.
+    await expect(resetAccount(env, {
+      statement: { ...r.statement, oldIdentityPub: (await makeKeys()).identityPub },
+      sig: r.body.sig,
+      signerPub: admin.keys.identityPub,
+      recoverySig: null,
+      actorId: admin.userId,
+      now: Date.now(),
+      invite: { tokenHash: "h", name: "Mom", createdBy: admin.userId, expiresAt: Date.now() + 1000 },
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect((await api(mom.accessToken, "GET", "/me")).status).toBe(200);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM resets").first<number>("n")).toBe(0);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM invites WHERE user_id IS NOT NULL").first<number>("n")).toBe(0);
   });
 });
 

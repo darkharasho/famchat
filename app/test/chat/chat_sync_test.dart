@@ -395,8 +395,9 @@ void main() {
 
   group('admin reset', () {
     Future<(Node, Node, String)> setup() async {
-      final alice = await start(await backend.addUser('Alice'));
-      backend.setAdmin(alice.d.userId);
+      final aliceDevice = await backend.addUser('Alice');
+      backend.setAdmin(aliceDevice.userId); // the bootstrapped admin
+      final alice = await start(aliceDevice);
       final bob = await start(await backend.addUser('Bob'));
       final chatId = await alice.sync.openDirect(bob.d.userId);
       await until(() async => await bob.d.db.key(chatId, 1) != null);
@@ -438,13 +439,38 @@ void main() {
 
     test('a reset signed by a non-admin is not trusted', () async {
       final (alice, bob, chatId) = await setup();
-      backend.setAdmin(alice.d.userId, false);
-      final resetId = await backend.adminReset(bob.d.userId, by: alice.d.userId);
+      final carol = await backend.addUser('Carol');
+      addTearDown(carol.dispose);
+      final resetId = await backend.adminReset(bob.d.userId, by: carol.userId);
       final bob2 = await start(await backend.claimReset(bob.d.userId, resetId));
       await alice.sync.syncAll();
       expect(await alice.sync.directory.identityChanged(bob.d.userId), isTrue, reason: 'manual banner stays');
       expect(backend.hasWrap(chatId, 1, bob2.d.deviceId), isFalse);
       expect(await alice.d.db.allResets(), isEmpty);
+    });
+
+    test("an admin the server names later, with no signed promotion, can't reset anyone", () async {
+      final (alice, bob, chatId) = await setup();
+      final carol = await backend.addUser('Carol');
+      addTearDown(carol.dispose);
+      backend.setAdmin(carol.userId);
+      final resetId = await backend.adminReset(bob.d.userId, by: carol.userId);
+      final bob2 = await start(await backend.claimReset(bob.d.userId, resetId));
+      await alice.sync.syncAll();
+      expect(await alice.sync.directory.identityChanged(bob.d.userId), isTrue);
+      expect(backend.hasWrap(chatId, 1, bob2.d.deviceId), isFalse);
+      expect(await alice.d.db.allResets(), isEmpty);
+    });
+
+    test('a second admin promoted with a signature can reset', () async {
+      final (alice, bob, chatId) = await setup();
+      final carol = await backend.addUser('Carol');
+      addTearDown(carol.dispose);
+      await backend.promote(carol.userId, by: alice.d.userId);
+      final resetId = await backend.adminReset(bob.d.userId, by: carol.userId);
+      final bob2 = await start(await backend.claimReset(bob.d.userId, resetId));
+      await until(() async => backend.hasWrap(chatId, 1, bob2.d.deviceId), reason: 'alice re-wraps the history');
+      expect(await alice.sync.directory.identityChanged(bob.d.userId), isFalse);
     });
 
     test('completed reset with a bad claim is not acknowledged', () async {

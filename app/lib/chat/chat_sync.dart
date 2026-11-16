@@ -355,11 +355,10 @@ class ChatSync {
       case 'reset':
         // An account was reset (or the reset was claimed): a verified one is trusted without the
         // manual banner, and the user's new device gets the history from this one.
-        final acked = await directory.refresh();
-        if (acked.isNotEmpty) {
-          await _retryUndecryptable();
-          await _repair();
-        }
+        // Always retry and repair: the trust may have moved in a refresh made outside this queue.
+        await directory.refresh();
+        await _retryUndecryptable();
+        await _repair();
       case 'keys':
         await keys.fetch(chatId: e['chatId'] as String?);
         await _retryUndecryptable();

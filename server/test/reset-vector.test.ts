@@ -1,7 +1,7 @@
 // The same vector as app/test/crypto/reset_test.dart: the Dart client's signatures verify here.
 import { describe, expect, it } from "vitest";
 import { b64urlEncode } from "../src/lib/encoding";
-import { claimMessage, resetMessage, verifyEd25519 } from "../src/lib/reset";
+import { claimMessage, promotionMessage, resetMessage, verifyEd25519 } from "../src/lib/reset";
 
 const fill = (n: number, v: number) => b64urlEncode(new Uint8Array(n).fill(v));
 
@@ -26,6 +26,12 @@ describe("reset byte strings match the Dart client", () => {
   it("statement signature from Dart verifies", async () => {
     expect(await verifyEd25519(vector.signerPub, vector.sig, resetMessage(statement))).toBe(true);
     expect(await verifyEd25519(vector.signerPub, vector.sig, resetMessage({ ...statement, createdAt: statement.createdAt + 1 }))).toBe(false);
+  });
+
+  it("promotion signature from Dart verifies", async () => {
+    const promotionSig = "KunKvoovZnGzngrDT31ZUMxdUZOSNCnlGs7dvdjBtm_HP8sxqHvWWayKVARJih5XqgHGEuTVT37R-NHKXysADQ";
+    expect(await verifyEd25519(vector.signerPub, promotionSig, promotionMessage(statement.userId, statement.signerUserId))).toBe(true);
+    expect(await verifyEd25519(vector.signerPub, promotionSig, promotionMessage(statement.signerUserId, statement.userId))).toBe(false);
   });
 
   it("claim signature from Dart verifies", async () => {

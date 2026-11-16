@@ -14,7 +14,7 @@ users.use(requireAuth);
 users.get("/", async (c) => {
   const db = c.env.DB;
   const [u, d, r] = await db.batch([
-    db.prepare("SELECT id, name, is_admin, identity_pub FROM users ORDER BY created_at"),
+    db.prepare("SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig FROM users ORDER BY created_at"),
     db.prepare(
       "SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices ORDER BY created_at",
     ),
@@ -42,13 +42,18 @@ users.get("/", async (c) => {
     });
     byUser.set(x.user_id, list);
   }
-  type U = { id: string; name: string; is_admin: number; identity_pub: string };
+  type U = {
+    id: string; name: string; is_admin: number; identity_pub: string;
+    admin_by: string | null; admin_signer_pub: string | null; admin_sig: string | null;
+  };
   return c.json({
     users: (u.results as U[]).map((x) => ({
       id: x.id,
       name: x.name,
       isAdmin: x.is_admin === 1,
       identityPub: x.identity_pub,
+      // Who made this user an admin, signed (null for the first admin, who was bootstrapped).
+      adminProof: x.admin_sig ? { byUserId: x.admin_by, signerPub: x.admin_signer_pub, sig: x.admin_sig } : null,
       devices: byUser.get(x.id) ?? [],
       resets: resets.get(x.id) ?? [],
     })),

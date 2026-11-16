@@ -96,6 +96,11 @@ class LocalUsers extends Table {
   /// so devices certified by an earlier key still verify their old messages.
   TextColumn get knownIdentityPubs => text().withDefault(const Constant('[]'))();
 
+  /// This device trusts the user as an admin: pinned when it first saw the family (or from a
+  /// pairing handover), or promoted by an admin it trusts (lib/chat/resets.dart). The server's
+  /// [isAdmin] alone doesn't make anyone's reset count.
+  BoolColumn get pinnedAdmin => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -171,9 +176,23 @@ class ChatDb extends _$ChatDb {
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onUpgrade: (m, from, to) async {
-          if (from < 2) await m.createTable(localResets);
+          if (from < 2) {
+            await m.createTable(localResets);
+            await m.addColumn(localUsers, localUsers.pinnedAdmin);
+            // A device that already knew the family pins the admins it knew.
+            await customStatement('UPDATE local_users SET pinned_admin = is_admin');
+            await into(meta).insertOnConflictUpdate(const MetaRow(key: adminsPinnedKey, value: '1'));
+          }
         },
       );
+
+  /// Set once this device has pinned the family's admins (lib/chat/directory.dart).
+  static const adminsPinnedKey = 'adminsPinned';
+
+  Future<String?> metaValue(String key) async =>
+      (await (select(meta)..where((m) => m.key.equals(key))).getSingleOrNull())?.value;
+
+  Future<void> setMeta(String key, String value) => into(meta).insertOnConflictUpdate(MetaRow(key: key, value: value));
 
   // --- device binding ---
 

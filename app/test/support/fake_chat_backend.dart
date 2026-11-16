@@ -24,6 +24,7 @@ class _User {
   SimpleKeyPair identity;
   Uint8List identityPub;
   bool isAdmin = false;
+  AdminProofDto? adminProof;
   final resets = <_Reset>[];
 }
 
@@ -193,7 +194,20 @@ class FakeChatBackend {
     return addDevice(userId);
   }
 
+  /// The server marks [userId] admin (or not) with no signed promotion (the bootstrap admin, or a lie).
   void setAdmin(String userId, [bool admin = true]) => _users[userId]!.isAdmin = admin;
+
+  /// `POST /admin/users/:id/admin` signed by [by]'s identity key.
+  Future<void> promote(String userId, {required String by}) async {
+    final admin = _users[by]!;
+    _users[userId]!
+      ..isAdmin = true
+      ..adminProof = AdminProofDto(
+        byUserId: by,
+        signerPub: b64url(admin.identityPub),
+        sig: b64url(await signPromotion(admin.identity, userId: userId, byUserId: by)),
+      );
+  }
 
   /// `POST /admin/users/:id/reset` signed by [by]'s identity key: [userId]'s devices are revoked
   /// (chats rotate), everyone gets a `reset` event. Returns the reset id.
@@ -485,6 +499,7 @@ class FakeChatApi implements ChatApi {
             name: u.name,
             isAdmin: u.isAdmin,
             resets: [for (final r in u.resets) r.dto()],
+            adminProof: u.adminProof,
             identityPub: b64url(u.identityPub),
             devices: [
               for (final d in b._devices.values.where((d) => d.userId == u.id))

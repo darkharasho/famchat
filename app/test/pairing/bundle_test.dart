@@ -94,6 +94,32 @@ void main() {
     await laptop.dispose();
   });
 
+  test("the approving device's trusted admins are handed over, not the server's word at first sight", () async {
+    b.setAdmin(bob.userId);
+    await phone.db.bindDevice(phone.deviceId);
+    await Directory(phone.db, phone.api, phone.me).refresh(); // pins Bob (first sight)
+    final carol = await b.addUser('Carol');
+    addTearDown(carol.dispose);
+    final newKeys = await DeviceKeys.generate();
+    final bundle = await buildHandover(
+      db: phone.db,
+      userId: phone.userId,
+      deviceId: 'NEWDEVICE',
+      identity: b.identityOf(phone.userId),
+      encPub: await newKeys.encPub(),
+      signPub: await newKeys.signPub(),
+    );
+    expect(PairBundle.decode(bundle.encode()).trust.firstWhere((t) => t.userId == bob.userId).admin, isTrue);
+    // The server now claims Carol is an admin too: an unsigned claim the new device must not pin.
+    b.setAdmin(carol.userId);
+    final laptop = await b.addDevice(phone.userId);
+    await installHandover(laptop.db, bundle);
+    await Directory(laptop.db, laptop.api, laptop.me).refresh();
+    expect((await laptop.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+    expect((await laptop.db.userById(carol.userId))!.pinnedAdmin, isFalse);
+    await laptop.dispose();
+  });
+
   test('install binds the database to the new device first', () async {
     await phone.db.bindDevice('OLD');
     await phone.db.putKey('X', 1, Uint8List(32));

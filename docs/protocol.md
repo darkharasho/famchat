@@ -35,7 +35,8 @@ reference; this document says what clients may rely on.
 ## Shapes
 
 ```
-User      = {id, name, isAdmin, identityPub, devices: Device[], resets: Reset[]}
+User      = {id, name, isAdmin, identityPub, adminProof: {byUserId, signerPub, sig}|null,
+             devices: Device[], resets: Reset[]}
 Reset     = {id, signerUserId, signerKind: "admin"|"recovery", signerPub, recoverySig: string|null,
              oldIdentityPub, claimPub, createdAt, sig, newIdentityPub: string|null,
              claimSig: string|null, completedAt: number|null}            ("Account resets")
@@ -122,7 +123,7 @@ which never leaves the two devices.
 Bundle: `sealed = ephPubE(32) ‖ nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 with key
 `HKDF-SHA256(ikm = X25519(ephE, ephPubN) ‖ UTF-8(S), salt = ephPubE ‖ ephPubN, info = "famchat-pair-bundle-v1")`.
 Plaintext is UTF-8 JSON:
-`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub]}]}`.
+`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub], admin?}]}` (`admin`: E trusts the user as an admin, plan 10).
 N accepts it only if it opens, `certSig` verifies over N's own keys with the identity key derived from
 `identitySeed`, and `userId`/`deviceId` equal the claim's. `keys` are every chat key E holds, so N reads
 the history at once; `trust` is E's trust-on-first-use state for other users, so N starts with it instead
@@ -161,25 +162,35 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
    the **same user**, and completes the reset (`newIdentityPub`, `claimSig`, `completedAt`). Sharing
    users get `device {userId, deviceId}`; everyone gets `reset` again. A lost response is retried
    with the same keys like any redeem.
-4. Other members' devices verify (client rule):
-   - the statement under `signerPub`; kind `admin`: the signer is another user marked admin whose
-     `signerPub` this device trusts (current, acknowledged, or learned from a verified reset); kind
-     `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`, a key this device trusts;
-   - if `oldIdentityPub` is the trusted key: show "Mom's account was reset by Michael" in every chat
-     shared with the user; if the reset is completed and its claim verifies, trust `newIdentityPub`
-     automatically (no manual key-change banner) and add wraps of every held epoch for the new device;
-   - if `newIdentityPub` is a known key: `oldIdentityPub` becomes known too (history; no banner);
-   - devices certified only by a retired `oldIdentityPub` count as revoked.
+4. Other members' devices verify (client rule, `app/lib/chat/resets.dart`):
+   - **Trusted admins:** the server's `isAdmin` alone carries no authority. A device pins the admins
+     the server lists when it first sees the family (trust on first use; a paired device takes the
+     approving device's list from the handover bundle), then adds only users whose `adminProof` is a
+     valid promotion signed by a trusted admin's current key. Its own user always counts.
+   - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin other
+     than the user. Kind `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`,
+     a key this device trusts.
+   - If `oldIdentityPub` is the trusted key and `signerPub` is the admin's **current** trusted key:
+     show "Mom's account was reset by Michael" in every chat shared with the user (a newer reset of
+     the same key replaces an unclaimed one), and count devices certified only by the old key as
+     revoked. If the reset is completed and its claim verifies, trust `newIdentityPub` automatically
+     (no manual key-change banner) and add wraps of every held epoch for the new device.
+   - History: if `newIdentityPub` is a known key, `oldIdentityPub` becomes known too (no banner); here
+     the admin's older known keys are accepted too, since old resets were signed with them.
    An identity change no verified reset explains keeps the manual "security key changed" banner.
 
-Second admin: `POST /admin/users/:id/admin` (admin) → 204 (404 unknown user). Not signed: the
-directory's `isAdmin` decides whose resets count.
+Second admin: `POST /admin/users/:id/admin {sig}` (admin) → 204 (400 bad signature, 404 unknown
+user). `sig` is the caller's identity key over `"famchat-admin-v1" ‖ str(userId) ‖ str(callerId)`;
+`/users` shows it as `adminProof: {byUserId, signerPub, sig}` (null for the bootstrapped admin).
 
 Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
 as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
 `HKDF-SHA256(UTF-8(code), salt = "", info = "famchat-recovery-seed-v1")`, and registers
 `POST /admin/recovery-key {recoveryPub, sig}` (admin; `sig` = identity key over the registration) →
 204, replacing any earlier key. Only the public key is stored, so the server can't use the code.
+A reset of the admin (by another admin) clears the stored key, and a key whose registration doesn't
+verify under the admin's current identity key is refused, so a code registered from a lost device
+dies with that device's identity key.
 To recover without any device: `POST /auth/recover/lookup {recoveryPub}` → `{userId, identityPub}`
 (401 if no admin has that key), then `POST /auth/recover {recoveryPub, resetId, oldIdentityPub,
 claimPub, createdAt, sig, claimSig, identityPub, encPub, signPub, certSig, deviceName, platform}`
@@ -307,4 +318,4 @@ Every signature, MAC and key derivation starts with its own domain string, and n
 prefix of another: `famchat-device-cert-v1`, `famchat-wrap-v1`, `famchat-envelope-v1`,
 `famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info),
 `famchat-media-v1` (media AEAD associated data), `famchat-reset-v1`, `famchat-reset-claim-v1`,
-`famchat-recovery-key-v1` (signatures), `famchat-recovery-seed-v1` (HKDF info).
+`famchat-recovery-key-v1`, `famchat-admin-v1` (signatures), `famchat-recovery-seed-v1` (HKDF info).

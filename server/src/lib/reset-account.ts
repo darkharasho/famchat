@@ -37,13 +37,17 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
   const userId = s.userId;
   const now = p.now;
   const r = p.recovered;
-  // A recovery first swaps the identity key, guarded by the recovery key still being registered.
-  // The reset row is written only if that swap just happened, and everything after it only if
-  // the reset row (with this batch's completion time) exists, so a failed guard changes nothing.
-  const rowGuard = r ? "EXISTS (SELECT 1 FROM users WHERE id = ? AND identity_pub = ? AND recovery_pub IS NULL)" : "1";
-  const rowBinds = r ? [userId, r.newIdentityPub] : [];
-  const guard = r ? "EXISTS (SELECT 1 FROM resets WHERE id = ? AND completed_at = ?)" : "1";
-  const gb = r ? [s.resetId, now] : [];
+  // The reset row is written only if the user's identity key is still the statement's old key
+  // (checked inside the transaction: a reset link redeemed meanwhile would fork the history). A
+  // recovery first swaps the key, guarded by the recovery key still being registered, so its row
+  // checks for the new key instead. Everything after the row runs only if it was written in this
+  // batch (a reused id fails the insert and aborts the batch), so a failed guard changes nothing.
+  const rowGuard = r
+    ? "EXISTS (SELECT 1 FROM users WHERE id = ? AND identity_pub = ? AND recovery_pub IS NULL)"
+    : "EXISTS (SELECT 1 FROM users WHERE id = ? AND identity_pub = ?)";
+  const rowBinds = [userId, r ? r.newIdentityPub : s.oldIdentityPub];
+  const guard = "EXISTS (SELECT 1 FROM resets WHERE id = ? AND sig = ?)";
+  const gb = [s.resetId, p.sig];
 
   const stmts: D1PreparedStatement[] = [];
   if (r) {
@@ -52,6 +56,7 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
        WHERE id = ? AND recovery_pub = ? AND identity_pub = ?`,
     ).bind(r.newIdentityPub, userId, r.recoveryPub, s.oldIdentityPub));
   }
+  const rowIdx = stmts.length;
   stmts.push(db.prepare(
     `INSERT INTO resets (id, user_id, signer_user_id, signer_kind, signer_pub, recovery_sig, old_identity_pub, claim_pub,
        created_at, sig, new_identity_pub, claim_sig, completed_at)
@@ -67,8 +72,11 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
   if (p.invite) {
     stmts.push(db.prepare(
       `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, user_id, reset_id)
-       VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
-    ).bind(p.invite.tokenHash, p.invite.name, p.invite.createdBy, now, p.invite.expiresAt, userId, s.resetId));
+       SELECT ?, ?, 0, ?, ?, ?, ?, ? WHERE ${guard}`,
+    ).bind(p.invite.tokenHash, p.invite.name, p.invite.createdBy, now, p.invite.expiresAt, userId, s.resetId, ...gb));
+    // A recovery code registered with the retired identity key (maybe from a stolen device) goes too.
+    stmts.push(db.prepare(`UPDATE users SET recovery_pub = NULL, recovery_sig = NULL WHERE id = ? AND ${guard}`)
+      .bind(userId, ...gb));
   }
   const revokeIdx = stmts.length;
   stmts.push(db.prepare(
@@ -106,7 +114,10 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
     if (String(e).includes("UNIQUE") || String(e).includes("PRIMARY KEY")) throw new ApiError("conflict");
     throw e;
   }
-  if (r && results[0].meta.changes !== 1) return false;
+  if (results[rowIdx].meta.changes !== 1) {
+    if (r) return false;
+    throw new ApiError("conflict"); // the identity key changed under us
+  }
 
   const revoked = (results[revokeIdx].results as { id: string }[]).map((x) => x.id);
   const bumped = (results[bumpIdx].results as { id: string }[]).map((x) => x.id);

@@ -16,6 +16,7 @@ class FakeUser {
   String name;
   bool isAdmin;
   String? recoveryPub, recoverySig;
+  Map<String, Object?>? adminProof;
 
   /// Directory reset records (server/src/lib/reset.ts resetOut).
   final resets = <Map<String, Object?>>[];
@@ -244,6 +245,7 @@ class FakeServer {
               'name': u.name,
               'isAdmin': u.isAdmin,
               'identityPub': u.identityPub,
+              'adminProof': u.adminProof,
               'devices': [
                 for (final d in devices.values.where((d) => d.userId == u.id))
                   {
@@ -267,7 +269,20 @@ class FakeServer {
       final target = users[adminUser[1]];
       if (target == null) return _err('not_found');
       if (adminUser[2] == 'admin') {
-        target.isAdmin = true;
+        final sig = _body(r)['sig'];
+        final by = users[userId]!;
+        if (sig is! String ||
+            !await verifyPromotion(
+              signerPub: b64urlDecode(by.identityPub),
+              userId: target.id,
+              byUserId: by.id,
+              sig: b64urlDecode(sig),
+            )) {
+          return _err('invalid_request');
+        }
+        target
+          ..isAdmin = true
+          ..adminProof = {'byUserId': by.id, 'signerPub': by.identityPub, 'sig': sig};
         return http.Response('', 204);
       }
       return await _reset(_body(r), users[userId]!, target);
@@ -484,6 +499,9 @@ class FakeServer {
     };
     target.resets.add(record);
     _revokeAll(target.id);
+    target
+      ..recoveryPub = null
+      ..recoverySig = null;
     for (final i in invites.values.where((i) => i.userId == target.id && i.usedBy == null)) {
       i.expiresAt = now();
     }
@@ -571,7 +589,10 @@ class FakeServer {
           )) {
         return _err('invalid_request');
       }
-      final u = users[inv.userId]!..identityPub = cert['identityPub']!;
+      final u = users[inv.userId]!
+        ..identityPub = cert['identityPub']!
+        ..recoveryPub = null
+        ..recoverySig = null;
       reset
         ..['newIdentityPub'] = cert['identityPub']
         ..['claimSig'] = claimSig

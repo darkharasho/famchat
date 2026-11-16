@@ -121,6 +121,25 @@ Future<bool> verifyRecoveryKey({
   return _verify(identityPub, sig, _recoveryKeyMessage(userId, recoveryPub));
 }
 
+// --- promotions ---
+
+Uint8List _promotionMessage(String userId, String byUserId) => (ByteWriter(domainAdmin)
+      ..str(userId)
+      ..str(byUserId))
+    .finish();
+
+/// `"famchat-admin-v1" ‖ str(userId) ‖ str(byUserId)`, signed by the promoting admin's identity key.
+Future<Uint8List> signPromotion(SimpleKeyPair identity, {required String userId, required String byUserId}) =>
+    _sign(identity, _promotionMessage(userId, byUserId));
+
+Future<bool> verifyPromotion({
+  required List<int> signerPub,
+  required String userId,
+  required String byUserId,
+  required List<int> sig,
+}) =>
+    _verify(signerPub, sig, _promotionMessage(userId, byUserId));
+
 // --- the printed admin recovery code ---
 
 const _alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

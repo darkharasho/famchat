@@ -3,7 +3,7 @@ import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
-import { freshTime, logEvent, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
+import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
@@ -110,12 +110,22 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   return c.json({ resetId, inviteToken: token, inviteUrl: inviteUrl(c.env, token), expiresAt }, 201);
 });
 
-/** Makes another member an admin (the second admin the setup flow asks for). */
+/**
+ * Makes another member an admin (the second admin the setup flow asks for). `sig` is the caller's
+ * identity key over `"famchat-admin-v1" ‖ str(userId) ‖ str(callerId)`, so other devices can check
+ * that an admin they trust made the promotion.
+ */
 admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
   const userId = c.req.param("id");
-  const res = await c.env.DB.prepare("UPDATE users SET is_admin = 1 WHERE id = ?").bind(userId).run();
+  const by = c.get("userId");
+  const sig = signature((await readJson(c)).sig);
+  const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
+  if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
+  const res = await db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+    .bind(by, signer, sig, userId).run();
   if (res.meta.changes !== 1) throw new ApiError("not_found");
-  await logEvent(c.env.DB, { kind: "admin_promoted", userId, actorId: c.get("userId") });
+  await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
   return c.body(null, 204);
 });
 

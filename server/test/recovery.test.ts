@@ -4,7 +4,7 @@ import { newId } from "../src/lib/ids";
 import { claimMessage, recoveryKeyMessage, resetMessage } from "../src/lib/reset";
 import { api, createDirect } from "./chat-helpers";
 import { BASE, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
-import { ed25519, registerRecovery, sign } from "./reset-helpers";
+import { ed25519, redeemReset, registerRecovery, resetUser, sign } from "./reset-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
 beforeEach(resetDb);
@@ -123,6 +123,38 @@ describe("POST /api/auth/recover", () => {
     expect(await res.json()).toEqual({ userId: admin.userId, identityPub: admin.keys.identityPub });
     const other = await ed25519();
     expect((await SELF.fetch(`${BASE}/api/auth/recover/lookup`, jsonReq("POST", { recoveryPub: other.pub }))).status).toBe(401);
+  });
+
+  it("an admin reset makes an earlier recovery code useless", async () => {
+    const michael = await insertUserWithDevice({ admin: true, name: "Michael" });
+    const mom = await insertUserWithDevice({ admin: true, name: "Mom" });
+    const { rk } = await registerRecovery(mom); // e.g. a thief with Mom's phone
+    const out = await resetUser(michael, mom);
+    expect(await env.DB.prepare("SELECT recovery_pub FROM users WHERE id = ?").bind(mom.userId).first("recovery_pub")).toBeNull();
+    const { keys } = await redeemReset(out.inviteToken, out.resetId, out.claim);
+    const stale = await recoverBody(mom.userId, keys.identityPub, rk);
+    expect((await recover(stale.body)).status).toBe(401);
+    expect((await SELF.fetch(`${BASE}/api/auth/recover/lookup`, jsonReq("POST", { recoveryPub: rk.pub }))).status).toBe(401);
+  });
+
+  it("a recovery key not signed by the current identity key is refused", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const { rk } = await registerRecovery(admin);
+    // The identity key changed some other way (here: by hand) after the code was saved.
+    const k = await makeKeys();
+    await env.DB.prepare("UPDATE users SET identity_pub = ? WHERE id = ?").bind(k.identityPub, admin.userId).run();
+    const { body } = await recoverBody(admin.userId, k.identityPub, rk);
+    expect((await recover(body)).status).toBe(401);
+  });
+
+  it("a lost response is retried even when the statement's time has gone stale", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const { rk } = await registerRecovery(admin);
+    const first = await recoverBody(admin.userId, admin.keys.identityPub, rk);
+    expect((await recover(first.body)).status).toBe(201);
+    // The retry is recognised by the stored reset and keys before the signed time is checked
+    // (here the time is past the window, as it would be for a statement signed 9 minutes earlier).
+    expect((await recover({ ...first.body, createdAt: Date.now() - 11 * 60_000 })).status).toBe(201);
   });
 
   it("recover with an unknown key -> 401", async () => {

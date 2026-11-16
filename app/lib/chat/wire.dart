@@ -51,11 +51,15 @@ class UserDto {
     required this.identityPub,
     required this.devices,
     this.resets = const [],
+    this.adminProof,
   });
 
   final String id, name, identityPub;
   final bool isAdmin;
   final List<DeviceDto> devices;
+
+  /// Who made this user an admin, signed; null for the bootstrapped first admin (and non-admins).
+  final AdminProofDto? adminProof;
 
   /// The user's signed account resets, oldest first: their identity key history.
   final List<ResetDto> resets;
@@ -69,8 +73,19 @@ class UserDto {
       identityPub: _f(j, 'identityPub'),
       devices: [for (final d in _list(j, 'devices')) DeviceDto.fromJson(id, d)],
       resets: j['resets'] == null ? const [] : [for (final r in _list(j, 'resets')) ResetDto.fromJson(r)],
+      adminProof: switch (j['adminProof']) {
+        final Map<String, Object?> p => AdminProofDto(byUserId: _f(p, 'byUserId'), signerPub: _f(p, 'signerPub'), sig: _f(p, 'sig')),
+        null => null,
+        _ => throw const FormatException('bad adminProof'),
+      },
     );
   }
+}
+
+/// `"famchat-admin-v1" ‖ str(userId) ‖ str(byUserId)` signed by [signerPub], the promoter's identity key then.
+class AdminProofDto {
+  const AdminProofDto({required this.byUserId, required this.signerPub, required this.sig});
+  final String byUserId, signerPub, sig;
 }
 
 /// A signed account reset as the directory lists it (docs/protocol.md "Account resets"). Unverified:

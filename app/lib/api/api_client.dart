@@ -92,9 +92,9 @@ class ApiClient {
             ));
       });
 
-  /// Admin: makes [userId] an admin too.
-  Future<void> makeAdmin(String userId) =>
-      _authed((t) => _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/admin', bearer: t));
+  /// Admin: makes [userId] an admin too; [sig] is this admin's signed promotion (base64url).
+  Future<void> makeAdmin(String userId, {required String sig}) => _authed(
+      (t) => _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/admin', bearer: t, body: {'sig': sig}));
 
   /// Admin: registers this admin's recovery key (base64url) with the identity key's signature over it.
   Future<void> setRecoveryKey({required String recoveryPub, required String sig}) =>

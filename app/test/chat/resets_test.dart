@@ -62,14 +62,31 @@ Future<ResetDto> makeReset({
   );
 }
 
-TrustInput user(String id, {required K server, K? trusted, Set<String>? known, bool admin = false, List<ResetDto> resets = const []}) =>
+TrustInput user(
+  String id, {
+  required K server,
+  K? trusted,
+  Set<String>? known,
+  bool admin = false,
+  bool? pinned,
+  AdminProofDto? proof,
+  List<ResetDto> resets = const [],
+}) =>
     TrustInput(
       userId: id,
       isAdmin: admin,
+      pinnedAdmin: pinned ?? admin,
+      adminProof: proof,
       serverKey: server.pub,
       trustedKey: (trusted ?? server).pub,
       known: known ?? {(trusted ?? server).pub},
       resets: resets,
+    );
+
+Future<AdminProofDto> promotion(String userId, {required String by, required K signer}) async => AdminProofDto(
+      byUserId: by,
+      signerPub: signer.pub,
+      sig: b64url(await signPromotion(signer.pair, userId: userId, byUserId: by)),
     );
 
 void main() {
@@ -207,6 +224,67 @@ void main() {
     ]);
     expect(out.known['ADM'], {admin.pub, admin2.pub});
     expect(out.known['DAD'], {dad1.pub, dad2.pub});
+  });
+
+  group('who counts as an admin', () {
+    test("an admin this device never pinned (the server's word only) is not trusted", () async {
+      final fake = await K.make();
+      final r = await makeReset(userId: 'MOM', signerUserId: 'FAKE', signer: fake, old: mom1, next: mom2);
+      final out = await resolve([
+        user('FAKE', server: fake, admin: true, pinned: false),
+        user('MOM', server: mom2, trusted: mom1, resets: [r]),
+      ]);
+      expect(out.acknowledged, isEmpty);
+      expect(out.witnessed, isEmpty);
+      expect(out.retired['MOM'] ?? {}, isEmpty);
+      expect(out.admins, isNot(contains('FAKE')));
+    });
+
+    test('a promotion signed by a trusted admin makes a trusted admin', () async {
+      final dad = await K.make();
+      final r = await makeReset(userId: 'MOM', signerUserId: 'DAD', signer: dad, old: mom1, next: mom2);
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('DAD', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'ADM', signer: admin)),
+        user('MOM', server: mom2, trusted: mom1, resets: [r]),
+      ]);
+      expect(out.admins, containsAll(['ADM', 'DAD']));
+      expect(out.acknowledged, {'MOM'});
+    });
+
+    test('a promotion by an untrusted admin, or with a bad signature, makes nobody an admin', () async {
+      final dad = await K.make(), fake = await K.make();
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('FAKE', server: fake, admin: true, pinned: false),
+        user('DAD', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'FAKE', signer: fake)),
+        user('KID', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'ADM', signer: admin)),
+      ]);
+      expect(out.admins, {'ADM'});
+    });
+
+    test("a retired admin key (a lost phone's) can't move anyone's trust", () async {
+      final admin2 = await K.make();
+      final r = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final out = await resolve([
+        user('ADM', server: admin2, trusted: admin2, known: {admin.pub, admin2.pub}, admin: true),
+        user('MOM', server: mom2, trusted: mom1, resets: [r]),
+      ]);
+      expect(out.acknowledged, isEmpty);
+      expect(out.witnessed, isEmpty);
+      expect(out.trusted['MOM'], mom1.pub);
+    });
+
+    test('a newer reset of the same key replaces an unclaimed one in the banners', () async {
+      final r1 = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1);
+      final r2 = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('MOM', server: mom2, trusted: mom1, resets: [r1, r2]),
+      ]);
+      expect(out.witnessed.map((w) => w.reset.id), [r2.id]);
+      expect(out.acknowledged, {'MOM'});
+    });
   });
 
   group('recovery', () {

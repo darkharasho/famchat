@@ -5,7 +5,7 @@ import { verifyDeviceCert } from "../lib/devicecert";
 import { ApiError } from "../lib/errors";
 import { sharingUserIds } from "../lib/family";
 import { newId } from "../lib/ids";
-import { claimMessage, eventStmt, freshTime, pubKey, resetMessage, signature, verifyEd25519 } from "../lib/reset";
+import { claimMessage, eventStmt, freshTime, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { notifyReset, resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex, signAccessToken } from "../lib/tokens";
 import { name, readJson, str } from "../lib/validate";
@@ -133,7 +133,9 @@ async function redeemReset(env: Env, body: Record<string, unknown>, tokenHash: s
       `UPDATE invites SET used_by = ?, used_at = ?
        WHERE token_hash = ? AND used_by IS NULL AND expires_at > ?`,
     ).bind(userId, now, tokenHash, now),
-    db.prepare(`UPDATE users SET identity_pub = ? WHERE id = ? AND ${won}`).bind(k.identityPub, userId, ...wb),
+    // A recovery code registered under the old identity key stops working with it.
+    db.prepare(`UPDATE users SET identity_pub = ?, recovery_pub = NULL, recovery_sig = NULL WHERE id = ? AND ${won}`)
+      .bind(k.identityPub, userId, ...wb),
     db.prepare(
       `UPDATE resets SET new_identity_pub = ?, claim_sig = ?, completed_at = ? WHERE id = ? AND completed_at IS NULL AND ${won}`,
     ).bind(k.identityPub, claimSig, now, resetId, ...wb),
@@ -158,12 +160,22 @@ async function redeemReset(env: Env, body: Record<string, unknown>, tokenHash: s
  * isn't published anywhere while unused, so only the code's holder can ask.
  */
 auth.post("/recover/lookup", async (c) => {
-  const recoveryPub = pubKey((await readJson(c)).recoveryPub);
-  const user = await c.env.DB.prepare("SELECT id, identity_pub FROM users WHERE recovery_pub = ? AND is_admin = 1")
-    .bind(recoveryPub).first<{ id: string; identity_pub: string }>();
-  if (!user) throw new ApiError("unauthorized");
+  const user = await recoveryUser(c.env.DB, pubKey((await readJson(c)).recoveryPub));
   return c.json({ userId: user.id, identityPub: user.identity_pub });
 });
+
+/**
+ * The admin whose registered recovery key is [recoveryPub], if their current identity key signed
+ * that registration (a key registered under an identity key since retired doesn't count).
+ */
+async function recoveryUser(db: D1Database, recoveryPub: string) {
+  const user = await db.prepare("SELECT id, identity_pub, recovery_sig FROM users WHERE recovery_pub = ? AND is_admin = 1")
+    .bind(recoveryPub).first<{ id: string; identity_pub: string; recovery_sig: string }>();
+  if (!user || !(await verifyEd25519(user.identity_pub, user.recovery_sig, recoveryKeyMessage(user.id, recoveryPub)))) {
+    throw new ApiError("unauthorized");
+  }
+  return user;
+}
 
 /**
  * Admin recovery without any device: the holder of the printed recovery code proves it with a
@@ -182,9 +194,9 @@ auth.post("/recover", async (c) => {
   const claimPub = pubKey(body.claimPub);
   const sig = signature(body.sig);
   const claimSig = signature(body.claimSig);
-  const createdAt = freshTime(body.createdAt, now);
 
-  // A retry of a recovery whose response was lost: same reset, same keys, within 10 minutes.
+  // A retry of a recovery whose response was lost: same reset, same keys, within 10 minutes of
+  // the recovery (checked before the signed time, which may be older by now).
   const done = await db.prepare(
     `SELECT r.user_id, d.id AS device_id, u.is_admin FROM resets r
      JOIN users u ON u.id = r.user_id
@@ -195,9 +207,8 @@ auth.post("/recover", async (c) => {
     .first<{ user_id: string; device_id: string; is_admin: number }>();
   if (done) return c.json(await reissue(c.env, done.user_id, done.device_id, done.is_admin === 1, now), 201);
 
-  const user = await db.prepare("SELECT id, identity_pub, recovery_sig FROM users WHERE recovery_pub = ? AND is_admin = 1")
-    .bind(recoveryPub).first<{ id: string; identity_pub: string; recovery_sig: string }>();
-  if (!user) throw new ApiError("unauthorized");
+  const createdAt = freshTime(body.createdAt, now);
+  const user = await recoveryUser(db, recoveryPub);
   const statement = {
     resetId, userId: user.id, signerUserId: user.id, signerKind: "recovery" as const, oldIdentityPub, claimPub, createdAt,
   };

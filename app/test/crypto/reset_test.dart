@@ -10,7 +10,7 @@ Uint8List _bytes(int n, int fill) => Uint8List.fromList(List.filled(n, fill));
 
 void main() {
   test('reset domains are registered and no domain is a prefix of another', () {
-    expect(famchatDomains, containsAll(['famchat-reset-v1', 'famchat-reset-claim-v1', 'famchat-recovery-key-v1', 'famchat-recovery-seed-v1']));
+    expect(famchatDomains, containsAll(['famchat-reset-v1', 'famchat-reset-claim-v1', 'famchat-recovery-key-v1', 'famchat-recovery-seed-v1', 'famchat-admin-v1']));
     for (final a in famchatDomains) {
       for (final b in famchatDomains) {
         if (a != b) expect(b.startsWith(a), isFalse, reason: '$a is a prefix of $b');
@@ -66,6 +66,16 @@ void main() {
     expect(await verifyResetClaim(claimPub: await publicKeyOf(await newIdentityKey()), newIdentityPub: newId, sig: sig), isFalse);
   });
 
+  test('promotion binds the promoted user and the promoter', () async {
+    final admin = await newIdentityKey();
+    final pub = await publicKeyOf(admin);
+    final sig = await signPromotion(admin, userId: 'DAD', byUserId: 'ADM');
+    expect(b64url(sig), isNotEmpty);
+    expect(await verifyPromotion(signerPub: pub, userId: 'DAD', byUserId: 'ADM', sig: sig), isTrue);
+    expect(await verifyPromotion(signerPub: pub, userId: 'KID', byUserId: 'ADM', sig: sig), isFalse);
+    expect(await verifyPromotion(signerPub: pub, userId: 'DAD', byUserId: 'MOM', sig: sig), isFalse);
+  });
+
   test('recovery key registration is signed by the identity key', () async {
     final identity = await newIdentityKey();
     final rk = _bytes(32, 5);
@@ -111,6 +121,7 @@ void main() {
     expect(b64url(await publicKeyOf(claim)), resetVector['claimPub']);
     final rk = await recoveryKeyFrom(RecoveryCode.parse('ABCDE-FGHJK-MNPQR-STVWX-YZ012')!);
     expect(b64url(await publicKeyOf(rk)), resetVector['recoveryPub']);
+    expect(b64url(await signPromotion(signer, userId: st.userId, byUserId: st.signerUserId)), resetVector['promotionSig']);
   });
 }
 
@@ -121,4 +132,5 @@ const resetVector = <String, String>{
   'claimPub': 'oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA',
   'claimSig': 'Jlze_kYQ0E_SOE2Vk6N1uO6MZap0wohPBjrFZiznTKtHmwZP47d9H15vqMVFkDpQEjwNFcQFnryJ9rQxdVGwDg',
   'recoveryPub': 'eUCm29K8ImuMaI3m5sFSFc5dTYRJGuhtXRbOZQv2CWY',
+  'promotionSig': 'KunKvoovZnGzngrDT31ZUMxdUZOSNCnlGs7dvdjBtm_HP8sxqHvWWayKVARJih5XqgHGEuTVT37R-NHKXysADQ',
 };

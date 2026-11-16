@@ -76,6 +76,11 @@ export function recoveryKeyMessage(userId: string, recoveryPub: string): Uint8Ar
   return new Writer("famchat-recovery-key-v1").str(userId).bytes(key32(recoveryPub)).finish();
 }
 
+/** `"famchat-admin-v1" ‖ str(userId) ‖ str(byUserId)`: [byUserId] made [userId] an admin. */
+export function promotionMessage(userId: string, byUserId: string): Uint8Array {
+  return new Writer("famchat-admin-v1").str(userId).str(byUserId).finish();
+}
+
 function key32(b64: string): Uint8Array {
   const b = b64urlDecode(b64);
   if (b.length !== 32) throw new ApiError("invalid_request");
