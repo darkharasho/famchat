@@ -63,3 +63,27 @@ class ByteWriter {
 
   Uint8List finish() => _b.toBytes();
 }
+
+/// Reads a base64url field from parsed JSON. Throws [CryptoFailure] if it is
+/// missing, not a string, not base64url, or not [length] bytes long.
+Uint8List jsonBytes(Map<String, Object?> j, String key, {int? length}) {
+  final v = j[key];
+  if (v is! String) throw CryptoFailure('missing or non-string $key');
+  final b = b64urlDecode(v);
+  if (length != null && b.length != length) throw CryptoFailure('$key must be $length bytes');
+  return b;
+}
+
+/// Reads a string field from parsed JSON, or throws [CryptoFailure].
+String jsonString(Map<String, Object?> j, String key) {
+  final v = j[key];
+  if (v is! String) throw CryptoFailure('missing or non-string $key');
+  return v;
+}
+
+/// Reads a non-negative u32 field from parsed JSON, or throws [CryptoFailure].
+int jsonU32(Map<String, Object?> j, String key) {
+  final v = j[key];
+  if (v is! int || v < 0 || v > 0xffffffff) throw CryptoFailure('missing or bad $key');
+  return v;
+}
