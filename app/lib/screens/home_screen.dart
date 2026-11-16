@@ -1,19 +1,14 @@
-import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(title: const Text('FamChat')),
-      body: Center(
-        child: FilledButton(
-          onPressed: () => context.go('/spikes'),
-          child: const Text('Platform spikes'),
-        ),
-      ),
+      body: const Center(child: Text('Chats coming soon')),
     );
   }
 }
