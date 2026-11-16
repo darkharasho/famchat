@@ -4,6 +4,7 @@ import { ApiError } from "../lib/errors";
 import { hubStub } from "../hub";
 import { memberIds } from "../lib/chatdb";
 import { sharingUserIds } from "../lib/family";
+import { readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
 import { notify } from "../notify";
 
@@ -28,6 +29,24 @@ devices.get("/", async (c) => {
       current: d.id === current,
     })),
   });
+});
+
+/**
+ * Sets (or with null, clears) this device's FCM token. A token belongs to one app install, so it
+ * is taken away from any other device row that still had it (an app signed in again).
+ */
+devices.put("/me/push", async (c) => {
+  const token = (await readJson(c)).token;
+  if (token !== null && (typeof token !== "string" || token.length < 1 || token.length > 4096)) {
+    throw new ApiError("invalid_request");
+  }
+  const db = c.env.DB;
+  const deviceId = c.get("deviceId");
+  await db.batch([
+    db.prepare("UPDATE devices SET push_token = NULL WHERE push_token = ? AND id != ?").bind(token, deviceId),
+    db.prepare("UPDATE devices SET push_token = ? WHERE id = ?").bind(token, deviceId),
+  ]);
+  return c.body(null, 204);
 });
 
 /**
