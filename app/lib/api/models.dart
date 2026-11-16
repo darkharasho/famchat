@@ -46,12 +46,41 @@ class RedeemResult {
 }
 
 class Me {
-  const Me({required this.userId, required this.deviceId, required this.name, required this.isAdmin, this.recoveryCodeSet = false});
+  const Me({
+    required this.userId,
+    required this.deviceId,
+    required this.name,
+    required this.isAdmin,
+    this.recoveryCodeSet = false,
+    this.reviewer = false,
+  });
   final String userId, deviceId, name;
   final bool isAdmin;
 
   /// An admin recovery code was saved (its key is registered).
   final bool recoveryCodeSet;
+
+  /// A reviewer account (docs/protocol.md "Reviewer accounts"): sees only other reviewers.
+  final bool reviewer;
+}
+
+/// `GET /admin/reviewers` (docs/protocol.md "Reviewer accounts"): the active reviewer invite's
+/// link, if any, and the reviewer accounts, which the family directory never lists.
+class Reviewers {
+  const Reviewers({required this.inviteUrl, required this.users});
+
+  /// The reusable `/join#review.<token>` link, or null when there is none (never made, or revoked).
+  final String? inviteUrl;
+  final List<ReviewerAccount> users;
+}
+
+class ReviewerAccount {
+  const ReviewerAccount({required this.id, required this.name, required this.createdAt, required this.devices});
+  final String id, name;
+  final DateTime createdAt;
+
+  /// Live devices.
+  final int devices;
 }
 
 /// `POST /admin/users/:id/reset`: the one-time link that signs the user in again. [url] already

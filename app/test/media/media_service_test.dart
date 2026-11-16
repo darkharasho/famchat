@@ -448,6 +448,32 @@ void main() {
       expect((await alice.rows(chatId)).where((r) => r.kind == 'voice'), hasLength(1));
     });
 
+    test('a lone user (a reviewer) sends text, a photo and a voice message to a chat with only themselves', () async {
+      final alice = await start(await backend.addUser('Reviewer'));
+      final chatId = await alice.sync.createGroup('Note to self', const []);
+      expect(backend.chatDto(chatId).members.map((m) => m.userId), [alice.d.userId]);
+      await alice.sync.sendText(chatId, 'hello me');
+      final photo = await sentPhoto(alice, chatId, photoBytes(800));
+      final voice = await alice.media.sendVoice(chatId, clip());
+      await until(() async => (await alice.row(voice))?.state == 'sent', reason: 'voice sent');
+      expect(backend.storedMessages(chatId), hasLength(3));
+      expect((await alice.row(photo))!.kind, 'photo');
+      // A second device of the same user (paired) gets the keys from the first and reads all of it.
+      final laptop = await start(await backend.pairDevice(alice.d.userId));
+      await until(() async => (await laptop.rows(chatId)).length == 3, reason: 'laptop catches up');
+      final v = (await laptop.voices(chatId)).single;
+      expect(await laptop.media.load(v.ref), clip().bytes);
+      expect(await laptop.media.load((await laptop.photos(chatId)).single.fullRef), photoBytes(800));
+      // Revoking the laptop moves the one-member chat to a new epoch that the phone creates alone.
+      backend.revoke(laptop.d.deviceId);
+      await until(() async => backend.chatDto(chatId).epochReady && backend.chatDto(chatId).currentEpoch == 2,
+          reason: 'epoch 2 created by the only member');
+      await alice.sync.sendText(chatId, 'after revoke');
+      await until(() async => backend.storedMessages(chatId).length == 4);
+      expect(backend.storedMessages(chatId).last.envelope['epoch'], 2);
+      expect(backend.hasWrap(chatId, 2, laptop.d.deviceId), isFalse);
+    });
+
     test('sendVoice rejects a clip over the 8 MiB voice cap', () async {
       final (alice, _, chatId) = await pair();
       await expectLater(alice.media.sendVoice(chatId, clip(n: 8 * 1024 * 1024)), throwsArgumentError);

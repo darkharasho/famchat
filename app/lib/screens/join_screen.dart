@@ -21,6 +21,7 @@ class JoinScreen extends ConsumerStatefulWidget {
 class _JoinScreenState extends ConsumerState<JoinScreen> {
   final _invite = TextEditingController();
   final _deviceName = TextEditingController(text: defaultDeviceName());
+  final _displayName = TextEditingController();
   String? _linkToken;
   bool _busy = false;
   String? _error;
@@ -29,21 +30,35 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
   void initState() {
     super.initState();
     _linkToken = ref.read(initialInviteTokenProvider);
+    // A pasted reviewer link shows the name field.
+    _invite.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _invite.dispose();
     _deviceName.dispose();
+    _displayName.dispose();
     super.dispose();
   }
 
+  String? get _token => _linkToken ?? parseInviteToken(_invite.text);
+
+  /// A reviewer link (docs/protocol.md "Reviewer accounts"): the joiner picks their own name.
+  bool get _reviewer {
+    final t = _token;
+    return t != null && isReviewerInvite(t);
+  }
+
   Future<void> _join() async {
-    final token = _linkToken ?? parseInviteToken(_invite.text);
+    final token = _token;
     final name = _deviceName.text.trim();
+    final displayName = _displayName.text.trim();
     String? error;
     if (token == null) {
       error = "That doesn't look like a FamChat invite link.";
+    } else if (_reviewer && (displayName.isEmpty || displayName.runes.length > 40)) {
+      error = 'Enter your name (up to 40 characters).';
     } else if (name.isEmpty || name.runes.length > 60) {
       error = 'Give this device a name (up to 60 characters).';
     }
@@ -56,7 +71,9 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
       _error = null;
     });
     try {
-      await ref.read(sessionProvider.notifier).join(token: token, deviceName: name);
+      await ref
+          .read(sessionProvider.notifier)
+          .join(token: token, deviceName: name, displayName: _reviewer ? displayName : null);
       // The router moves on to the home screen.
     } catch (e) {
       if (mounted) setState(() => _error = _message(e));
@@ -125,6 +142,22 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
                 child: const Text('Use a different link'),
               ),
             ),
+          if (_reviewer) ...[
+            const SizedBox(height: Space.lg),
+            TextField(
+              key: const Key('display-name-field'),
+              controller: _displayName,
+              enabled: !_busy,
+              maxLength: 40,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Your name',
+                helperText: 'Shown to the others you chat with.',
+                prefixIcon: Icon(Icons.badge_outlined),
+              ),
+              onSubmitted: (_) => _join(),
+            ),
+          ],
           const SizedBox(height: Space.lg),
           TextField(
             key: const Key('device-name-field'),

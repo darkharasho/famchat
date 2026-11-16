@@ -313,7 +313,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final other = otherMember(chat, members, me);
     final group = chat.kind == 'group';
     final otherOnline = other != null && online.contains(other);
-    final subtitle = group ? '${members.length} members' : (otherOnline ? 'Online' : null);
+    final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
     final changed = [
       for (final m in members)

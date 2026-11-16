@@ -28,6 +28,18 @@ void main() {
     expect(inviteTokenFromUri(Uri.parse('https://famchat.dev/join#$t.$seed')), '$t.$seed');
   });
 
+  test('a reviewer link is marked, and the marker never reaches the server', () {
+    expect(parseInviteToken('https://famchat.dev/join#review.$t'), 'review.$t');
+    expect(inviteTokenFromUri(Uri.parse('https://famchat.dev/join#review.$t')), 'review.$t');
+    final parts = splitInvite('review.$t');
+    expect((parts.token, parts.reviewer, parts.claimSeed), (t, true, null));
+    expect(splitInvite(t).reviewer, isFalse);
+    expect(isReviewerInvite('review.$t'), isTrue);
+    expect(isReviewerInvite(t), isFalse);
+    expect(parseInviteToken('review.short'), isNull);
+    expect(parseInviteToken('review.$t.${'A' * 43}'), isNull, reason: 'reviewer links carry no claim seed');
+  });
+
   test('rejects anything that is not a token', () {
     for (final input in [
       '',

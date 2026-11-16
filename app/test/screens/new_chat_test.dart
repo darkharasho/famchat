@@ -66,6 +66,32 @@ void main() {
     expect(find.byType(ConversationView), findsOneWidget);
   });
 
+  chatTestWidgets('alone (a reviewer), you can start a note to self', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    final lone = FakeChatBackend();
+    final me = await lone.addUser('Reviewer');
+    await pumpChatApp(tester, me);
+    go(tester, '/new');
+    await settle(tester);
+    expect(find.text('No one else here yet'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('note-to-self')));
+    await settle(tester);
+    final chats = (await tester.runAsync(() => me.api.chats()))!;
+    expect(chats.single.title, 'Note to self');
+    expect(chats.single.kind, 'group');
+    expect(chats.single.members.map((m) => m.userId), [me.userId]);
+    expect(find.byType(ConversationView), findsOneWidget);
+    expect(find.text('Only you'), findsOneWidget);
+  });
+
+  chatTestWidgets('with others to pick, there is no note-to-self button', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice);
+    go(tester, '/new');
+    await settle(tester);
+    expect(find.byKey(const Key('note-to-self')), findsNothing);
+  });
+
   chatTestWidgets('preselected people start checked', (tester) async {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);

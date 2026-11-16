@@ -551,7 +551,8 @@ class FakeChatApi implements ChatApi {
           directKey = ([userId, userIds.single]..sort()).join(':');
           final dup = b._chats.values.where((c) => c.directKey == directKey).firstOrNull;
           if (dup != null) return (chat: dup.dto(), created: false);
-        } else if (title == null || title.trim().isEmpty || userIds.isEmpty || userIds.contains(userId)) {
+        } else if (title == null || title.trim().isEmpty || userIds.contains(userId)) {
+          // No others is a chat with only yourself ("Note to self").
           b._err('invalid_request');
         }
         if (!userIds.every(b._users.containsKey)) b._err('invalid_request');
