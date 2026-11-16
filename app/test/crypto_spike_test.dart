@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -110,6 +111,20 @@ void main() {
       // ignore: avoid_print
       print('SPIKE crypto-throughput ${sw.elapsedMilliseconds}ms/100');
       expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+  });
+
+  // The server test verifies this committed fixture; if the Dart cert format changes,
+  // this fails until `dart run tool/gen_cert_fixture.dart` regenerates it.
+  test('cert matches the server fixture', () async {
+    final cert = await makeDeviceCert(identity: identity, enc: enc, sign: sign);
+    final fixture = jsonDecode(
+        File('../server/test/fixtures/dart-device-cert.json').readAsStringSync()) as Map<String, dynamic>;
+    expect(fixture, {
+      'identityPub': cert.identityPub,
+      'encPub': cert.encPub,
+      'signPub': cert.signPub,
+      'certSig': cert.certSig,
     });
   });
 }

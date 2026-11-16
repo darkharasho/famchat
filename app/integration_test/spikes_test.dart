@@ -3,6 +3,7 @@
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:famchat/audio_init.dart';
 import 'package:famchat/spikes/audio_spike.dart';
 import 'package:famchat/spikes/crypto_spike.dart';
 import 'package:famchat/spikes/db_spike.dart';
@@ -10,7 +11,6 @@ import 'package:famchat/spikes/ws_spike.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
 
@@ -27,12 +27,8 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   // On the web, print() goes to the browser console; flutter drive's driver prints these instead.
   tearDownAll(() => binding.reportData = {'spike': _lines});
-  Object? audioInitError;
-  try {
-    JustAudioMediaKit.ensureInitialized(linux: true, windows: true);
-  } catch (e) {
-    audioInitError = e; // e.g. libmpv missing on Linux: report it, keep the other spikes running
-  }
+  // e.g. libmpv missing on Linux: report it, keep the other spikes running
+  final audioInitError = initAudioBackend();
 
   testWidgets('crypto', (_) async {
     final identity = await Ed25519().newKeyPair();

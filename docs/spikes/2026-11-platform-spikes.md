@@ -65,7 +65,9 @@ The rule from the plan:
 > Platforms that can't record AAC record Opus `.ogg` only if all six can play Opus; otherwise transcoding
 > is out of scope and those platforms ship playback-only voice in v1.
 
-- AAC `.m4a` played to the end on all six platforms, and all five recorders that support AAC recorded it.
+- AAC `.m4a` played to the end on all six platforms. Five of the six recorders report AAC support, but
+  only Linux has actually recorded it so far (checked with ffprobe). Recording on the other four is
+  checked on real devices in plans 4 and 12, and the decision holds only if those checks pass.
   **Voice messages are AAC-LC `.m4a`, about 48 kbps, mono.**
 - Chrome can't record AAC. Its Opus output is WebM, not Ogg, and AVFoundation on iOS and macOS doesn't play
   WebM. Windows can't even record Opus, so Opus fails the "all six" test. **Browsers that can't record AAC
@@ -80,4 +82,8 @@ The rule from the plan:
   "Recording isn't available in this browser" hint.
 - Plans 4 and 12: on real devices, check the microphone permission prompt and record-then-play, and
   measure crypto speed on a low-end Android phone.
+- Plan 3 (crypto): the spec doesn't say who authenticates an epoch-key wrap. `sealBox` is anonymous, so
+  a compromised server could hand devices a new epoch key it knows. Decide the signer (for example, the
+  wrapping device signs `chatId, epoch, recipientDeviceId, sealed`) before building on it. Also add
+  `v` and `epoch` to the AAD, a domain prefix on envelope signatures, and length-prefixed AAD fields.
 - Linux packaging (plan 12): the AppImage has to bundle libmpv, or declare it as a dependency, for playback.
