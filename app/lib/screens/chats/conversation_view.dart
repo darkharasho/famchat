@@ -134,7 +134,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             content: Text("${u.name}'s security key changed. This happens after an account reset."),
             actions: [
               TextButton(
-                onPressed: () => ref.read(chatSyncProvider)?.directory.acknowledgeIdentity(u.id),
+                onPressed: () => ref.read(chatSyncProvider)?.acknowledgeIdentity(u.id),
                 child: const Text('OK'),
               ),
             ],

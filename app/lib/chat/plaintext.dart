@@ -46,7 +46,7 @@ sealed class Plaintext {
         }
         return ReactionBody(target, emoji);
       default:
-        return UnknownBody(kind);
+        return UnknownBody(kind, j);
     }
   }
 }
@@ -71,10 +71,12 @@ class ReactionBody extends Plaintext {
 }
 
 /// A kind this version doesn't know (photos and voice before plans 7–8 land, or newer kinds).
+/// Keeps the whole body, so a later version can show the stored message.
 class UnknownBody extends Plaintext {
-  const UnknownBody(this.kind);
+  const UnknownBody(this.kind, [this.raw = const {}]);
   @override
   final String kind;
+  final Map<String, Object?> raw;
   @override
-  Map<String, Object?> toJson() => {'kind': kind};
+  Map<String, Object?> toJson() => {...raw, 'kind': kind};
 }

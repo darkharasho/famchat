@@ -90,6 +90,10 @@ class LocalUsers extends Table {
   /// The key first seen (or last acknowledged). Differs from [identityPub] after a change.
   TextColumn get trustedIdentityPub => text()();
 
+  /// JSON list of every key this device has trusted for the user (first seen and acknowledged),
+  /// so devices certified by an earlier key still verify their old messages.
+  TextColumn get knownIdentityPubs => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -104,8 +108,12 @@ class LocalDevices extends Table {
   TextColumn get certSig => text()();
   BoolColumn get revoked => boolean()();
 
-  /// The cert verifies against the user's current identity key.
+  /// The cert verifies against the user's current identity key or a key trusted earlier.
   BoolColumn get certValid => boolean()();
+
+  /// The cert verifies against a key this device trusts (not an unacknowledged new one). Only
+  /// trusted devices get wraps, count as wrappers, or count as senders.
+  BoolColumn get trusted => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -290,7 +298,7 @@ class ChatDb extends _$ChatDb {
       (select(localMembers)..where((m) => m.chatId.equals(chatId))).watch();
 
   /// Chats with members, last message and unread count (others' non-reaction messages above my read
-  /// position), newest activity first.
+  /// position and my join point), newest activity first.
   Stream<List<ChatListItem>> watchChatList(String myUserId) => customSelect(
         'SELECT 1',
         readsFrom: {localChats, localMembers, localMessages},
@@ -311,8 +319,16 @@ class ChatDb extends _$ChatDb {
             ..limit(1))
           .getSingleOrNull();
       final unread = await customSelect(
-        "SELECT COUNT(*) AS n FROM local_messages WHERE chat_id = ? AND seq > ? AND sender_user_id != ? AND kind != 'reaction'",
-        variables: [Variable.withString(c.id), Variable.withInt(c.myLastReadSeq), Variable.withString(me)],
+        // Counted from where I joined: history from before is shown, not unread.
+        "SELECT COUNT(*) AS n FROM local_messages WHERE chat_id = ? AND sender_user_id != ? AND kind != 'reaction' "
+        'AND seq > MAX(?, COALESCE((SELECT joined_seq FROM local_members WHERE chat_id = ? AND user_id = ?), 0))',
+        variables: [
+          Variable.withString(c.id),
+          Variable.withString(me),
+          Variable.withInt(c.myLastReadSeq),
+          Variable.withString(c.id),
+          Variable.withString(me),
+        ],
         readsFrom: {localMessages},
       ).getSingle();
       items.add(ChatListItem(

@@ -54,6 +54,25 @@ void main() {
     expect(old.members.map((m) => m.userId), containsAll(['me', 'bob']));
   });
 
+  test('unread starts at the join point for new members', () async {
+    await db.upsertChat(ChatDto(
+      id: 'g',
+      kind: 'group',
+      title: 'G',
+      createdBy: 'bob',
+      currentEpoch: 1,
+      epochReady: true,
+      lastSeq: 4,
+      lastMessageAt: 1,
+      createdAt: 1,
+      members: const [MemberDto(userId: 'me', joinedSeq: 3, lastReadSeq: 0), MemberDto(userId: 'bob', joinedSeq: 0, lastReadSeq: 4)],
+    ));
+    for (var i = 1; i <= 4; i++) {
+      await db.insertMessageIfAbsent(msg('m$i', 'g', i));
+    }
+    expect((await db.watchChatList('me').first).single.unread, 1);
+  });
+
   test('a pending own message bumps activity', () async {
     await db.upsertChat(chat('a', createdAt: 1));
     await db.upsertChat(chat('b', createdAt: 2));

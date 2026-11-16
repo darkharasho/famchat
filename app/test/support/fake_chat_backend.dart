@@ -176,6 +176,16 @@ class FakeChatBackend {
 
   // --- helpers mirroring the server ---
 
+  bool _wrapperIsMember(ChatKeyWrap w) {
+    final wrapper = _devices[w.wrapperDeviceId];
+    return wrapper != null && (_chats[w.chatId]?.members.containsKey(wrapper.userId) ?? false);
+  }
+
+  bool _hasUsableWrap(String chatId, int epoch, String deviceId) {
+    final w = _wraps['$chatId|$epoch|$deviceId'];
+    return w != null && _wrapperIsMember(w);
+  }
+
   Never _err(String code) => throw ApiException(
         switch (code) {
           'invalid_request' => 400,
@@ -476,14 +486,14 @@ class FakeChatApi implements ChatApi {
         for (final w in wraps) {
           final c = b._chats[w.chatId];
           if (c == null || !c.members.containsKey(userId) || w.wrapperDeviceId != deviceId) b._err('invalid_request');
-          if (!c.epochs.contains(w.epoch) || !b._liveDevices(c.members.keys).contains(w.recipientDeviceId)) {
-            b._err('invalid_request');
-          }
         }
         var added = 0;
         for (final w in wraps) {
+          final c = b._chats[w.chatId]!;
+          if (!c.epochs.contains(w.epoch) || !b._liveDevices(c.members.keys).contains(w.recipientDeviceId)) continue;
           final k = '${w.chatId}|${w.epoch}|${w.recipientDeviceId}';
-          if (b._wraps.containsKey(k)) continue;
+          final old = b._wraps[k];
+          if (old != null && b._wrapperIsMember(old)) continue;
           b._wraps[k] = w;
           added++;
           b._notify([b._devices[w.recipientDeviceId]!.userId], {'type': 'keys', 'chatId': w.chatId});
@@ -496,7 +506,8 @@ class FakeChatApi implements ChatApi {
         for (final w in b._wraps.values.where((w) => w.recipientDeviceId == deviceId))
           if (b._chats[w.chatId]?.members.containsKey(userId) ?? false)
             for (final d in b._liveDevices(b._chats[w.chatId]!.members.keys))
-              if (!b.hasWrap(w.chatId, w.epoch, d)) MissingWrap(chatId: w.chatId, epoch: w.epoch, deviceId: d),
+              if (b._chats[w.chatId]!.epochs.contains(w.epoch) && !b._hasUsableWrap(w.chatId, w.epoch, d))
+                MissingWrap(chatId: w.chatId, epoch: w.epoch, deviceId: d),
       ]);
 
   @override

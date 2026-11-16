@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/reactions.dart';
@@ -288,5 +289,108 @@ void main() {
     expect(await alice.sync.openDirect(bob.d.userId), a);
     expect(await bob.sync.openDirect(alice.d.userId), a);
     expect(() => alice.sync.addMembers(a, [bob.d.userId]), throwsArgumentError);
+  });
+
+  test("an identity change gets no keys or trust until acknowledged", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bobOld = await backend.addUser('Bob');
+    final chatId = await alice.sync.openDirect(bobOld.userId);
+    final bob2 = await start(await backend.resetUser(bobOld.userId));
+    await alice.sync.syncAll();
+    expect(backend.hasWrap(chatId, 1, bob2.d.deviceId), isFalse, reason: 'no history for an unacknowledged key');
+    await alice.sync.acknowledgeIdentity(bobOld.userId);
+    await until(() async => backend.hasWrap(chatId, 1, bob2.d.deviceId), reason: 'repair after acknowledging');
+  });
+
+  test('a message under an unacknowledged identity waits, then shows once acknowledged', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bobOld = await backend.addUser('Bob');
+    final chatId = await alice.sync.openDirect(bobOld.userId);
+    final bob2 = await start(await backend.resetUser(bobOld.userId));
+    await alice.sync.syncAll(); // sees Bob's new key, not acknowledged
+    // As if Bob's key reached his new device some other way (pairing comes in plan 6).
+    await bob2.d.db.putKey(chatId, 1, (await alice.d.db.key(chatId, 1))!);
+    await bob2.sync.sendText(chatId, 'it is me');
+    await until(() async => (await alice.rows(chatId)).isNotEmpty);
+    expect((await alice.rows(chatId)).single.kind, 'undecryptable');
+    await alice.sync.acknowledgeIdentity(bobOld.userId);
+    await until(() async => (await alice.texts(chatId)).contains('it is me'));
+  });
+
+  test("old messages from a reset user's previous device still verify", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await until(() async => await bob.d.db.key(chatId, 1) != null);
+    alice.d.hub.drop();
+    await bob.sync.sendText(chatId, 'before reset');
+    await until(() async => backend.storedMessages(chatId).isNotEmpty);
+    final bob2 = await backend.resetUser(bob.d.userId);
+    addTearDown(bob2.dispose);
+    await alice.d.hub.connect();
+    await until(() async => (await alice.rows(chatId)).isNotEmpty);
+    expect(await alice.texts(chatId), ['before reset']);
+  });
+
+  test('a directory failure leaves a message waiting, not invalid', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final bob2 = await start(await backend.addDevice(bob.d.userId));
+    await bob.sync.syncAll(); // wraps for bob2
+    await until(() async => await bob2.d.db.key(chatId, 1) != null);
+    alice.d.api.failNext = const NetworkException('offline');
+    await bob2.sync.sendText(chatId, 'new phone');
+    await until(() async => (await alice.rows(chatId)).isNotEmpty);
+    expect((await alice.rows(chatId)).single.kind, 'undecryptable');
+    await alice.sync.syncAll();
+    expect(await alice.texts(chatId), ['new phone']);
+  });
+
+  test('a read made offline is sent on reconnect', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await alice.sync.sendText(chatId, 'read me later');
+    await until(() async => (await bob.texts(chatId)).isNotEmpty);
+    bob.d.hub.drop();
+    await bob.sync.markRead(chatId);
+    await bob.d.hub.connect();
+    await until(() async =>
+        (await alice.d.db.membersOf(chatId)).firstWhere((m) => m.userId == bob.d.userId).lastReadSeq == 1,
+        reason: 'the read reaches Alice');
+  });
+
+  test('a failed connect sync still flushes the outbox, then retries', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await pump();
+    await alice.sync.idle;
+    alice.d.hub.drop();
+    await alice.sync.sendText(chatId, 'queued');
+    await bob.sync.sendText(chatId, 'while you were out');
+    await until(() async => backend.storedMessages(chatId).length == 1);
+    alice.d.api.failNext = const NetworkException('blip');
+    await alice.d.hub.connect();
+    await until(() async => (await bob.texts(chatId)).contains('queued'), reason: 'outbox flushed despite the failed sync');
+    await until(() async => (await alice.texts(chatId)).contains('while you were out'), reason: 'sync retried');
+  });
+
+  test('a missing key is fetched once per pass, not per message', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    for (var i = 0; i < 5; i++) {
+      await alice.sync.sendText(chatId, 'm$i');
+    }
+    await until(() async => backend.storedMessages(chatId).length == 5);
+    final bob2 = Node(await backend.addDevice(bob.d.userId)); // no wraps yet, nobody repairs
+    nodes.add(bob2);
+    backend.calls.clear();
+    await bob2.sync.start();
+    await until(() async => (await bob2.rows(chatId)).length == 5);
+    await bob2.sync.idle;
+    expect(backend.calls.where((c) => c == 'GET /keys/wraps').length, lessThanOrEqualTo(3));
   });
 }

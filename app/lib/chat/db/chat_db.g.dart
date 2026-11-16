@@ -1979,6 +1979,19 @@ class $LocalUsersTable extends LocalUsers
         type: DriftSqlType.string,
         requiredDuringInsert: true,
       );
+  static const VerificationMeta _knownIdentityPubsMeta = const VerificationMeta(
+    'knownIdentityPubs',
+  );
+  @override
+  late final GeneratedColumn<String> knownIdentityPubs =
+      GeneratedColumn<String>(
+        'known_identity_pubs',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultValue: const Constant('[]'),
+      );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1986,6 +1999,7 @@ class $LocalUsersTable extends LocalUsers
     isAdmin,
     identityPub,
     trustedIdentityPub,
+    knownIdentityPubs,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2042,6 +2056,15 @@ class $LocalUsersTable extends LocalUsers
     } else if (isInserting) {
       context.missing(_trustedIdentityPubMeta);
     }
+    if (data.containsKey('known_identity_pubs')) {
+      context.handle(
+        _knownIdentityPubsMeta,
+        knownIdentityPubs.isAcceptableOrUnknown(
+          data['known_identity_pubs']!,
+          _knownIdentityPubsMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -2071,6 +2094,10 @@ class $LocalUsersTable extends LocalUsers
         DriftSqlType.string,
         data['${effectivePrefix}trusted_identity_pub'],
       )!,
+      knownIdentityPubs: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}known_identity_pubs'],
+      )!,
     );
   }
 
@@ -2090,12 +2117,17 @@ class UserRow extends DataClass implements Insertable<UserRow> {
 
   /// The key first seen (or last acknowledged). Differs from [identityPub] after a change.
   final String trustedIdentityPub;
+
+  /// JSON list of every key this device has trusted for the user (first seen and acknowledged),
+  /// so devices certified by an earlier key still verify their old messages.
+  final String knownIdentityPubs;
   const UserRow({
     required this.id,
     required this.name,
     required this.isAdmin,
     required this.identityPub,
     required this.trustedIdentityPub,
+    required this.knownIdentityPubs,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2105,6 +2137,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     map['is_admin'] = Variable<bool>(isAdmin);
     map['identity_pub'] = Variable<String>(identityPub);
     map['trusted_identity_pub'] = Variable<String>(trustedIdentityPub);
+    map['known_identity_pubs'] = Variable<String>(knownIdentityPubs);
     return map;
   }
 
@@ -2115,6 +2148,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       isAdmin: Value(isAdmin),
       identityPub: Value(identityPub),
       trustedIdentityPub: Value(trustedIdentityPub),
+      knownIdentityPubs: Value(knownIdentityPubs),
     );
   }
 
@@ -2131,6 +2165,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       trustedIdentityPub: serializer.fromJson<String>(
         json['trustedIdentityPub'],
       ),
+      knownIdentityPubs: serializer.fromJson<String>(json['knownIdentityPubs']),
     );
   }
   @override
@@ -2142,6 +2177,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       'isAdmin': serializer.toJson<bool>(isAdmin),
       'identityPub': serializer.toJson<String>(identityPub),
       'trustedIdentityPub': serializer.toJson<String>(trustedIdentityPub),
+      'knownIdentityPubs': serializer.toJson<String>(knownIdentityPubs),
     };
   }
 
@@ -2151,12 +2187,14 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     bool? isAdmin,
     String? identityPub,
     String? trustedIdentityPub,
+    String? knownIdentityPubs,
   }) => UserRow(
     id: id ?? this.id,
     name: name ?? this.name,
     isAdmin: isAdmin ?? this.isAdmin,
     identityPub: identityPub ?? this.identityPub,
     trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
+    knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
   );
   UserRow copyWithCompanion(LocalUsersCompanion data) {
     return UserRow(
@@ -2169,6 +2207,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       trustedIdentityPub: data.trustedIdentityPub.present
           ? data.trustedIdentityPub.value
           : this.trustedIdentityPub,
+      knownIdentityPubs: data.knownIdentityPubs.present
+          ? data.knownIdentityPubs.value
+          : this.knownIdentityPubs,
     );
   }
 
@@ -2179,14 +2220,21 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ..write('name: $name, ')
           ..write('isAdmin: $isAdmin, ')
           ..write('identityPub: $identityPub, ')
-          ..write('trustedIdentityPub: $trustedIdentityPub')
+          ..write('trustedIdentityPub: $trustedIdentityPub, ')
+          ..write('knownIdentityPubs: $knownIdentityPubs')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, isAdmin, identityPub, trustedIdentityPub);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    isAdmin,
+    identityPub,
+    trustedIdentityPub,
+    knownIdentityPubs,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2195,7 +2243,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           other.name == this.name &&
           other.isAdmin == this.isAdmin &&
           other.identityPub == this.identityPub &&
-          other.trustedIdentityPub == this.trustedIdentityPub);
+          other.trustedIdentityPub == this.trustedIdentityPub &&
+          other.knownIdentityPubs == this.knownIdentityPubs);
 }
 
 class LocalUsersCompanion extends UpdateCompanion<UserRow> {
@@ -2204,6 +2253,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
   final Value<bool> isAdmin;
   final Value<String> identityPub;
   final Value<String> trustedIdentityPub;
+  final Value<String> knownIdentityPubs;
   final Value<int> rowid;
   const LocalUsersCompanion({
     this.id = const Value.absent(),
@@ -2211,6 +2261,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.isAdmin = const Value.absent(),
     this.identityPub = const Value.absent(),
     this.trustedIdentityPub = const Value.absent(),
+    this.knownIdentityPubs = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalUsersCompanion.insert({
@@ -2219,6 +2270,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     required bool isAdmin,
     required String identityPub,
     required String trustedIdentityPub,
+    this.knownIdentityPubs = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2231,6 +2283,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Expression<bool>? isAdmin,
     Expression<String>? identityPub,
     Expression<String>? trustedIdentityPub,
+    Expression<String>? knownIdentityPubs,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2240,6 +2293,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       if (identityPub != null) 'identity_pub': identityPub,
       if (trustedIdentityPub != null)
         'trusted_identity_pub': trustedIdentityPub,
+      if (knownIdentityPubs != null) 'known_identity_pubs': knownIdentityPubs,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2250,6 +2304,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Value<bool>? isAdmin,
     Value<String>? identityPub,
     Value<String>? trustedIdentityPub,
+    Value<String>? knownIdentityPubs,
     Value<int>? rowid,
   }) {
     return LocalUsersCompanion(
@@ -2258,6 +2313,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       isAdmin: isAdmin ?? this.isAdmin,
       identityPub: identityPub ?? this.identityPub,
       trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
+      knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2280,6 +2336,9 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     if (trustedIdentityPub.present) {
       map['trusted_identity_pub'] = Variable<String>(trustedIdentityPub.value);
     }
+    if (knownIdentityPubs.present) {
+      map['known_identity_pubs'] = Variable<String>(knownIdentityPubs.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2294,6 +2353,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
           ..write('isAdmin: $isAdmin, ')
           ..write('identityPub: $identityPub, ')
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
+          ..write('knownIdentityPubs: $knownIdentityPubs, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2392,6 +2452,21 @@ class $LocalDevicesTable extends LocalDevices
       'CHECK ("cert_valid" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _trustedMeta = const VerificationMeta(
+    'trusted',
+  );
+  @override
+  late final GeneratedColumn<bool> trusted = GeneratedColumn<bool>(
+    'trusted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("trusted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2402,6 +2477,7 @@ class $LocalDevicesTable extends LocalDevices
     certSig,
     revoked,
     certValid,
+    trusted,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2476,6 +2552,12 @@ class $LocalDevicesTable extends LocalDevices
     } else if (isInserting) {
       context.missing(_certValidMeta);
     }
+    if (data.containsKey('trusted')) {
+      context.handle(
+        _trustedMeta,
+        trusted.isAcceptableOrUnknown(data['trusted']!, _trustedMeta),
+      );
+    }
     return context;
   }
 
@@ -2517,6 +2599,10 @@ class $LocalDevicesTable extends LocalDevices
         DriftSqlType.bool,
         data['${effectivePrefix}cert_valid'],
       )!,
+      trusted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}trusted'],
+      )!,
     );
   }
 
@@ -2535,8 +2621,12 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
   final String certSig;
   final bool revoked;
 
-  /// The cert verifies against the user's current identity key.
+  /// The cert verifies against the user's current identity key or a key trusted earlier.
   final bool certValid;
+
+  /// The cert verifies against a key this device trusts (not an unacknowledged new one). Only
+  /// trusted devices get wraps, count as wrappers, or count as senders.
+  final bool trusted;
   const DeviceRow({
     required this.id,
     required this.userId,
@@ -2546,6 +2636,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     required this.certSig,
     required this.revoked,
     required this.certValid,
+    required this.trusted,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2558,6 +2649,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     map['cert_sig'] = Variable<String>(certSig);
     map['revoked'] = Variable<bool>(revoked);
     map['cert_valid'] = Variable<bool>(certValid);
+    map['trusted'] = Variable<bool>(trusted);
     return map;
   }
 
@@ -2571,6 +2663,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       certSig: Value(certSig),
       revoked: Value(revoked),
       certValid: Value(certValid),
+      trusted: Value(trusted),
     );
   }
 
@@ -2588,6 +2681,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       certSig: serializer.fromJson<String>(json['certSig']),
       revoked: serializer.fromJson<bool>(json['revoked']),
       certValid: serializer.fromJson<bool>(json['certValid']),
+      trusted: serializer.fromJson<bool>(json['trusted']),
     );
   }
   @override
@@ -2602,6 +2696,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       'certSig': serializer.toJson<String>(certSig),
       'revoked': serializer.toJson<bool>(revoked),
       'certValid': serializer.toJson<bool>(certValid),
+      'trusted': serializer.toJson<bool>(trusted),
     };
   }
 
@@ -2614,6 +2709,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     String? certSig,
     bool? revoked,
     bool? certValid,
+    bool? trusted,
   }) => DeviceRow(
     id: id ?? this.id,
     userId: userId ?? this.userId,
@@ -2623,6 +2719,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     certSig: certSig ?? this.certSig,
     revoked: revoked ?? this.revoked,
     certValid: certValid ?? this.certValid,
+    trusted: trusted ?? this.trusted,
   );
   DeviceRow copyWithCompanion(LocalDevicesCompanion data) {
     return DeviceRow(
@@ -2634,6 +2731,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       certSig: data.certSig.present ? data.certSig.value : this.certSig,
       revoked: data.revoked.present ? data.revoked.value : this.revoked,
       certValid: data.certValid.present ? data.certValid.value : this.certValid,
+      trusted: data.trusted.present ? data.trusted.value : this.trusted,
     );
   }
 
@@ -2647,7 +2745,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           ..write('signPub: $signPub, ')
           ..write('certSig: $certSig, ')
           ..write('revoked: $revoked, ')
-          ..write('certValid: $certValid')
+          ..write('certValid: $certValid, ')
+          ..write('trusted: $trusted')
           ..write(')'))
         .toString();
   }
@@ -2662,6 +2761,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     certSig,
     revoked,
     certValid,
+    trusted,
   );
   @override
   bool operator ==(Object other) =>
@@ -2674,7 +2774,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           other.signPub == this.signPub &&
           other.certSig == this.certSig &&
           other.revoked == this.revoked &&
-          other.certValid == this.certValid);
+          other.certValid == this.certValid &&
+          other.trusted == this.trusted);
 }
 
 class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
@@ -2686,6 +2787,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
   final Value<String> certSig;
   final Value<bool> revoked;
   final Value<bool> certValid;
+  final Value<bool> trusted;
   final Value<int> rowid;
   const LocalDevicesCompanion({
     this.id = const Value.absent(),
@@ -2696,6 +2798,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
     this.certSig = const Value.absent(),
     this.revoked = const Value.absent(),
     this.certValid = const Value.absent(),
+    this.trusted = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalDevicesCompanion.insert({
@@ -2707,6 +2810,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
     required String certSig,
     required bool revoked,
     required bool certValid,
+    this.trusted = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        userId = Value(userId),
@@ -2725,6 +2829,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
     Expression<String>? certSig,
     Expression<bool>? revoked,
     Expression<bool>? certValid,
+    Expression<bool>? trusted,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2736,6 +2841,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
       if (certSig != null) 'cert_sig': certSig,
       if (revoked != null) 'revoked': revoked,
       if (certValid != null) 'cert_valid': certValid,
+      if (trusted != null) 'trusted': trusted,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2749,6 +2855,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
     Value<String>? certSig,
     Value<bool>? revoked,
     Value<bool>? certValid,
+    Value<bool>? trusted,
     Value<int>? rowid,
   }) {
     return LocalDevicesCompanion(
@@ -2760,6 +2867,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
       certSig: certSig ?? this.certSig,
       revoked: revoked ?? this.revoked,
       certValid: certValid ?? this.certValid,
+      trusted: trusted ?? this.trusted,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2791,6 +2899,9 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
     if (certValid.present) {
       map['cert_valid'] = Variable<bool>(certValid.value);
     }
+    if (trusted.present) {
+      map['trusted'] = Variable<bool>(trusted.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2808,6 +2919,7 @@ class LocalDevicesCompanion extends UpdateCompanion<DeviceRow> {
           ..write('certSig: $certSig, ')
           ..write('revoked: $revoked, ')
           ..write('certValid: $certValid, ')
+          ..write('trusted: $trusted, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4051,6 +4163,7 @@ typedef $$LocalUsersTableCreateCompanionBuilder = LocalUsersCompanion Function({
   required bool isAdmin,
   required String identityPub,
   required String trustedIdentityPub,
+  Value<String> knownIdentityPubs,
   Value<int> rowid,
 });
 typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
@@ -4059,6 +4172,7 @@ typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
   Value<bool> isAdmin,
   Value<String> identityPub,
   Value<String> trustedIdentityPub,
+  Value<String> knownIdentityPubs,
   Value<int> rowid,
 });
 
@@ -4093,6 +4207,11 @@ class $$LocalUsersTableFilterComposer
 
   ColumnFilters<String> get trustedIdentityPub => $composableBuilder(
     column: $table.trustedIdentityPub,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get knownIdentityPubs => $composableBuilder(
+    column: $table.knownIdentityPubs,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4130,6 +4249,11 @@ class $$LocalUsersTableOrderingComposer
     column: $table.trustedIdentityPub,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get knownIdentityPubs => $composableBuilder(
+    column: $table.knownIdentityPubs,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalUsersTableAnnotationComposer
@@ -4157,6 +4281,11 @@ class $$LocalUsersTableAnnotationComposer
 
   GeneratedColumn<String> get trustedIdentityPub => $composableBuilder(
     column: $table.trustedIdentityPub,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get knownIdentityPubs => $composableBuilder(
+    column: $table.knownIdentityPubs,
     builder: (column) => column,
   );
 }
@@ -4194,6 +4323,7 @@ class $$LocalUsersTableTableManager
                 Value<bool> isAdmin = const Value.absent(),
                 Value<String> identityPub = const Value.absent(),
                 Value<String> trustedIdentityPub = const Value.absent(),
+                Value<String> knownIdentityPubs = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion(
                 id: id,
@@ -4201,6 +4331,7 @@ class $$LocalUsersTableTableManager
                 isAdmin: isAdmin,
                 identityPub: identityPub,
                 trustedIdentityPub: trustedIdentityPub,
+                knownIdentityPubs: knownIdentityPubs,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4210,6 +4341,7 @@ class $$LocalUsersTableTableManager
                 required bool isAdmin,
                 required String identityPub,
                 required String trustedIdentityPub,
+                Value<String> knownIdentityPubs = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion.insert(
                 id: id,
@@ -4217,6 +4349,7 @@ class $$LocalUsersTableTableManager
                 isAdmin: isAdmin,
                 identityPub: identityPub,
                 trustedIdentityPub: trustedIdentityPub,
+                knownIdentityPubs: knownIdentityPubs,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4260,6 +4393,7 @@ typedef $$LocalDevicesTableCreateCompanionBuilder =
       required String certSig,
       required bool revoked,
       required bool certValid,
+      Value<bool> trusted,
       Value<int> rowid,
     });
 typedef $$LocalDevicesTableUpdateCompanionBuilder =
@@ -4272,6 +4406,7 @@ typedef $$LocalDevicesTableUpdateCompanionBuilder =
       Value<String> certSig,
       Value<bool> revoked,
       Value<bool> certValid,
+      Value<bool> trusted,
       Value<int> rowid,
     });
 
@@ -4321,6 +4456,11 @@ class $$LocalDevicesTableFilterComposer
 
   ColumnFilters<bool> get certValid => $composableBuilder(
     column: $table.certValid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get trusted => $composableBuilder(
+    column: $table.trusted,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4373,6 +4513,11 @@ class $$LocalDevicesTableOrderingComposer
     column: $table.certValid,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get trusted => $composableBuilder(
+    column: $table.trusted,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalDevicesTableAnnotationComposer
@@ -4407,6 +4552,9 @@ class $$LocalDevicesTableAnnotationComposer
 
   GeneratedColumn<bool> get certValid =>
       $composableBuilder(column: $table.certValid, builder: (column) => column);
+
+  GeneratedColumn<bool> get trusted =>
+      $composableBuilder(column: $table.trusted, builder: (column) => column);
 }
 
 class $$LocalDevicesTableTableManager
@@ -4445,6 +4593,7 @@ class $$LocalDevicesTableTableManager
                 Value<String> certSig = const Value.absent(),
                 Value<bool> revoked = const Value.absent(),
                 Value<bool> certValid = const Value.absent(),
+                Value<bool> trusted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalDevicesCompanion(
                 id: id,
@@ -4455,6 +4604,7 @@ class $$LocalDevicesTableTableManager
                 certSig: certSig,
                 revoked: revoked,
                 certValid: certValid,
+                trusted: trusted,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4467,6 +4617,7 @@ class $$LocalDevicesTableTableManager
                 required String certSig,
                 required bool revoked,
                 required bool certValid,
+                Value<bool> trusted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalDevicesCompanion.insert(
                 id: id,
@@ -4477,6 +4628,7 @@ class $$LocalDevicesTableTableManager
                 certSig: certSig,
                 revoked: revoked,
                 certValid: certValid,
+                trusted: trusted,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -160,6 +160,11 @@ void main() {
       expect((r.target, r.emoji), ('M1', '👍'));
     });
 
+    test('unknown kinds keep their whole body for a later version', () {
+      final p = Plaintext.decode(utf8.encode('{"kind":"photo","key":"abc","w":2048}'));
+      expect(p.toJson(), {'kind': 'photo', 'key': 'abc', 'w': 2048});
+    });
+
     test('unknown kinds are kept, broken bodies throw', () {
       expect(Plaintext.decode(utf8.encode('{"kind":"photo","x":1}')), isA<UnknownBody>().having((u) => u.kind, 'kind', 'photo'));
       expect(() => Plaintext.decode(utf8.encode('nope')), throwsFormatException);

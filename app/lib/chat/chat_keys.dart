@@ -54,7 +54,7 @@ class ChatKeys {
       if (await _db.key(w.chatId, w.epoch) != null) continue;
       final members = {for (final m in await _db.membersOf(w.chatId)) m.userId};
       final wrapper = await _dir.device(w.wrapperDeviceId);
-      if (wrapper == null || !members.contains(wrapper.userId)) continue;
+      if (wrapper == null || !wrapper.trusted || !members.contains(wrapper.userId)) continue;
       try {
         final k = await unwrapChatKey(
           wrap: w,
@@ -143,7 +143,7 @@ class ChatKeys {
       final key = await _db.key(m.chatId, m.epoch);
       if (key == null) continue;
       final d = await _dir.device(m.deviceId);
-      if (d == null || d.revoked) continue;
+      if (d == null || d.revoked || !d.trusted) continue;
       final members = {for (final x in await _db.membersOf(m.chatId)) x.userId};
       if (!members.contains(d.userId)) continue;
       wraps.addAll(await wrapKey(chatId: m.chatId, epoch: m.epoch, key: key, devices: [d]));

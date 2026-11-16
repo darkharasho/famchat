@@ -29,6 +29,7 @@ class ChatSync {
     ChatKeys? keys,
     this.typingTtl = const Duration(seconds: 5),
     this.typingThrottle = const Duration(seconds: 3),
+    this.syncRetryDelays = const [Duration(seconds: 2), Duration(seconds: 10), Duration(seconds: 30), Duration(minutes: 1)],
     DateTime Function()? now,
   })  : directory = directory ?? Directory(db, api, me),
         _now = now ?? DateTime.now {
@@ -42,6 +43,9 @@ class ChatSync {
   final Directory directory;
   late final ChatKeys keys;
   final Duration typingTtl, typingThrottle;
+
+  /// After a failed connect-sync, while still connected: wait these (the last repeats) and retry.
+  final List<Duration> syncRetryDelays;
   final DateTime Function() _now;
 
   static const pageSize = 100;
@@ -54,6 +58,11 @@ class ChatSync {
   final _inflight = <String>{};
   final _staleRetries = <String, int>{};
   final _lastTypingSent = <String, DateTime>{};
+
+  /// Chats whose wraps were already fetched during the current queued job (one fetch per pass).
+  final _keysFetched = <String>{};
+  Timer? _syncRetry;
+  int _syncFailures = 0;
 
   Set<String> _online = {};
   final _onlineCtl = StreamController<Set<String>>.broadcast();
@@ -84,8 +93,9 @@ class ChatSync {
     _subs.add(hub.events.listen((e) => _enqueue(() => _onEvent(e))));
     _subs.add(hub.connection.listen((up) {
       if (up) {
-        _enqueue(syncAll);
+        _enqueue(_connectSync);
       } else {
+        _syncRetry?.cancel();
         _inflight.clear();
         _setOnline({});
         for (final t in _typing.values.expand((m) => m.values)) {
@@ -99,6 +109,7 @@ class ChatSync {
   }
 
   Future<void> stop() async {
+    _syncRetry?.cancel();
     for (final s in _subs) {
       await s.cancel();
     }
@@ -113,7 +124,10 @@ class ChatSync {
   /// Runs [f] after everything queued before it; a failure is logged, not propagated, so one bad
   /// event can't stall the queue.
   Future<void> _enqueue(Future<void> Function() f) {
-    final next = _chain.then((_) => f()).catchError((Object e, StackTrace st) {
+    final next = _chain.then((_) {
+      _keysFetched.clear();
+      return f();
+    }).catchError((Object e, StackTrace st) {
       // ignore: avoid_print
       if (e is! NetworkException && e is! SignedOutException) print('chat sync: $e\n$st');
     });
@@ -123,6 +137,28 @@ class ChatSync {
 
   // ---------------------------------------------------------------------------------------------
   // Sync
+
+  /// [syncAll] for a new connection: the outbox is flushed even if the sync fails, and a failed
+  /// sync is retried with backoff while the connection stays up.
+  Future<void> _connectSync() async {
+    _syncRetry?.cancel();
+    try {
+      await syncAll();
+      _syncFailures = 0;
+    } catch (_) {
+      if (hub.connected) {
+        final delay = syncRetryDelays[_syncFailures < syncRetryDelays.length ? _syncFailures : syncRetryDelays.length - 1];
+        _syncFailures++;
+        _syncRetry = Timer(delay, () => _enqueue(_connectSync));
+      }
+      try {
+        await _flushOutbox();
+      } catch (_) {
+        // Sends need only the epoch key; anything else waits for the retry.
+      }
+      rethrow;
+    }
+  }
 
   /// What a (re)connect runs: directory, chats, keys, history, repair, outbox.
   Future<void> syncAll() async {
@@ -134,6 +170,10 @@ class ChatSync {
     }
     for (final c in chats) {
       await db.upsertChat(c);
+      // A read made while offline: the server still has an older position for me.
+      final server = c.members.where((m) => m.userId == me.userId).firstOrNull?.lastReadSeq ?? 0;
+      final local = (await db.chatById(c.id))!.myLastReadSeq;
+      if (local > server) hub.send({'type': 'read', 'chatId': c.id, 'seq': local});
     }
     await keys.fetch();
     for (final c in chats) {
@@ -211,18 +251,28 @@ class ChatSync {
     } on CryptoFailure {
       return base;
     }
-    final device = await directory.device(m.senderDeviceId);
+    final waiting = base.copyWith(kind: 'undecryptable', envelope: Value(jsonEncode(m.envelope)));
+    final VerifiedDevice? device;
+    try {
+      device = await directory.device(m.senderDeviceId);
+    } catch (_) {
+      return waiting; // couldn't ask the directory; retried on the next sync
+    }
     if (device == null || device.userId != m.senderUserId) return base;
+    // A sender under a changed, unacknowledged identity key waits for the user's OK.
+    if (!device.trusted) return waiting;
     var key = await keys.key(m.chatId, env.epoch);
-    if (key == null) {
+    if (key == null && _keysFetched.add(m.chatId)) {
       try {
         await keys.fetch(chatId: m.chatId);
       } on ApiException {
-        // Keep it undecryptable; a later keys event retries.
+        // Stays undecryptable; a later keys event retries.
+      } on NetworkException {
+        // Same.
       }
       key = await keys.key(m.chatId, env.epoch);
     }
-    if (key == null) return base.copyWith(kind: 'undecryptable', envelope: Value(jsonEncode(m.envelope)));
+    if (key == null) return waiting;
     final Plaintext p;
     try {
       p = Plaintext.decode(await decryptEnvelope(
@@ -445,6 +495,16 @@ class ChatSync {
   /// Sets this user's reaction on [messageId]; an empty [emoji] removes it.
   Future<void> react(String chatId, String messageId, String emoji) =>
       _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
+
+  /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
+  /// their new devices get the chat keys this device holds.
+  Future<void> acknowledgeIdentity(String userId) async {
+    await directory.acknowledgeIdentity(userId);
+    await _enqueue(() async {
+      await _retryUndecryptable();
+      await keys.repairMissing();
+    });
+  }
 
   /// Puts a failed message back in the outbox.
   Future<void> retry(String messageId) async {

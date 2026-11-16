@@ -35,11 +35,15 @@ void main() {
     addTearDown(bob2.dispose);
     await dir.refresh();
     expect(await dir.identityChanged(bob.userId), isTrue);
-    // The new device chains to the new key: accepted (an admin reset is legitimate), but flagged.
-    expect(await dir.device(bob2.deviceId), isNotNull);
-    expect((await dir.liveDevices([bob.userId])).map((d) => d.id), [bob2.deviceId]);
+    // The new device chains to the new key: it verifies, but gets no keys until the change is acknowledged.
+    expect((await dir.device(bob2.deviceId))!.trusted, isFalse);
+    expect(await dir.liveDevices([bob.userId]), isEmpty);
+    // Bob's old device still verifies against the key first seen (for its old signatures).
+    expect((await dir.device(bob.deviceId))!.trusted, isTrue);
     await dir.acknowledgeIdentity(bob.userId);
     expect(await dir.identityChanged(bob.userId), isFalse);
+    expect((await dir.liveDevices([bob.userId])).map((d) => d.id), [bob2.deviceId]);
+    expect((await dir.device(bob2.deviceId))!.trusted, isTrue);
   });
 
   test('device with a bad cert is not verified', () async {
