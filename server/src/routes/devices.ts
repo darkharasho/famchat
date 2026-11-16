@@ -7,6 +7,7 @@ import { sharingUserIds } from "../lib/family";
 import { readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
 import { notify } from "../notify";
+import { type Delivery, sendAll, serviceAccount } from "../push/consumer";
 
 export const devices = new Hono<AppEnv>();
 devices.use(requireAuth);
@@ -47,6 +48,27 @@ devices.put("/me/push", async (c) => {
     db.prepare("UPDATE devices SET push_token = ? WHERE id = ?").bind(token, deviceId),
   ]);
   return c.body(null, 204);
+});
+
+/**
+ * Sends a test notification to the caller's own devices that have a token, right away, and says
+ * how each went. For checking the Firebase setup (scripts/setup-firebase.sh).
+ */
+devices.post("/me/push/test", async (c) => {
+  const sa = serviceAccount(c.env);
+  if (!sa) return c.json({ configured: false, devices: [] });
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, name, push_token FROM devices WHERE user_id = ? AND revoked_at IS NULL AND push_token IS NOT NULL`,
+  ).bind(c.get("userId")).all<{ id: string; name: string; push_token: string }>();
+  const names = new Map(results.map((d) => [d.id, d.name]));
+  let sent: Delivery[];
+  try {
+    sent = await sendAll(c.env, sa, results, { title: "FamChat", body: "Test notification", chatId: null }, (i, init) => fetch(i, init));
+  } catch (e) {
+    console.error("push test failed", e);
+    return c.json({ configured: true, error: "oauth_failed", devices: [] });
+  }
+  return c.json({ configured: true, devices: sent.map((d) => ({ id: d.deviceId, name: names.get(d.deviceId), result: d.result })) });
 });
 
 /**

@@ -1,6 +1,6 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { FamilyHub, PushJob } from "../src/hub";
+import { type FamilyHub, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
 import { api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
 import { BASE, insertUserWithDevice, resetDb } from "./helpers";
@@ -284,6 +284,45 @@ describe("send", () => {
     await ca.next("ack");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
     expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId] }]);
+  });
+
+  it("a socket silent for over a minute is pruned and its user pushed", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const chat = await createGroup(a, [b, c]);
+    const ca = await connect(a);
+    const cb = await connect(b);
+    const cc = await connect(c);
+    // b answers pings; c went quiet (a phone that lost its network). Both connected long ago.
+    cb.send({ type: "ping" });
+    await cb.next("pong");
+    const stub = env.HUB.get(env.HUB.idFromName("family"));
+    const jobs: PushJob[] = [];
+    await runInDurableObject(stub, (hub: FamilyHub, state) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+      for (const ws of [...state.getWebSockets(`d:${b.deviceId}`), ...state.getWebSockets(`d:${c.deviceId}`)]) {
+        ws.serializeAttachment({ ...(ws.deserializeAttachment() as object), at: Date.now() - STALE_SOCKET_MS - 1000 });
+      }
+    });
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    await ca.next("ack");
+    expect(await cc.closed).toBe(4002);
+    expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: true }); // c joining
+    expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: false });
+    await cb.next("msg");
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId] }]);
+  });
+
+  it("the default push hook puts the job on the queue", async () => {
+    const sent: PushJob[] = [];
+    const job = { chatId: "c", senderUserId: "s", messageId: "m", userIds: ["u"] };
+    await queuePush({ PUSH_QUEUE: { send: async (j: PushJob) => void sent.push(j) } as unknown as Queue<PushJob> }).notify(job);
+    expect(sent).toEqual([job]);
+    // No binding: push is off, nothing throws.
+    await queuePush({}).notify(job);
   });
 });
 
