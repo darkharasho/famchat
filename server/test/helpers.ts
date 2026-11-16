@@ -41,3 +41,44 @@ export async function makeKeys(): Promise<TestKeys> {
     raw: { encPub, signPub: sign.pub },
   };
 }
+
+import { env } from "cloudflare:test";
+import { newId } from "../src/lib/ids";
+import { signAccessToken } from "../src/lib/tokens";
+
+export const BASE = "https://famchat.dev";
+
+export async function resetDb(): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM devices"),
+    env.DB.prepare("DELETE FROM invites"),
+    env.DB.prepare("DELETE FROM users"),
+  ]);
+}
+
+/** Inserts a user + device row directly and returns an access token for it. */
+export async function insertUserWithDevice(opts: { admin?: boolean; name?: string } = {}) {
+  const keys = await makeKeys();
+  const userId = newId();
+  const deviceId = newId();
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO users (id, name, is_admin, identity_pub, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).bind(userId, opts.name ?? "Test", opts.admin ? 1 : 0, keys.identityPub, now),
+    env.DB.prepare(
+      `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, created_at, last_seen)
+       VALUES (?, ?, 'Phone', 'android', ?, ?, ?, ?, ?)`,
+    ).bind(deviceId, userId, keys.encPub, keys.signPub, keys.certSig, now, now),
+  ]);
+  const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: !!opts.admin });
+  return { userId, deviceId, accessToken, keys };
+}
+
+export function jsonReq(method: string, body?: unknown, headers: Record<string, string> = {}): RequestInit {
+  return {
+    method,
+    headers: { "content-type": "application/json", ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
+}
