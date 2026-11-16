@@ -2,10 +2,12 @@
 // for the spike report. Needs `dart run tool/echo_server.dart` running (see echoUrl()).
 import 'dart:convert';
 
-import 'package:cryptography/cryptography.dart';
 import 'package:famchat/audio_init.dart';
+import 'package:famchat/crypto/device_cert.dart';
+import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/crypto/sealed_box.dart';
 import 'package:famchat/spikes/audio_spike.dart';
-import 'package:famchat/spikes/crypto_spike.dart';
 import 'package:famchat/spikes/db_spike.dart';
 import 'package:famchat/spikes/ws_spike.dart';
 import 'package:flutter/foundation.dart';
@@ -31,30 +33,23 @@ void main() {
   final audioInitError = initAudioBackend();
 
   testWidgets('crypto', (_) async {
-    final identity = await Ed25519().newKeyPair();
-    final enc = await X25519().newKeyPair();
-    final sign = await Ed25519().newKeyPair();
-    final cert = await makeDeviceCert(identity: identity, enc: enc, sign: sign);
-    final msg = await deviceCertMessage(b64urlDecode(cert.encPub), b64urlDecode(cert.signPub));
-    expect(
-      await Ed25519().verify(msg,
-          signature: Signature(b64urlDecode(cert.certSig),
-              publicKey: SimplePublicKey(b64urlDecode(cert.identityPub), type: KeyPairType.ed25519))),
-      isTrue,
-    );
+    final identity = await newIdentityKey();
+    final device = await DeviceKeys.generate();
+    final cert = await signDeviceCert(identity: identity, device: device);
+    expect(await verifyDeviceCert(cert), isTrue);
 
-    final sealed = await sealBox((await enc.extractPublicKey()).bytes, utf8.encode('chat key'));
-    expect(utf8.decode(await openBox(enc, sealed)), 'chat key');
+    final sealed = await sealBox(await device.encPub(), utf8.encode('chat key'));
+    expect(utf8.decode(await openBox(device.enc, sealed)), 'chat key');
 
-    final signPub = (await sign.extractPublicKey()).bytes;
-    final key = List.generate(32, (i) => i);
+    final signPub = await device.signPub();
+    final key = newChatKey();
     final body = List.filled(1024, 7);
     final sw = Stopwatch()..start();
     for (var i = 0; i < 100; i++) {
-      final env = await encryptEnvelope(
-          chatKey: key, epoch: 1, chatId: 'C', messageId: 'M$i', senderDeviceId: 'D', signKey: sign, plaintext: body);
-      final pt = await decryptEnvelope(
-          chatKey: key, chatId: 'C', messageId: 'M$i', senderDeviceId: 'D', senderSignPub: signPub, envelope: env);
+      final env = await encryptEnvelope(chatKey: key, epoch: 1, chatId: 'C', messageId: 'M$i',
+          senderDeviceId: 'D', signKey: device.sign, plaintext: body);
+      final pt = await decryptEnvelope(envelope: env, chatKey: key, chatId: 'C', messageId: 'M$i',
+          senderDeviceId: 'D', senderSignPub: signPub);
       expect(pt.length, 1024);
     }
     sw.stop();

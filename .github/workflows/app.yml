@@ -22,6 +22,7 @@ defaults:
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -29,10 +30,11 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter test --platform chrome test/crypto_spike_test.dart
+      - run: flutter test --platform chrome test/crypto/
 
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -57,6 +59,7 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -82,6 +85,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -101,6 +105,7 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -120,6 +125,7 @@ jobs:
 
   ios:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -145,6 +151,7 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Enable KVM
