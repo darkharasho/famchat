@@ -1,10 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'router.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // just_audio has no Linux/Windows backend of its own; media_kit (libmpv) provides it.
+  JustAudioMediaKit.ensureInitialized(linux: true, windows: true);
   runApp(const ProviderScope(child: FamChatApp()));
 }
 
