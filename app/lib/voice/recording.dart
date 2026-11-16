@@ -164,8 +164,8 @@ class VoiceRecording extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true; // no notifications from here on: the owner is going away
     unawaited(cancel());
-    _disposed = true;
     super.dispose();
   }
 }
