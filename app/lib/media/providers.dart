@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/models.dart';
 import '../chat/providers.dart';
 import '../session/session_controller.dart';
+import '../voice/voice_io.dart';
 import 'http_media_api.dart';
 import 'media_api.dart';
 import 'media_db.dart';
@@ -36,7 +37,10 @@ const mediaCacheBytes = kIsWeb ? 48 * 1024 * 1024 : 256 * 1024 * 1024;
 /// The media pipeline for the running chat engine, or null when signed out. Signing out wipes it.
 final mediaServiceProvider = Provider<MediaService?>((ref) {
   ref.listen(sessionProvider, (prev, next) {
-    if (prev is SignedIn && next is SignedOut) unawaited(ref.read(mediaDbProvider).wipe());
+    if (prev is SignedIn && next is SignedOut) {
+      unawaited(ref.read(mediaDbProvider).wipe());
+      unawaited(sweepVoiceFiles()); // decrypted clips and unsent recordings
+    }
   });
   final sync = ref.watch(chatSyncProvider);
   if (sync == null) return null;

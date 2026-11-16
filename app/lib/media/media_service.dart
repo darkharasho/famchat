@@ -14,6 +14,7 @@ import '../crypto/media.dart';
 import 'media_api.dart';
 import 'media_db.dart';
 import 'photo.dart';
+import '../voice/waveform.dart';
 
 /// Where one blob lives and how to open it.
 class MediaRef {
@@ -42,6 +43,10 @@ class MediaRef {
 extension PhotoRefs on PhotoBody {
   MediaRef get fullRef => MediaRef(id: mediaKey, key: key, sha256: sha256, purpose: MediaPurpose.file);
   MediaRef get thumbRef => MediaRef(id: thumbKey, key: key, sha256: thumbSha256, purpose: MediaPurpose.thumb);
+}
+
+extension VoiceRef on VoiceBody {
+  MediaRef get ref => MediaRef(id: mediaKey, key: key, sha256: sha256, purpose: MediaPurpose.file);
 }
 
 /// A staged blob: its media key and the SHA-256 of its ciphertext.
@@ -152,6 +157,31 @@ class MediaService {
         width: p.width,
         height: p.height,
         bytes: p.full.length,
+      ),
+      id: messageId,
+    );
+  }
+
+  /// Encrypts and queues a recorded voice clip (one `voice` blob); returns the message id. Throws
+  /// [ArgumentError] for an empty clip, a length outside (0, [maxVoiceDuration]], or too many bytes.
+  Future<String> sendVoice(String chatId, RecordedVoice v) async {
+    if (v.bytes.isEmpty) throw ArgumentError.value(v.bytes.length, 'bytes', 'empty recording');
+    if (v.duration <= Duration.zero || v.duration > maxVoiceDuration) {
+      throw ArgumentError.value(v.duration, 'duration', 'voice messages are at most ${maxVoiceDuration.inMinutes} minutes');
+    }
+    final key = newMediaKey();
+    final messageId = newUlid();
+    final clip = await stage(
+        chatId: chatId, messageId: messageId, kind: 'voice', purpose: MediaPurpose.file, key: key, plaintext: v.bytes, position: 0);
+    return sync.enqueueMessage(
+      chatId,
+      VoiceBody(
+        mediaKey: clip.id,
+        key: key,
+        sha256: clip.sha256,
+        durationMs: v.duration.inMilliseconds,
+        waveform: v.waveform.take(VoiceBody.maxWaveform).toList(),
+        bytes: v.bytes.length,
       ),
       id: messageId,
     );

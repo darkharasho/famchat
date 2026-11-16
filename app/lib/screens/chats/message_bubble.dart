@@ -7,6 +7,7 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/plaintext.dart';
 import 'chat_list.dart' show shortTime;
 import 'photo_view.dart';
+import 'voice_bubble.dart';
 
 const reactionEmoji = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -101,7 +102,19 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
-  bool get _reactable => (widget.message.kind == 'text' || widget.message.kind == 'photo') && widget.message.seq != null;
+  /// The voice clip in this message, or null.
+  VoiceBody? get _voice {
+    final m = widget.message;
+    if (m.kind != 'voice' || m.body == null) return null;
+    try {
+      final p = Plaintext.decode(utf8.encode(m.body!));
+      return p is VoiceBody ? p : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  bool get _reactable => const {'text', 'photo', 'voice'}.contains(widget.message.kind) && widget.message.seq != null;
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +122,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     final scheme = theme.colorScheme;
     final m = widget.message;
     final photo = _photo;
+    final voice = _voice;
     final special = m.kind != 'text';
     final bubble = GestureDetector(
       onLongPress: _reactable ? _pick : null,
@@ -132,6 +146,8 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           if (photo != null)
             PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo))
+          else if (voice != null)
+            VoiceBubble(body: voice, messageId: m.id)
           else
             Text(
               _text,

@@ -10,6 +10,7 @@ import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
 import 'package:famchat/session/secure_kv.dart';
+import 'package:famchat/voice/providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,6 +18,7 @@ import 'app_harness.dart';
 import 'fake_chat_backend.dart';
 import 'fake_media.dart';
 import 'fake_server.dart';
+import 'fake_voice.dart';
 import 'session_overrides.dart';
 
 /// A hub that stays disconnected unless the test says otherwise; tests push events with [emit].
@@ -80,6 +82,8 @@ Future<ScriptedHubLink> pumpChatApp(
   bool admin = false,
   MediaDb? mediaDb,
   PhotoPicker? picker,
+  FakeRecorders? recorders,
+  FakeVoicePlayer? player,
 }) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
@@ -99,6 +103,9 @@ Future<ScriptedHubLink> pumpChatApp(
       photoProcessorProvider.overrideWithValue(FakeProcessor()),
       mediaOffloadProvider.overrideWithValue(null), // isolates never answer under fake time
       if (picker != null) photoPickerProvider.overrideWithValue(picker),
+      // No microphone or speaker in tests: fakes, unless a test brings its own.
+      voiceRecorderFactoryProvider.overrideWithValue((recorders ?? FakeRecorders()).call),
+      voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),
     ],
     child: const FamChatApp(),
   ));

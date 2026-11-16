@@ -66,6 +66,7 @@ void main() {
   chatTestWidgets('sending shows the message pending, then sent', (tester) async {
     final hub = await open(tester);
     await tester.enterText(find.byKey(const Key('composer')), 'hello there');
+    await tester.pump(); // Send replaces the mic once there is text
     await tester.tap(find.byTooltip('Send'));
     await settle(tester);
     expect(find.text('hello there'), findsOneWidget);

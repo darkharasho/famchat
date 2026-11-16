@@ -34,7 +34,7 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -47,12 +47,21 @@ jobs:
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
       - name: Integration test
+        # libmpv under xvfb has hung the audio spike past every Dart timeout (a stuck native call), and
+        # reruns passed. Kill a run that outlives its budget and try once more instead of waiting out
+        # the job timeout. Only a timeout is retried: a test failure fails the job right away.
         run: |
           set -o pipefail
-          xvfb-run -a flutter test integration_test -d linux 2>&1 | tee spikes.log
+          run() { timeout --kill-after=30s 480 xvfb-run -a flutter test integration_test -d linux 2>&1 | tee "spikes-$1.log"; }
+          rc=0; run 1 || rc=$?
+          if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+            echo "::warning::integration test timed out (exit $rc); retrying once"
+            rc=0; run 2 || rc=$?
+          fi
+          exit "$rc"
       - name: Spike summary
         if: always()
-        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+        run: grep -H '^SPIKE ' spikes-*.log >> "$GITHUB_STEP_SUMMARY" || true # file name = attempt
       - uses: actions/upload-artifact@v7
         if: always()
         with: { name: spikes-linux, path: "app/*.log" }
