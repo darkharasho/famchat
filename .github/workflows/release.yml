@@ -28,7 +28,6 @@ name: release
 on:
   push:
     tags: ["v*"]
-    branches: [plan12-release] # TEMPORARY: proves the workflow before it reaches main; remove before merge
   workflow_dispatch:
     inputs:
       platforms:
@@ -445,7 +444,7 @@ jobs:
 
   github-release:
     needs: [version, macos, windows, linux]
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.github_release || github.ref == 'refs/heads/plan12-release' # TEMPORARY branch clause
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.github_release
     runs-on: ubuntu-latest
     permissions:
       contents: write

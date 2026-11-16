@@ -54,8 +54,8 @@
 - [x] `store-check.py appstore|play <id>` prints `exists` / `missing: <reason>`, exit 1 only if the check itself fails.
 - [x] Jobs `version`, `ios`, `android`, `macos`, `windows`, `linux`, `github-release` as described in the workflow header.
 - [x] Android Gradle: `signingConfigs.upload` from env `ANDROID_KEYSTORE_FILE`/`_PASSWORD`/`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD`, debug fallback when unset.
-- [ ] Prove it: run on the branch (temporary `push: branches: [plan12-release]` trigger, because `workflow_dispatch` needs the file on main), iterate until each job is green or blocked on an owner-only action. Remove the temporary trigger.
-- [ ] Open the PR; `app.yml` and `server.yml` green.
+- [x] Prove it: run on the branch (temporary `push: branches: [plan12-release]` trigger, because `workflow_dispatch` needs the file on main), iterate until each job is green or blocked on an owner-only action. Remove the temporary trigger. Result (run 43856540897): all seven jobs green; Windows installer and exe `Valid`; DMG notarization `Accepted`, stapled, `source=Notarized Developer ID`; IPA exported with App Store distribution signing; AAB signed with the upload key; draft prerelease `v1.0.0-build.29913798` holds the DMG, setup.exe and AppImage. Store uploads skipped: no App Store Connect app record yet; Play says "Package not found" until the first bundle is uploaded by hand.
+- [x] Open the PR; `app.yml` and `server.yml` green.
 
 ## Rulings ledger
 
@@ -66,7 +66,7 @@
 | R3 | `--no-web-resources-cdn` (self-host CanvasKit). | Private app; no runtime dependency on gstatic.com. | ~10 MB more per deploy upload; none for users. |
 | R4 | No Cloudflare API token could be created (MCP OAuth and wrangler OAuth lack token-write scope); `deploy.yml` skips with a warning and `scripts/deploy.sh` is the working path. | No credential available non-interactively. | Main isn't auto-deployed until the owner adds `CLOUDFLARE_API_TOKEN`. |
 | R5 | Build number = minutes since Unix epoch (iOS, Android, macOS, Linux); Windows gets only `--build-name`. | Monotonic across workflows/branches/re-runs; Windows file-version parts cap at 65535. | Android versionCode limit 2.1e9 is reached in ~4000 years; mixing with a hand-chosen small build number later would be refused by the stores (easy to see). |
-| R6 | iOS: archive unsigned, sign at export with cloud-managed signing via the API key (duel-binder pattern). | Avoids a new development cert per runner. | If the key's role can't use cloud signing, export fails — swap in an Admin key. |
+| R6 | iOS: archive unsigned, sign at export with cloud-managed signing via the API key (duel-binder pattern). | Avoids a new development cert per runner. | Happened: the App Manager key got "Cloud signing permission error"; the secrets now hold the team's Admin key (`5287VQWCFL`, as in duel-binder). |
 | R7 | Store uploads are gated by `store-check.py`: missing listing → warning + signed artifact, job stays green. | First Play upload and the App Store Connect app record are owner-only console actions. | A misconfigured service account looks like "missing listing" (warning text says both causes). |
 | R8 | Play upload tries `status: completed`, falls back to `draft`. | Play refuses non-draft releases for apps that haven't completed setup. | A real failure gets one retry as a draft before the job fails. |
 | R9 | macOS: re-sign the Flutter build ourselves with `--options runtime` + `Release.entitlements`, bundle renamed `FamChat.app` in the DMG; notarize with the App Store Connect API key (not Apple ID). | Flutter's template has no hardened runtime; the API key avoids 2FA/app-password drift and keeps the Apple ID out of CI use. | Sandbox + hardened runtime could block something at runtime (mic needs `audio-input`, present). |
@@ -74,3 +74,5 @@
 | R11 | Linux AppImage built on ubuntu-22.04, relying on system GTK 3 and libmpv. | Older glibc for wider compatibility; bundling GTK/libmpv is fragile. | Users without libmpv lose voice playback until they install it. |
 | R12 | Bundle id `dev.famchat.app` registered with Apple via the API during this plan (it wasn't on team YMPSC6RQ4F); PUSH_NOTIFICATIONS capability enabled for plan 9. | Needed for signing; plan 0 note was wrong. | None. |
 | R13 | `ITSAppUsesNonExemptEncryption` not set in Info.plist. | Export-compliance answer for an E2E messenger is the owner's call. | Each TestFlight build waits on the compliance question in App Store Connect. |
+| R14 | `ANDROID_KEY_ALIAS` is a repo variable, not a secret. | As a secret (`upload`), GitHub masked the word "upload" in every log line. | None; an alias isn't sensitive. |
+| R15 | The temporary branch push trigger and its draft-release clause were removed after the proof; the proof's draft prerelease is kept (drafts aren't public). | `workflow_dispatch` only works once the file is on main. | A stale draft to delete by hand. |
