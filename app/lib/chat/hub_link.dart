@@ -69,6 +69,10 @@ class HubConnection implements HubLink {
   final _connection = StreamController<bool>.broadcast();
 
   bool _running = false;
+
+  /// Bumped by [stop]: an [_open] that started before a stop (and a start) gives up after its
+  /// awaits instead of opening a second socket.
+  int _generation = 0;
   int _attempt = 0;
   WebSocketChannel? _ch;
   StreamSubscription<dynamic>? _sub;
@@ -107,6 +111,7 @@ class HubConnection implements HubLink {
   @override
   Future<void> stop() async {
     _running = false;
+    _generation++;
     _retry?.cancel();
     final ch = _ch;
     _teardown();
@@ -115,24 +120,28 @@ class HubConnection implements HubLink {
 
   Future<void> _open() async {
     if (!_running || _ch != null) return;
+    final gen = _generation;
+    bool stale() => !_running || gen != _generation || _ch != null;
     final String t;
     try {
       t = await ticket();
     } on SignedOutException {
-      _running = false;
+      if (gen == _generation) _running = false;
       return;
     } catch (_) {
+      if (stale()) return;
       return _scheduleRetry();
     }
-    if (!_running) return;
+    if (stale()) return;
     final WebSocketChannel ch;
     try {
       ch = _connect(wsUri(apiBase, t));
       await ch.ready.timeout(connectTimeout);
     } catch (_) {
+      if (stale()) return;
       return _scheduleRetry();
     }
-    if (!_running) {
+    if (stale()) {
       unawaited(ch.sink.close(1000).catchError((_) {}));
       return;
     }
