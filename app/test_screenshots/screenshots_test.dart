@@ -20,11 +20,13 @@ import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:famchat/theme/app_theme.dart';
 import 'package:famchat/voice/providers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:material_ui/material_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../test/support/chat_harness.dart' show ScriptedHubLink, settle, inApp;
 import '../test/support/fake_chat_backend.dart';
@@ -54,7 +56,11 @@ Future<void> _loadFonts() async {
   final root = Platform.environment['FLUTTER_ROOT']!;
   await family('MaterialIcons', [file('$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf')]);
   const emoji = '/usr/share/fonts/twemoji/Twemoji.ttf';
-  if (File(emoji).existsSync()) await family(_emojiFamily, [file(emoji)]);
+  if (File(emoji).existsSync()) {
+    await family(_emojiFamily, [file(emoji)]);
+    // The emoji picker's grid asks for this family by name.
+    await family('Noto Color Emoji', [file(emoji)]);
+  }
 }
 
 ThemeData _withEmoji(ThemeData t) => t.copyWith(
@@ -256,10 +262,20 @@ void main() {
 
   const phone = Size(400, 860), desktop = Size(1280, 800);
 
-  void shot(String name, Size size, Future<void> Function(WidgetTester tester, bool dark) body, {List<bool> modes = const [false, true]}) {
+  void shot(
+    String name,
+    Size size,
+    Future<void> Function(WidgetTester tester, bool dark) body, {
+    List<bool> modes = const [false, true],
+    TargetPlatform? platform,
+  }) {
     for (final dark in modes) {
       final file = '$name-${dark ? 'dark' : 'light'}';
       testWidgets(file, (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        // The emoji picker's recently used list (this folder is a test, but outside test/).
+        // ignore: invalid_use_of_visible_for_testing_member
+        SharedPreferences.setMockInitialValues({});
         tester.view.physicalSize = size * 2;
         tester.view.devicePixelRatio = 2;
         tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
@@ -273,6 +289,7 @@ void main() {
         for (var i = 0; i < 3; i++) {
           await tester.pump(const Duration(milliseconds: 10));
         }
+        debugDefaultTargetPlatformOverride = null;
       });
     }
   }
@@ -308,6 +325,38 @@ void main() {
     hub.emit({'type': 'typing', 'chatId': 'sunday', 'userId': f.dad.userId});
     await settle(tester);
   });
+
+  shot('phone-emoji', phone, (tester, dark) async {
+    final f = _Family();
+    await f.create();
+    final (c, _) = await _pump(tester, f, dark: dark);
+    c.read(routerProvider).go('/chats/sunday');
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'See you all Sunday ');
+    await tester.tap(find.byTooltip('Emoji'));
+    await settle(tester);
+  });
+
+  shot('desktop-emoji', desktop, (tester, dark) async {
+    final f = _Family();
+    await f.create();
+    final (c, _) = await _pump(tester, f, dark: dark);
+    c.read(routerProvider).go('/chats/sunday');
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'See you all Sunday ');
+    await tester.tap(find.byTooltip('Emoji'));
+    await settle(tester);
+  }, platform: TargetPlatform.linux);
+
+  shot('desktop-shortcodes', desktop, (tester, dark) async {
+    final f = _Family();
+    await f.create();
+    final (c, _) = await _pump(tester, f, dark: dark);
+    c.read(routerProvider).go('/chats/sunday');
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'Sounds great :ta');
+    await settle(tester);
+  }, platform: TargetPlatform.linux);
 
   shot('phone-join', phone, (tester, dark) async {
     final f = _Family();

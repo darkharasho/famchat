@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/emoji/shortcodes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../media/photo.dart';
@@ -21,6 +22,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
 import '../../widgets/typing_dots.dart';
+import 'emoji_input.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -48,6 +50,23 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   bool _empty = true;
   RecordingStatus _recStatus = RecordingStatus.idle;
 
+  /// Phones: the emoji picker is showing in place of the keyboard.
+  bool _pickerOpen = false;
+
+  /// The last on-screen keyboard height, so the picker can take its place at the same size.
+  double _keyboardHeight = 300;
+
+  /// Desktop and web: the emoji popover.
+  final _emojiPopover = EmojiPopoverHandle();
+
+  /// The `:partial` being typed, its matches and the highlighted one.
+  ShortcodeQuery? _query;
+  List<ShortcodeMatch> _matches = const [];
+  int _selected = 0;
+
+  /// Where a query closed with Esc started: it stays closed until the user moves on.
+  int? _dismissedAt;
+
   @override
   void initState() {
     super.initState();
@@ -66,7 +85,59 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
       if (empty != _empty && mounted) setState(() => _empty = empty);
+      _updateSuggestions();
     });
+  }
+
+  void _updateSuggestions() {
+    final q = shortcodeQueryAt(_text.value);
+    if (q?.start != _dismissedAt) _dismissedAt = null;
+    final matches = q == null || q.start == _dismissedAt ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
+    final same = q?.query == _query?.query && q?.start == _query?.start;
+    if (!mounted) return;
+    if (same && _matches.length == matches.length) {
+      _query = q;
+      return;
+    }
+    setState(() {
+      _query = q;
+      _matches = matches;
+      if (!same) _selected = 0;
+    });
+  }
+
+  bool get _suggesting => _matches.isNotEmpty && _query != null;
+
+  void _pickSuggestion([ShortcodeMatch? m]) {
+    final query = _query;
+    if (query == null || _matches.isEmpty) return;
+    _text.value = replaceShortcodeQuery(_text.value, query, (m ?? _matches[_selected]).emoji);
+    if (!_pickerOpen) _focus.requestFocus();
+  }
+
+  void _moveSelection(int by) => setState(() => _selected = (_selected + by) % _matches.length);
+
+  void _dismissSuggestions() => setState(() {
+        _dismissedAt = _query?.start;
+        _matches = const [];
+      });
+
+  void _insertEmoji(String emoji) => _text.value = insertEmoji(_text.value, emoji);
+
+  /// Phones: swap the keyboard for the picker, or back.
+  void _togglePicker() {
+    if (_pickerOpen) {
+      setState(() => _pickerOpen = false);
+      _focus.requestFocus();
+      unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+    } else {
+      unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+      setState(() => _pickerOpen = true);
+    }
+  }
+
+  void _closePicker() {
+    if (_pickerOpen) setState(() => _pickerOpen = false);
   }
 
   @override
@@ -84,10 +155,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }));
     _text.dispose();
     _focus.dispose();
+    _emojiPopover.dispose();
     super.dispose();
   }
 
   Future<void> _startRecording() async {
+    _closePicker();
+    if (_emojiPopover.isShowing) _emojiPopover.hide();
     unawaited(ref.read(voicePlaybackProvider.notifier).stop());
     _voiceTarget = ref.read(mediaServiceProvider);
     await _recording.start();
@@ -144,7 +218,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That message is too long.')));
       }
     }
-    _focus.requestFocus();
+    if (!_pickerOpen) _focus.requestFocus();
   }
 
   /// Photos being compressed and encrypted (before they appear in the list).
@@ -218,12 +292,23 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       ),
       Expanded(
         child: CallbackShortcuts(
-          bindings: {
-            if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
-            // With a draft, Esc only leaves the field; a second Esc (the shell's) closes the chat.
-            const SingleActivator(LogicalKeyboardKey.escape): () =>
-                _text.text.isEmpty ? context.go('/') : _focus.unfocus(),
-          },
+          bindings: _suggesting
+              ? {
+                  const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveSelection(1),
+                  const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveSelection(-1),
+                  const SingleActivator(LogicalKeyboardKey.enter): _pickSuggestion,
+                  const SingleActivator(LogicalKeyboardKey.tab): _pickSuggestion,
+                  const SingleActivator(LogicalKeyboardKey.escape): _dismissSuggestions,
+                }
+              : {
+                  if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
+                  // With a draft, Esc only leaves the field; a second Esc (the shell's) closes the chat.
+                  const SingleActivator(LogicalKeyboardKey.escape): () => _emojiPopover.isShowing
+                      ? _emojiPopover.hide()
+                      : _text.text.isEmpty
+                          ? context.go('/')
+                          : _focus.unfocus(),
+                },
           child: TextField(
             key: const Key('composer'),
             controller: _text,
@@ -232,9 +317,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             keyboardType: TextInputType.multiline,
+            inputFormatters: const [ShortcodeFormatter()],
+            onTap: _closePicker,
             style: Theme.of(context).textTheme.bodyLarge,
             decoration: InputDecoration(
               hintText: 'Message',
+              suffixIcon: emojiPopover
+                  ? EmojiPopoverButton(handle: _emojiPopover)
+                  : IconButton(
+                      tooltip: _pickerOpen ? 'Keyboard' : 'Emoji',
+                      icon: Icon(_pickerOpen ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined),
+                      onPressed: _togglePicker,
+                    ),
               filled: true,
               fillColor: t.theirsBubble,
               isDense: true,
@@ -296,6 +390,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final theme = Theme.of(context);
     final tokens = FamTokens.of(context);
     final canRecord = ref.watch(voiceRecordingSupportedProvider).value ?? false;
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    if (keyboard > 150) _keyboardHeight = keyboard;
 
     if (chat == null) {
       return Scaffold(
@@ -363,7 +459,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             ),
         };
 
-    return Scaffold(
+    return PopScope(
+      // Back closes the emoji picker first, as it would the keyboard.
+      canPop: !_pickerOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _closePicker();
+      },
+      child: Scaffold(
         backgroundColor: tokens.chatBackdrop,
         appBar: AppBar(
           automaticallyImplyLeading: false,
@@ -480,22 +582,51 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   ),
                 ]),
               ),
+            if (_suggesting && !_recording.active)
+              Padding(
+                padding: EdgeInsets.fromLTRB(side, 0, side, Space.xs),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: ShortcodeSuggestions(matches: _matches, selected: _selected, onPick: _pickSuggestion),
+                  ),
+                ),
+              ),
             if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
             Material(
               color: theme.colorScheme.surface,
               shape: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
               child: SafeArea(
                 top: false,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(math.max(Space.xs, side - Space.md), Space.sm, math.max(Space.sm, side - Space.xs), Space.sm),
-                  child: _recording.active
-                      ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)
-                      : _composer(canRecord),
-                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(math.max(Space.xs, side - Space.md), Space.sm, math.max(Space.sm, side - Space.xs), Space.sm),
+                    child: _recording.active
+                        ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)
+                        : emojiPopover
+                            ? EmojiPopover(
+                                handle: _emojiPopover,
+                                onSelected: _insertEmoji,
+                                onClosed: () {
+                                  if (mounted) _focus.requestFocus();
+                                },
+                                child: _composer(canRecord),
+                              )
+                            : _composer(canRecord),
+                  ),
+                  if (_pickerOpen && !_recording.active)
+                    EmojiPanel(
+                      height: _keyboardHeight.clamp(240.0, 360.0),
+                      onSelected: _insertEmoji,
+                      onBackspace: () => _text.value = deleteBackward(_text.value),
+                    ),
+                ]),
               ),
             ),
           ]);
         }),
+      ),
     );
   }
 }
