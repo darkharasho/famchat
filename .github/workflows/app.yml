@@ -1,0 +1,176 @@
+name: app
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: app
+    shell: bash
+
+# Every platform job starts the local WebSocket echo server, runs the spike integration
+# test, and copies its `SPIKE <name> <platform> <result>` lines into the job summary.
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter test --platform chrome test/crypto_spike_test.dart
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Install Linux build deps, libmpv and a null audio sink
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev pulseaudio xvfb
+          pulseaudio --start --exit-idle-time=-1 || echo 'pulseaudio did not start; audio may have no sink'
+      - name: Start echo server
+        run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+      - name: Integration test
+        run: |
+          set -o pipefail
+          xvfb-run -a flutter test integration_test -d linux 2>&1 | tee spikes.log
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-linux, path: "app/*.log" }
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - uses: nanasess/setup-chromedriver@v3
+      - name: Start echo server and chromedriver
+        run: |
+          nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+          nohup chromedriver --port=4444 > chromedriver.log 2>&1 &
+      - name: Integration test (Chrome)
+        run: |
+          set -o pipefail
+          flutter drive --driver=test_driver/integration_test.dart \
+            --target=integration_test/spikes_test.dart \
+            -d web-server --browser-name=chrome --headless \
+            --web-browser-flag=--autoplay-policy=no-user-gesture-required 2>&1 | tee spikes.log
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-web, path: "app/*.log" }
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Start echo server
+        run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+      - name: Integration test
+        run: |
+          set -o pipefail
+          flutter test integration_test -d windows 2>&1 | tee spikes.log
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-windows, path: "app/*.log" }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Start echo server
+        run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+      - name: Integration test
+        run: |
+          set -o pipefail
+          flutter test integration_test -d macos 2>&1 | tee spikes.log
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-macos, path: "app/*.log" }
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Boot an iPhone simulator
+        run: |
+          UDID=$(xcrun simctl list devices available | grep -m1 -E '^\s+iPhone' | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+          echo "Using simulator $UDID"
+          xcrun simctl boot "$UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+      - name: Start echo server
+        run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+      - name: Integration test
+        run: |
+          set -o pipefail
+          flutter test integration_test -d "$SIM_UDID" 2>&1 | tee spikes.log
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-ios, path: "app/*.log" }
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Start echo server
+        run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
+      - name: Integration test (emulator, API 34)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          working-directory: app
+          # The emulator reaches the host's echo server at 10.0.2.2.
+          script: bash -c "set -o pipefail; flutter test integration_test --dart-define=ECHO_URL=ws://10.0.2.2:8787/echo 2>&1 | tee spikes.log"
+      - name: Spike summary
+        if: always()
+        run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: spikes-android, path: "app/*.log" }
