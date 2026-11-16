@@ -82,3 +82,49 @@ export function jsonReq(method: string, body?: unknown, headers: Record<string, 
     body: body === undefined ? undefined : JSON.stringify(body),
   };
 }
+
+import { randomToken, sha256Hex } from "../src/lib/tokens";
+import { SELF } from "cloudflare:test";
+
+/** Inserts an invite row directly and returns its raw token. */
+export async function insertInvite(opts: { admin?: boolean; name?: string; expiresAt?: number } = {}) {
+  const token = randomToken();
+  const now = Date.now();
+  await env.DB.prepare(
+    "INSERT INTO invites (token_hash, name, make_admin, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(await sha256Hex(token), opts.name ?? "Mom", opts.admin ? 1 : 0, now, opts.expiresAt ?? now + 86_400_000)
+    .run();
+  return token;
+}
+
+export async function redeemBody(token: string, keys?: TestKeys) {
+  const k = keys ?? (await makeKeys());
+  return {
+    token,
+    deviceName: "Pixel",
+    platform: "android",
+    identityPub: k.identityPub,
+    encPub: k.encPub,
+    signPub: k.signPub,
+    certSig: k.certSig,
+  };
+}
+
+export interface Redeemed {
+  userId: string;
+  deviceId: string;
+  isAdmin: boolean;
+  accessToken: string;
+  refreshToken: string;
+  keys: TestKeys;
+}
+
+/** Creates an invite and redeems it through the API. */
+export async function redeemNewDevice(opts: { admin?: boolean; name?: string } = {}): Promise<Redeemed> {
+  const token = await insertInvite(opts);
+  const keys = await makeKeys();
+  const res = await SELF.fetch(`${BASE}/api/auth/invite/redeem`, jsonReq("POST", await redeemBody(token, keys)));
+  if (res.status !== 201) throw new Error(`redeem failed: ${res.status} ${await res.text()}`);
+  return { ...(await res.json<Omit<Redeemed, "keys">>()), keys };
+}
