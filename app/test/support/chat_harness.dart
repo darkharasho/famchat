@@ -71,7 +71,10 @@ void setWindow(WidgetTester tester, Size size) {
 /// Pumps the signed-in app with [me]'s chat stack (database, fake API, scripted hub).
 Future<ScriptedHubLink> pumpChatApp(WidgetTester tester, TestDevice me, {String name = 'Alice'}) async {
   final hub = ScriptedHubLink();
-  await tester.runAsync(() => Directory(me.db, me.api, me.me).refresh());
+  await tester.runAsync(() async {
+    await me.db.bindDevice(me.deviceId); // as ChatSync.start does; binding later would wipe the directory
+    await Directory(me.db, me.api, me.me).refresh();
+  });
   final server = FakeServer();
   await tester.pumpWidget(ProviderScope(
     overrides: [
@@ -89,11 +92,32 @@ Future<ScriptedHubLink> pumpChatApp(WidgetTester tester, TestDevice me, {String 
   return hub;
 }
 
-/// Lets real async work (database, crypto, fake network) finish, then settles the UI.
+/// Lets queued work (database, crypto, fake network) finish under fake time, then settles the UI.
+/// Everything touching the app's database stays in the test's fake zone: a query from
+/// `runAsync` would wait forever on a lock held by a query parked in the fake zone.
 Future<void> settle(WidgetTester tester) async {
-  for (var i = 0; i < 5; i++) {
-    await tester.runAsync(() => pump(10));
-    await tester.pump();
+  for (var i = 0; i < 30; i++) {
+    await tester.pump(const Duration(milliseconds: 1));
   }
   await tester.pumpAndSettle();
+}
+
+/// Runs [f] (which may use the app's database) in the fake zone, pumping until it completes.
+Future<T> inApp<T>(WidgetTester tester, Future<T> Function() f) async {
+  var done = false;
+  late T value;
+  Object? error;
+  f().then((v) {
+    value = v;
+    done = true;
+  }, onError: (Object e) {
+    error = e;
+    done = true;
+  });
+  for (var i = 0; i < 500 && !done; i++) {
+    await tester.pump(const Duration(milliseconds: 1));
+  }
+  if (error != null) throw error!;
+  if (!done) throw StateError('operation did not finish');
+  return value;
 }

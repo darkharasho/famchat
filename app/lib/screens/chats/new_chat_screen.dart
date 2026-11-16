@@ -9,9 +9,12 @@ import '../sign_out.dart' show apiErrorMessage;
 
 /// Pick one person for a 1:1, or several (plus a title) for a group.
 class NewChatScreen extends ConsumerStatefulWidget {
-  const NewChatScreen({super.key, this.preselected = const []});
+  const NewChatScreen({super.key, this.preselected = const [], this.addTo});
 
   final List<String> preselected;
+
+  /// Add the picked people to this group instead of starting a chat.
+  final String? addTo;
 
   @override
   ConsumerState<NewChatScreen> createState() => _NewChatScreenState();
@@ -53,6 +56,12 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
     });
     try {
       final people = _picked.toList();
+      final addTo = widget.addTo;
+      if (addTo != null) {
+        await sync.addMembers(addTo, people);
+        if (mounted) context.go('/chats/$addTo/info');
+        return;
+      }
       final id = people.length == 1
           ? await sync.openDirect(people.single)
           : await sync.createGroup(_title.text.trim().isEmpty ? 'Group' : _title.text.trim(), people);
@@ -67,14 +76,23 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
   @override
   Widget build(BuildContext context) {
     final me = ref.watch(myUserIdProvider);
-    final users = (ref.watch(usersProvider).value ?? const {}).values.where((u) => u.id != me).toList()
+    final addTo = widget.addTo;
+    final existing = addTo == null
+        ? const <String>{}
+        : {for (final m in ref.watch(membersProvider(addTo)).value ?? const []) m.userId};
+    final users = (ref.watch(usersProvider).value ?? const {})
+        .values
+        .where((u) => u.id != me && !existing.contains(u.id))
+        .toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final names = {for (final u in users) u.id: u.name};
-    final group = _picked.length > 1;
+    final group = addTo == null && _picked.length > 1;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New chat'),
-        leading: BackButton(onPressed: () => context.canPop() ? context.pop() : context.go('/')),
+        title: Text(addTo == null ? 'New chat' : 'Add people'),
+        leading: BackButton(
+          onPressed: () => context.canPop() ? context.pop() : context.go(addTo == null ? '/' : '/chats/$addTo/info'),
+        ),
       ),
       body: Column(children: [
         if (group)
@@ -114,7 +132,7 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
               onPressed: _picked.isEmpty || _busy ? null : _create,
               child: _busy
                   ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(group ? 'Create group' : 'Chat'),
+                  : Text(addTo != null ? 'Add' : (group ? 'Create group' : 'Chat')),
             ),
           ),
         ),

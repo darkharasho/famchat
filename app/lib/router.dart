@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/devices_screen.dart';
 import 'screens/chats/chats_shell.dart';
+import 'screens/chats/group_info_screen.dart';
 import 'screens/chats/new_chat_screen.dart';
 import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
@@ -38,6 +39,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/chats/:id',
         builder: (context, state) => ChatsShell(chatId: state.pathParameters['id']),
+      ),
+      GoRoute(
+        path: '/chats/:id/info',
+        builder: (context, state) => GroupInfoScreen(chatId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/chats/:id/add',
+        builder: (context, state) => NewChatScreen(addTo: state.pathParameters['id']),
       ),
       GoRoute(
         path: '/new',
