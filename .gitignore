@@ -7,3 +7,6 @@ build
 *.log
 .superpowers
 .sai/
+server/node_modules
+server/.wrangler
+server/.dev.vars
