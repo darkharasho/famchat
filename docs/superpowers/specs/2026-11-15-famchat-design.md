@@ -74,6 +74,7 @@ The client keeps a local SQLite cache (drift; wasm on web) plus an outbox for me
 - `POST /api/auth/refresh` swaps a refresh token for a 15-minute access token
 - `POST /api/devices/pair/*` starts and completes QR pairing of a new device
 - `GET/DELETE /api/devices` lists or revokes your devices
+- `GET /api/me` returns the signed-in user's id, device id, name and admin flag
 - `POST /api/admin/invites`, `POST /api/admin/users/:id/reset` (admin only)
 - `GET/POST /api/chats`, `GET /api/chats/:id/messages`
 - `GET/PUT /api/keys/*` publishes and fetches public device keys and wrapped chat keys
