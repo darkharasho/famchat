@@ -43,6 +43,8 @@ void main() {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await tester.enterText(find.byKey(const Key('invite-field')), link.url);
     await tester.enterText(find.byKey(const Key('device-name-field')), 'New phone');
+    await tester.ensureVisible(find.byKey(const Key('join-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('join-button')));
     await tester.pumpAndSettle();
     expect(find.text('No chats yet'), findsOneWidget);
@@ -54,10 +56,14 @@ void main() {
     final admin = await adminElsewhere(tester);
     final code = (await tester.runAsync(admin.createRecoveryCode))!;
     await pumpApp(tester, server: server, kv: MemorySecureKv());
+    await tester.ensureVisible(find.byKey(const Key('recover-link')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('recover-link')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('recovery-code-field')), code.display.toLowerCase().replaceAll('-', ' '));
     await tester.enterText(find.byKey(const Key('recover-device-name')), 'Laptop');
+    await tester.ensureVisible(find.byKey(const Key('recover-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('recover-button')));
     await tester.pumpAndSettle();
     expect(find.text('No chats yet'), findsOneWidget);
@@ -73,10 +79,14 @@ void main() {
     appRouter(tester).go('/recover');
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('recovery-code-field')), 'ABCDE');
+    await tester.ensureVisible(find.byKey(const Key('recover-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('recover-button')));
     await tester.pumpAndSettle();
     expect(find.textContaining('25 letters and numbers'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('recovery-code-field')), newRecoveryCode().display);
+    await tester.ensureVisible(find.byKey(const Key('recover-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('recover-button')));
     await tester.pumpAndSettle();
     expect(find.textContaining("doesn't match an admin account"), findsOneWidget);
