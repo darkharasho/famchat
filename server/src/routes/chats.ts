@@ -168,18 +168,27 @@ chats.post("/:id/epochs", async (c) => {
   });
   if (wraps.some((w) => w.epoch !== chat.currentEpoch)) throw new ApiError("wraps_mismatch");
   const now = Date.now();
+  let created: D1Result[];
   try {
-    await db.batch([
+    created = await db.batch([
       db.prepare(
         `INSERT INTO chat_epochs (chat_id, epoch, created_by_device, created_at)
          SELECT id, current_epoch, ?, ? FROM chats WHERE id = ? AND current_epoch = ?`,
       ).bind(device, now, chat.id, chat.currentEpoch),
-      ...wrapInserts(db, wraps, now),
+      // Only alongside the epoch row: if a removal moved the chat on meanwhile, neither is written.
+      ...wraps.map((w) =>
+        db.prepare(
+          `INSERT OR IGNORE INTO chat_key_wraps (chat_id, epoch, device_id, wrapper_device_id, sealed, sig, created_at)
+           SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+             SELECT 1 FROM chat_epochs WHERE chat_id = ? AND epoch = ? AND created_by_device = ? AND created_at = ?)`,
+        ).bind(w.chatId, w.epoch, w.recipientDeviceId, w.wrapperDeviceId, w.sealed, w.sig, now, chat.id, chat.currentEpoch, device, now),
+      ),
     ]);
   } catch (e) {
     if (String(e).includes("UNIQUE")) throw new ApiError("epoch_exists");
     throw e;
   }
+  if (created[0].meta.changes !== 1) throw new ApiError("stale_epoch");
   await notify(c.env, chat.members.map((m) => m.userId), { type: "keys", chatId: chat.id, epoch: chat.currentEpoch });
   return c.json({ chat: await chatOut(db, chat.id) }, 201);
 });
