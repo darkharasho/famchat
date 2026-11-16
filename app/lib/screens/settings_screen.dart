@@ -7,6 +7,7 @@ import '../dev_tools.dart';
 import '../push/notification_settings.dart';
 import '../session/session_controller.dart';
 import '../theme/tokens.dart';
+import '../update/update_banner.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/common.dart';
 import '../widgets/person_avatar.dart';
@@ -75,6 +76,7 @@ class SettingsScreen extends ConsumerWidget {
                     '/storage',
                     key: const Key('settings-storage')),
               ]),
+            const AppVersionGroup(),
             if (ref.watch(developerToolsProvider))
               SettingsGroup(title: 'Developer', children: [
                 row(Icons.science_outlined, 'Platform spikes', 'Check crypto, storage, sockets and audio here',
