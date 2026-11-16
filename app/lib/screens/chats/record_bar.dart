@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../../theme/tokens.dart';
 import '../../voice/recording.dart';
 import '../../voice/waveform.dart';
 import 'voice_bubble.dart' show formatClock;
@@ -18,7 +19,8 @@ class RecordBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return ListenableBuilder(
       listenable: recording,
       builder: (context, _) {
@@ -27,29 +29,43 @@ class RecordBar extends StatelessWidget {
         final levels = recording.levels;
         final recent = levels.sublist(math.max(0, levels.length - liveBars));
         return Row(key: const Key('record-bar'), children: [
-          IconButton(tooltip: 'Discard recording', icon: const Icon(Icons.delete_outline), onPressed: onDiscard),
-          Icon(Icons.fiber_manual_record, size: 14, color: started ? scheme.error : scheme.outline),
-          const SizedBox(width: 6),
-          Text(
-            formatClock(elapsed),
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-          ),
-          if (maxVoiceDuration - elapsed <= const Duration(seconds: 30) && started)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Text('of ${formatClock(maxVoiceDuration)}', style: Theme.of(context).textTheme.labelSmall),
-            ),
-          const SizedBox(width: 12),
+          IconButton(tooltip: 'Discard recording', icon: const Icon(Icons.delete_outline_rounded), onPressed: onDiscard),
           Expanded(
-            child: SizedBox(
-              height: 32,
-              child: CustomPaint(painter: _LivePainter(recent, scheme.primary, liveBars)),
+            child: Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              decoration: BoxDecoration(
+                color: FamTokens.of(context).theirsBubble,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Row(children: [
+                Icon(Icons.fiber_manual_record, size: 14, color: started ? scheme.error : scheme.outline, semanticLabel: started ? 'Recording' : null),
+                const SizedBox(width: Space.sm),
+                Text(
+                  formatClock(elapsed),
+                  style: theme.textTheme.titleSmall?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+                ),
+                if (maxVoiceDuration - elapsed <= const Duration(seconds: 30) && started)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Text('of ${formatClock(maxVoiceDuration)}', style: theme.textTheme.labelSmall),
+                  ),
+                const SizedBox(width: Space.md),
+                Expanded(
+                  child: SizedBox(
+                    height: 28,
+                    child: CustomPaint(painter: _LivePainter(recent, scheme.error, liveBars)),
+                  ),
+                ),
+              ]),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: Space.sm),
           IconButton.filled(
             tooltip: 'Send voice message',
-            icon: const Icon(Icons.send),
+            style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+            icon: const Icon(Icons.arrow_upward_rounded),
             onPressed: started ? onSend : null,
           ),
         ]);

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -16,9 +17,13 @@ import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
 import '../../voice/waveform.dart';
-import 'chat_list.dart' show ChatAvatar;
+import '../../theme/tokens.dart';
+import '../../widgets/common.dart';
+import '../../widgets/person_avatar.dart';
+import '../../widgets/typing_dots.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
+import 'timeline.dart';
 
 /// One chat: header, messages, typing line and the composer.
 class ConversationView extends ConsumerStatefulWidget {
@@ -195,8 +200,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Attach, the text field, and Send (or the mic while the field is empty and recording works here).
   Widget _composer(bool canRecord) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = FamTokens.of(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      IconButton(tooltip: 'Attach photo', icon: const Icon(Icons.add_photo_alternate_outlined), onPressed: _attach),
+      IconButton(
+        tooltip: 'Attach photo',
+        icon: const Icon(Icons.add_photo_alternate_outlined),
+        style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+        onPressed: _attach,
+      ),
       Expanded(
         child: CallbackShortcuts(
           bindings: {
@@ -206,22 +218,55 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             key: const Key('composer'),
             controller: _text,
             focusNode: _focus,
+            autofocus: _enterSends, // desktop and web: type straight away; phones wait for a tap
             minLines: 1,
-            maxLines: 5,
+            maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             keyboardType: TextInputType.multiline,
-            decoration: const InputDecoration(hintText: 'Message', border: OutlineInputBorder()),
+            style: Theme.of(context).textTheme.bodyLarge,
+            decoration: InputDecoration(
+              hintText: 'Message',
+              filled: true,
+              fillColor: t.theirsBubble,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide(color: scheme.outlineVariant),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide(color: scheme.outlineVariant),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide(color: scheme.tertiary, width: 1.5),
+              ),
+            ),
             onChanged: (_) => ref.read(chatSyncProvider)?.typing(widget.chatId),
           ),
         ),
       ),
-      const SizedBox(width: 4),
+      const SizedBox(width: Space.sm),
       if (_empty && canRecord)
-        IconButton.filled(tooltip: 'Record voice message', icon: const Icon(Icons.mic), onPressed: _startRecording)
+        IconButton.filled(
+          tooltip: 'Record voice message',
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          icon: const Icon(Icons.mic_rounded),
+          onPressed: _startRecording,
+        )
       else
-        IconButton.filled(tooltip: 'Send', icon: const Icon(Icons.send), onPressed: _send),
+        IconButton.filled(
+          tooltip: 'Send',
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          icon: const Icon(Icons.arrow_upward_rounded),
+          onPressed: _send,
+        ),
     ]);
   }
+
+  /// Ids on screen when the conversation opened: those don't animate in, later ones do.
+  Set<String>? _initialIds;
 
   @override
   Widget build(BuildContext context) {
@@ -232,23 +277,28 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final me = ref.watch(myUserIdProvider);
     final online = ref.watch(onlineProvider).value ?? const <String>{};
     final typing = ref.watch(typingProvider(chatId)).value ?? const <String>{};
-    final messages = ref.watch(messagesProvider(chatId)).value ?? const <MessageRow>[];
+    final loaded = ref.watch(messagesProvider(chatId));
+    final messages = loaded.value ?? const <MessageRow>[];
+    if (_initialIds == null && loaded.hasValue) _initialIds = {for (final m in messages) m.id};
     ref.listen(messagesProvider(chatId), (_, _) => _markRead());
     final theme = Theme.of(context);
+    final tokens = FamTokens.of(context);
     final canRecord = ref.watch(voiceRecordingSupportedProvider).value ?? false;
 
     if (chat == null) {
       return Scaffold(
         appBar: AppBar(automaticallyImplyLeading: widget.showBack),
-        body: const Center(child: Text('This chat is no longer available.')),
+        body: EmptyState(
+          art: Icon(Icons.forum_outlined, size: 48, color: theme.colorScheme.onSurfaceVariant),
+          title: 'This chat is no longer available.',
+        ),
       );
     }
     final title = chatTitle(chat, members, users, me);
     final other = otherMember(chat, members, me);
     final group = chat.kind == 'group';
-    final subtitle = group
-        ? '${members.length} members'
-        : (other != null && online.contains(other) ? 'Online' : null);
+    final otherOnline = other != null && online.contains(other);
+    final subtitle = group ? '${members.length} members' : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
     final changed = [
       for (final m in members)
@@ -269,102 +319,161 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
+    final entries = buildTimeline(visible).reversed.toList(); // the list runs bottom-up
+    final now = DateTime.now();
+    final sync = ref.read(chatSyncProvider);
+    const avatarSpace = 40.0;
 
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: widget.showBack ? BackButton(onPressed: () => context.go('/')) : null,
-        titleSpacing: widget.showBack ? 0 : null,
-        title: Row(children: [
-          ChatAvatar(label: title, group: group, online: other != null && online.contains(other), radius: 18),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, overflow: TextOverflow.ellipsis),
-              if (subtitle != null) Text(subtitle, style: theme.textTheme.labelSmall),
-            ]),
-          ),
-        ]),
-        actions: [
-          IconButton(
-            tooltip: 'Chat info',
-            icon: const Icon(Icons.info_outline),
-            onPressed: () => context.go('/chats/$chatId/info'),
-          ),
-        ],
-      ),
-      body: Column(children: [
-        for (final r in resets)
-          MaterialBanner(
-            key: Key('reset-banner-${r.id}'),
-            leading: Icon(Icons.restart_alt_rounded, color: theme.colorScheme.primary),
-            content: Text(resetBannerText(r, users)),
-            actions: [
-              TextButton(
-                key: Key('dismiss-reset-${r.id}'),
-                onPressed: () => ref.read(chatDbProvider).dismissResetBanner(r.id, chatId),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        for (final u in changed)
-          MaterialBanner(
-            leading: Icon(Icons.gpp_maybe_outlined, color: theme.colorScheme.error),
-            content: Text("${u.name}'s security key changed. This happens after an account reset."),
-            actions: [
-              TextButton(
-                onPressed: () => ref.read(chatSyncProvider)?.acknowledgeIdentity(u.id),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        Expanded(
-          child: visible.isEmpty
-              ? Center(child: Text('Say hello 👋', style: theme.textTheme.bodyLarge))
-              : ListView.builder(
-                  reverse: true,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: visible.length,
-                  itemBuilder: (context, i) {
-                    final m = visible[visible.length - 1 - i];
-                    final mine = m.senderUserId == me;
-                    final sync = ref.read(chatSyncProvider);
-                    return MessageBubble(
-                      key: ValueKey(m.id),
-                      message: m,
-                      mine: mine,
-                      senderName: group && !mine ? users[m.senderUserId]?.name ?? 'Someone' : null,
-                      reactions: reactions[m.id] ?? const {},
-                      myUserId: me,
-                      onReact: (e) => sync?.react(chatId, m.id, e),
-                      onRetry: () => sync?.retry(m.id),
-                      footer: seenFooter(m),
-                    );
-                  },
-                ),
-        ),
-        if (typingNames.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                typingNames.length == 1 ? '${typingNames.single} is typing…' : '${typingNames.join(', ')} are typing…',
-                style: theme.textTheme.labelMedium?.copyWith(fontStyle: FontStyle.italic),
+    Widget entry(TimelineEntry e) => switch (e) {
+          DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
+          MessageEntry(message: final m, :final firstInGroup, :final lastInGroup) => AppearIn(
+              key: ValueKey(m.id),
+              animate: !(_initialIds?.contains(m.id) ?? true),
+              child: MessageBubble(
+                message: m,
+                mine: m.senderUserId == me,
+                senderName: group && m.senderUserId != me && firstInGroup ? users[m.senderUserId]?.name ?? 'Someone' : null,
+                reactions: reactions[m.id] ?? const {},
+                myUserId: me,
+                onReact: (e) => sync?.react(chatId, m.id, e),
+                onRetry: () => sync?.retry(m.id),
+                footer: seenFooter(m),
+                firstInGroup: firstInGroup,
+                lastInGroup: lastInGroup,
+                avatarSpace: group ? avatarSpace : 0,
+                avatar: group && m.senderUserId != me && lastInGroup
+                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, radius: 15)
+                    : null,
               ),
             ),
-          ),
-        if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 8, 8),
-            child: _recording.active
-                ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)
-                : _composer(canRecord),
-          ),
+        };
+
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => context.go('/')},
+      child: Scaffold(
+        backgroundColor: tokens.chatBackdrop,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: widget.showBack ? BackButton(onPressed: () => context.go('/')) : null,
+          titleSpacing: widget.showBack ? 0 : Space.lg,
+          shape: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
+          title: Row(children: [
+            PersonAvatar(label: title, colorKey: group ? chat.id : (other ?? chat.id), group: group, online: otherOnline, radius: 20),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(title, overflow: TextOverflow.ellipsis, maxLines: 1, style: theme.textTheme.titleMedium),
+                if (subtitle != null)
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+              ]),
+            ),
+          ]),
+          actions: [
+            IconButton(
+              tooltip: 'Chat info',
+              icon: const Icon(Icons.info_outline_rounded),
+              onPressed: () => context.go('/chats/$chatId/info'),
+            ),
+            const SizedBox(width: Space.xs),
+          ],
         ),
-      ]),
+        body: LayoutBuilder(builder: (context, c) {
+          // Wide panes keep the messages in a readable column; the backdrop runs edge to edge.
+          final side = math.max(Space.md, (c.maxWidth - Widths.conversation) / 2);
+          return Column(children: [
+            for (final r in resets)
+              NoticeCard(
+                key: Key('reset-banner-${r.id}'),
+                icon: Icons.restart_alt_rounded,
+                text: resetBannerText(r, users),
+                actions: [
+                  TextButton(
+                    key: Key('dismiss-reset-${r.id}'),
+                    onPressed: () => ref.read(chatDbProvider).dismissResetBanner(r.id, chatId),
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            for (final u in changed)
+              NoticeCard(
+                tone: NoticeTone.warning,
+                icon: Icons.gpp_maybe_outlined,
+                text: "${u.name}'s security key changed. This happens after an account reset.",
+                actions: [
+                  TextButton(
+                    onPressed: () => ref.read(chatSyncProvider)?.acknowledgeIdentity(u.id),
+                    style: TextButton.styleFrom(foregroundColor: theme.colorScheme.onErrorContainer),
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            Expanded(
+              child: visible.isEmpty
+                  ? EmptyState(
+                      art: PersonAvatar(
+                        label: title,
+                        colorKey: group ? chat.id : (other ?? chat.id),
+                        group: group,
+                        radius: 36,
+                      ),
+                      title: 'Say hello 👋',
+                      body: group ? 'Messages here go to everyone in $title.' : 'Only you and $title can read this chat.',
+                    )
+                  : ListView.builder(
+                      reverse: true,
+                      padding: EdgeInsets.fromLTRB(side, Space.sm, side, Space.sm),
+                      itemCount: entries.length,
+                      itemBuilder: (context, i) => entry(entries[i]),
+                    ),
+            ),
+            if (typingNames.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.fromLTRB(side + (group ? avatarSpace : 0), 0, side, Space.xs),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: tokens.theirsBubble,
+                      borderRadius: BorderRadius.circular(Radii.lg),
+                      border: Border.all(color: tokens.theirsBorder),
+                    ),
+                    child: TypingDots(color: tokens.theirsMeta),
+                  ),
+                  const SizedBox(width: Space.sm),
+                  Expanded(
+                    child: Text(
+                      typingNames.length == 1
+                          ? '${typingNames.single} is typing…'
+                          : '${typingNames.join(', ')} are typing…',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                ]),
+              ),
+            if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
+            Material(
+              color: theme.colorScheme.surface,
+              shape: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(math.max(Space.xs, side - Space.md), Space.sm, math.max(Space.sm, side - Space.xs), Space.sm),
+                  child: _recording.active
+                      ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)
+                      : _composer(canRecord),
+                ),
+              ),
+            ),
+          ]);
+        }),
+      ),
     );
   }
 }

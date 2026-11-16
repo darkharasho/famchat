@@ -5,6 +5,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
 import '../../chat/plaintext.dart';
+import '../../theme/motion.dart';
+import '../../theme/tokens.dart';
 import 'chat_list.dart' show shortTime;
 import 'photo_view.dart';
 import 'voice_bubble.dart';
@@ -18,20 +20,27 @@ bool get hoverReactions =>
 /// Shows the emoji picker; returns the emoji picked, or null.
 Future<String?> pickReaction(BuildContext context, {String? current}) => showModalBottomSheet<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-          child: Wrap(alignment: WrapAlignment.center, spacing: 4, children: [
-            for (final e in reactionEmoji)
-              IconButton(
-                isSelected: e == current,
-                style: IconButton.styleFrom(minimumSize: const Size(52, 52)),
-                onPressed: () => Navigator.pop(context, e),
-                icon: Text(e, style: const TextStyle(fontSize: 26)),
-              ),
-          ]),
-        ),
-      ),
+      builder: (context) {
+        final s = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl),
+            child: Wrap(alignment: WrapAlignment.center, spacing: Space.sm, runSpacing: Space.sm, children: [
+              for (final e in reactionEmoji)
+                IconButton(
+                  isSelected: e == current,
+                  tooltip: e == current ? 'Remove $e' : 'React $e',
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(56, 56),
+                    backgroundColor: e == current ? s.secondaryContainer : s.surfaceContainer,
+                  ),
+                  onPressed: () => Navigator.pop(context, e),
+                  icon: Text(e, style: const TextStyle(fontSize: 28)),
+                ),
+            ]),
+          ),
+        );
+      },
     );
 
 /// One message: bubble, sender (groups), time, delivery state and reaction chips.
@@ -46,6 +55,10 @@ class MessageBubble extends StatefulWidget {
     required this.onReact,
     required this.onRetry,
     this.footer,
+    this.firstInGroup = true,
+    this.lastInGroup = true,
+    this.avatar,
+    this.avatarSpace = 0,
   });
 
   final MessageRow message;
@@ -64,6 +77,15 @@ class MessageBubble extends StatefulWidget {
 
   /// E.g. "Seen".
   final String? footer;
+
+  /// Where this bubble sits in a run from one sender (see timeline.dart).
+  final bool firstInGroup, lastInGroup;
+
+  /// The sender's avatar beside the last bubble of their run (others, in groups).
+  final Widget? avatar;
+
+  /// Width kept free on the sender's side for [avatar], so a run lines up.
+  final double avatarSpace;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -116,96 +138,158 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   bool get _reactable => const {'text', 'photo', 'voice'}.contains(widget.message.kind) && widget.message.seq != null;
 
+  BorderRadius get _radius {
+    const big = Radius.circular(Radii.lg), small = Radius.circular(Radii.xs);
+    final top = widget.firstInGroup ? big : small;
+    // The sender's side stays tight at the bottom: the run "points" at its sender.
+    return widget.mine
+        ? BorderRadius.only(topLeft: big, bottomLeft: big, topRight: top, bottomRight: small)
+        : BorderRadius.only(topRight: big, bottomRight: big, topLeft: top, bottomLeft: small);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final t = FamTokens.of(context);
     final m = widget.message;
     final photo = _photo;
     final voice = _voice;
-    final special = m.kind != 'text';
+    final special = m.kind != 'text' && photo == null && voice == null;
+    final mine = widget.mine;
+    final bg = mine ? t.mineBubble : t.theirsBubble;
+    final fg = mine ? t.onMineBubble : t.onTheirsBubble;
+    final meta = mine ? t.mineMeta : t.theirsMeta;
+    final pending = m.state == 'pending';
+    final showTime = widget.lastInGroup || pending || m.state == 'failed';
+
+    final metaRow = Row(mainAxisSize: MainAxisSize.min, children: [
+      if (showTime)
+        Text(
+          shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
+          style: theme.textTheme.labelSmall?.copyWith(color: meta, fontFeatures: const [FontFeature.tabularFigures()]),
+        ),
+      if (pending) ...[
+        const SizedBox(width: 4),
+        Icon(Icons.schedule_rounded, key: const Key('pending-icon'), size: 13, color: meta, semanticLabel: 'Sending'),
+      ],
+    ]);
+
+    final Widget content;
+    if (photo != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
+        if (showTime) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+      ]);
+    } else if (voice != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        VoiceBubble(body: voice, messageId: m.id, mine: mine),
+        if (showTime) metaRow,
+      ]);
+    } else {
+      content = Wrap(
+        alignment: WrapAlignment.end,
+        crossAxisAlignment: WrapCrossAlignment.end,
+        spacing: Space.sm,
+        children: [
+          Text(
+            _text,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: special ? meta : fg,
+              fontStyle: special ? FontStyle.italic : null,
+            ),
+          ),
+          if (showTime) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
+        ],
+      );
+    }
+
     final bubble = GestureDetector(
       onLongPress: _reactable ? _pick : null,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 480),
-        padding: photo != null ? const EdgeInsets.fromLTRB(4, 4, 4, 6) : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: const BoxConstraints(maxWidth: 520),
+        padding: photo != null
+            ? const EdgeInsets.fromLTRB(4, 4, 4, 6)
+            : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: widget.mine ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(widget.mine ? 16 : 4),
-            bottomRight: Radius.circular(widget.mine ? 4 : 16),
-          ),
+          color: bg,
+          borderRadius: _radius,
+          border: mine ? null : Border.all(color: t.theirsBorder),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (widget.senderName != null)
             Padding(
-              padding: photo != null ? const EdgeInsets.fromLTRB(8, 2, 8, 4) : EdgeInsets.zero,
-              child: Text(widget.senderName!, style: theme.textTheme.labelMedium?.copyWith(color: scheme.primary)),
+              padding: photo != null ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
+              child: Text(
+                widget.senderName!,
+                style: theme.textTheme.labelMedium?.copyWith(color: fg, fontWeight: FontWeight.w700),
+              ),
             ),
-          if (photo != null)
-            PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo))
-          else if (voice != null)
-            VoiceBubble(body: voice, messageId: m.id)
-          else
-            Text(
-              _text,
-              style: special ? theme.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic, color: scheme.onSurfaceVariant) : null,
-            ),
-          const SizedBox(height: 2),
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            if (photo != null) const SizedBox(width: 8),
-            Text(shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)), style: theme.textTheme.labelSmall),
-            if (m.state == 'pending') ...[
-              const SizedBox(width: 4),
-              Icon(Icons.schedule, key: const Key('pending-icon'), size: 12, color: scheme.onSurfaceVariant, semanticLabel: 'Sending'),
-            ],
-          ]),
+          content,
         ]),
       ),
     );
+
     final row = Row(
-      mainAxisAlignment: widget.mine ? MainAxisAlignment.end : MainAxisAlignment.start,
-      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (widget.mine && hoverReactions) _hoverButton(),
+        if (!mine && widget.avatarSpace > 0)
+          SizedBox(
+            width: widget.avatarSpace,
+            child: Align(alignment: Alignment.bottomLeft, child: widget.avatar ?? const SizedBox()),
+          ),
+        if (mine && hoverReactions) _hoverButton(),
         Flexible(child: bubble),
-        if (!widget.mine && hoverReactions) _hoverButton(),
+        if (!mine && hoverReactions) _hoverButton(),
       ],
     );
+
+    final indent = EdgeInsets.only(left: mine ? 0 : widget.avatarSpace);
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        padding: EdgeInsets.only(top: widget.firstInGroup ? Space.sm : 2, bottom: widget.lastInGroup ? 2 : 0),
         child: Column(
-          crossAxisAlignment: widget.mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             row,
             if (widget.reactions.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Wrap(spacing: 4, children: [
+                padding: indent.add(EdgeInsets.only(top: Space.xs, left: mine ? 0 : Space.sm, right: mine ? Space.sm : 0)),
+                child: Wrap(spacing: Space.xs, runSpacing: Space.xs, children: [
                   for (final e in widget.reactions.entries)
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: e.value.contains(widget.myUserId) ? scheme.secondaryContainer : null,
-                      label: Text('${e.key} ${e.value.length}'),
-                      onPressed: () => widget.onReact(e.value.contains(widget.myUserId) ? '' : e.key),
+                    _ReactionPill(
+                      emoji: e.key,
+                      count: e.value.length,
+                      mine: e.value.contains(widget.myUserId),
+                      onTap: () => widget.onReact(e.value.contains(widget.myUserId) ? '' : e.key),
                     ),
                 ]),
               ),
             if (m.state == 'failed')
-              TextButton(
-                onPressed: widget.onRetry,
-                style: TextButton.styleFrom(foregroundColor: scheme.error, visualDensity: VisualDensity.compact),
-                child: const Text('Not sent. Tap to retry'),
+              Padding(
+                padding: indent,
+                child: TextButton.icon(
+                  onPressed: widget.onRetry,
+                  icon: const Icon(Icons.error_outline_rounded, size: 18),
+                  style: TextButton.styleFrom(
+                    foregroundColor: scheme.error,
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  label: const Text('Not sent. Tap to retry'),
+                ),
               ),
             if (widget.footer != null)
               Padding(
-                padding: const EdgeInsets.only(top: 2, right: 4),
-                child: Text(widget.footer!, style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
+                padding: const EdgeInsets.only(top: Space.xs, right: Space.xs),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.done_all_rounded, size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text(widget.footer!, style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ]),
               ),
           ],
         ),
@@ -215,7 +299,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Widget _hoverButton() => AnimatedOpacity(
         opacity: _hover ? 1 : 0,
-        duration: const Duration(milliseconds: 120),
+        duration: Motion.of(context, Motion.fast),
         child: IconButton(
           tooltip: 'React',
           visualDensity: VisualDensity.compact,
@@ -223,4 +307,73 @@ class _MessageBubbleState extends State<MessageBubble> {
           onPressed: _reactable ? _pick : null,
         ),
       );
+}
+
+class _ReactionPill extends StatelessWidget {
+  const _ReactionPill({required this.emoji, required this.count, required this.mine, required this.onTap});
+
+  final String emoji;
+  final int count;
+  final bool mine;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    final t = FamTokens.of(context);
+    return Semantics(
+      button: true,
+      selected: mine,
+      label: '$emoji $count${mine ? ', yours' : ''}',
+      excludeSemantics: true,
+      child: Material(
+        color: mine ? t.badge : s.surfaceContainerLowest,
+        shape: StadiumBorder(side: BorderSide(color: mine ? t.badge : s.outlineVariant)),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Text(
+              '$emoji $count',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: mine ? t.onBadge : s.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Today", "Yesterday", … between days.
+class DaySeparator extends StatelessWidget {
+  const DaySeparator({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: Space.md),
+      child: Center(
+        child: Semantics(
+          header: true,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 5),
+            decoration: BoxDecoration(
+              color: s.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(99),
+              border: Border.all(color: s.outlineVariant),
+            ),
+            child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: s.onSurfaceVariant)),
+          ),
+        ),
+      ),
+    );
+  }
 }

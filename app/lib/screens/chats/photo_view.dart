@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/plaintext.dart';
 import '../../media/media_service.dart';
 import '../../media/providers.dart';
+import '../../theme/tokens.dart';
 
 const _maxThumbWidth = 260.0, _maxThumbHeight = 320.0;
 
@@ -95,7 +96,7 @@ class PhotoThumb extends ConsumerWidget {
       child: GestureDetector(
         onTap: onTap,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(Radii.lg - 4),
           child: Container(
             width: size.width,
             height: size.height,
@@ -193,10 +194,11 @@ class PhotoViewer extends ConsumerWidget {
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: IconButton(
+                child: IconButton.filled(
                   tooltip: 'Close',
-                  color: Colors.white,
-                  icon: const Icon(Icons.close),
+                  // Readable over a bright photo too.
+                  style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
+                  icon: const Icon(Icons.close_rounded),
                   onPressed: () => Navigator.of(context).maybePop(),
                 ),
               ),

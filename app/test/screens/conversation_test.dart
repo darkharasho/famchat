@@ -106,6 +106,9 @@ void main() {
   });
 
   chatTestWidgets('typing indicator shows the other member', (tester) async {
+    // The dots loop while someone types; with reduced motion they hold still, so the UI can settle.
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     final hub = await open(tester);
     hub.emit({'type': 'typing', 'chatId': chatId, 'userId': bob.userId});
     await settle(tester);

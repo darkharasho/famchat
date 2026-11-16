@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/plaintext.dart';
 import '../../media/media_service.dart';
 import '../../media/providers.dart';
+import '../../theme/tokens.dart';
 import '../../voice/providers.dart';
 
 /// "m:ss", rounded down.
@@ -19,22 +20,31 @@ String formatClock(Duration d) {
 const _waveWidth = 168.0, _waveHeight = 32.0;
 
 class VoiceBubble extends ConsumerWidget {
-  const VoiceBubble({super.key, required this.body, required this.messageId});
+  const VoiceBubble({super.key, required this.body, required this.messageId, this.mine = false});
 
   final VoiceBody body;
   final String messageId;
+
+  /// In the sender's own (amber) bubble.
+  final bool mine;
 
   Duration get _length => Duration(milliseconds: body.durationMs);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final t = FamTokens.of(context);
+    final ink = mine ? t.onMineBubble : t.onTheirsBubble;
+    final meta = mine ? t.mineMeta : t.theirsMeta;
+    // The play button: dusk on amber for your own clips, the theme's primary on everyone else's.
+    final buttonBg = mine ? t.onMineBubble : scheme.primary;
+    final buttonFg = mine ? t.mineBubble : scheme.onPrimary;
     final expired = (ref.watch(expiredMediaProvider).value ?? const <String>{}).contains(body.mediaKey);
     if (expired) {
       return Row(key: const Key('voice-expired'), mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.mic_off_outlined, color: scheme.onSurfaceVariant),
+        Icon(Icons.mic_off_outlined, color: meta),
         const SizedBox(width: 8),
-        Text('Voice message expired', style: TextStyle(color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic)),
+        Flexible(child: Text('Voice message expired', style: TextStyle(color: meta, fontStyle: FontStyle.italic))),
       ]);
     }
     final state = ref.watch(voicePlaybackProvider.select((s) => s.messageId == messageId ? s : null));
@@ -48,16 +58,17 @@ class VoiceBubble extends ConsumerWidget {
 
     final Widget button;
     if (state?.loading ?? false) {
-      button = const SizedBox.square(
+      button = SizedBox.square(
         dimension: 40,
-        child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2)),
+        child: Padding(padding: const EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2, color: ink)),
       );
     } else {
       final failed = state?.error != null;
       final playing = state?.playing ?? false;
-      button = IconButton(
+      button = IconButton.filled(
         tooltip: failed ? 'Retry voice message' : (playing ? 'Pause voice message' : 'Play voice message'),
-        icon: Icon(failed ? Icons.refresh : (playing ? Icons.pause : Icons.play_arrow)),
+        style: IconButton.styleFrom(backgroundColor: buttonBg, foregroundColor: buttonFg, fixedSize: const Size.square(40)),
+        icon: Icon(failed ? Icons.refresh_rounded : (playing ? Icons.pause_rounded : Icons.play_arrow_rounded)),
         onPressed: () => playback.toggle(messageId, load, duration: _length),
       );
     }
@@ -71,10 +82,15 @@ class VoiceBubble extends ConsumerWidget {
           if (progress != null && progress < 1)
             SizedBox.square(
               dimension: 40,
-              child: CircularProgressIndicator(key: const Key('upload-progress'), strokeWidth: 2, value: progress == 0 ? null : progress),
+              child: CircularProgressIndicator(
+                key: const Key('upload-progress'),
+                strokeWidth: 2.5,
+                color: buttonFg,
+                value: progress == 0 ? null : progress,
+              ),
             ),
         ]),
-        const SizedBox(width: 4),
+        const SizedBox(width: 10),
         GestureDetector(
           key: const Key('voice-waveform'),
           behavior: HitTestBehavior.opaque,
@@ -86,8 +102,8 @@ class VoiceBubble extends ConsumerWidget {
             painter: WaveformPainter(
               peaks: body.waveform,
               progress: state?.progress ?? 0,
-              played: scheme.primary,
-              unplayed: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+              played: ink,
+              unplayed: ink.withValues(alpha: 0.32),
             ),
           ),
         ),
@@ -95,7 +111,10 @@ class VoiceBubble extends ConsumerWidget {
         Text(
           formatClock(showPosition ? position : _length),
           key: const Key('voice-time'),
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+          style: Theme.of(context)
+              .textTheme
+              .labelMedium
+              ?.copyWith(color: meta, fontFeatures: const [FontFeature.tabularFigures()]),
         ),
       ]),
     );
