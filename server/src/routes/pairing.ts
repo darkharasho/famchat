@@ -15,6 +15,7 @@ import { verifyDeviceCert } from "../lib/devicecert";
 import { b64urlDecode } from "../lib/encoding";
 import { ApiError } from "../lib/errors";
 import { sharingUserIds } from "../lib/family";
+import { logEvent } from "../lib/reset";
 import { newId } from "../lib/ids";
 import { randomToken, sha256Hex, signAccessToken } from "../lib/tokens";
 import { name, readJson, str } from "../lib/validate";
@@ -242,7 +243,12 @@ pairing.post("/claim", async (c) => {
   }
   const isAdmin = (await db.prepare("SELECT is_admin FROM users WHERE id = ?").bind(userId).first<number>("is_admin")) === 1;
   const accessToken = await signAccessToken(c.env, { sub: userId, dev: s.device_id, adm: isAdmin });
-  if (created) await notify(c.env, await sharingUserIds(db, userId), { type: "device", userId, deviceId: s.device_id });
+  if (created) {
+    await logEvent(db, {
+      kind: "device_paired", userId, actorId: userId, payload: { deviceId: s.device_id, approvedBy: s.approved_by_device }, at: now,
+    });
+    await notify(c.env, await sharingUserIds(db, userId), { type: "device", userId, deviceId: s.device_id });
+  }
   return c.json({
     status: "approved",
     userId,

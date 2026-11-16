@@ -128,6 +128,22 @@ void main() {
     expect(find.textContaining("Bob's security key changed"), findsNothing);
   });
 
+  chatTestWidgets('a verified reset shows a banner that can be dismissed, and no key-change banner', (tester) async {
+    await open(tester);
+    await inApp(tester, () async {
+      backend.setAdmin(alice.userId);
+      final resetId = await backend.adminReset(bob.userId, by: alice.userId);
+      await backend.claimReset(bob.userId, resetId);
+      await Directory(alice.db, alice.api, alice.me).refresh();
+    });
+    await settle(tester);
+    expect(find.text("Bob's account was reset by Alice. Their old devices were signed out."), findsOneWidget);
+    expect(find.textContaining("Bob's security key changed"), findsNothing);
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await settle(tester);
+    expect(find.textContaining('account was reset'), findsNothing);
+  });
+
   chatTestWidgets('a failed message can be retried', (tester) async {
     await open(tester, messages: [row('m9', null, alice.userId, 'oops', state: 'failed').copyWith(senderDeviceId: alice.deviceId)]);
     await tester.tap(find.text('Not sent. Tap to retry'));

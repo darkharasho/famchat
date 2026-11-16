@@ -13,8 +13,18 @@ const domainSealedBox = 'famchat-sealed-box-v1';
 const domainPairKeys = 'famchat-pair-keys-v1';
 const domainPairBundle = 'famchat-pair-bundle-v1';
 const domainMedia = 'famchat-media-v1';
+const domainReset = 'famchat-reset-v1';
+const domainResetClaim = 'famchat-reset-claim-v1';
+const domainRecoveryKey = 'famchat-recovery-key-v1';
+const domainRecoverySeed = 'famchat-recovery-seed-v1';
+const domainAdmin = 'famchat-admin-v1';
 
 const famchatDomains = [
+  domainAdmin,
+  domainReset,
+  domainResetClaim,
+  domainRecoveryKey,
+  domainRecoverySeed,
   domainDeviceCert,
   domainWrap,
   domainEnvelope,

@@ -10,6 +10,7 @@ import '../crypto/device_cert.dart';
 import '../crypto/encoding.dart';
 import '../crypto/keys.dart';
 import 'db/chat_db.dart';
+import 'resets.dart';
 import 'wire.dart';
 
 /// This device: who it is and its private keys.
@@ -44,21 +45,42 @@ class Directory {
   final ChatDb _db;
   final ChatApi _api;
   final LocalIdentity _me;
-  Future<void>? _inflight;
 
-  /// Fetches every user and device and re-checks every certificate. One call at a time.
-  Future<void> refresh() => _inflight ??= _refresh().whenComplete(() => _inflight = null);
 
-  Future<void> _refresh() async {
+  /// Fetches every user and device, applies the signed resets and re-checks every certificate.
+  /// One call at a time. Returns the users whose new identity key was trusted automatically
+  /// because a verified reset vouches for it (their devices now get keys: run repair).
+  Future<Set<String>> refresh() => _inflight ??= _refresh().whenComplete(() => _inflight = null);
+  Future<Set<String>>? _inflight;
+
+  Future<Set<String>> _refresh() async {
     final users = await _api.users();
     final myPub = b64url(_me.identityPub);
+    // The first time this device sees the family, it pins the admins the server lists (trust on
+    // first use, like identity keys); after that only signed promotions add admins.
+    final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
+    final inputs = <TrustInput>[];
     for (final u in users) {
       final old = await _db.userById(u.id);
       final mine = u.id == _me.userId;
       // My own devices must chain to the key I hold; others' to a key trusted before (first seen
       // or acknowledged). A device under a new, unacknowledged key verifies but isn't trusted.
       final trusted = mine ? myPub : (old?.trustedIdentityPub ?? u.identityPub);
-      final known = mine ? {myPub} : {..._known(old), trusted};
+      inputs.add(TrustInput(
+        userId: u.id,
+        isAdmin: u.isAdmin,
+        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin),
+        adminProof: u.adminProof,
+        serverKey: u.identityPub,
+        trustedKey: trusted,
+        known: mine ? {myPub, ..._known(old)} : {..._known(old), trusted},
+        resets: u.resets,
+      ));
+    }
+    final t = await resolveTrust(inputs, myUserId: _me.userId);
+    for (final u in users) {
+      final mine = u.id == _me.userId;
+      final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
       await _db.putUser(UserRow(
         id: u.id,
         name: u.name,
@@ -66,15 +88,16 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
+        pinnedAdmin: t.admins.contains(u.id),
       ));
       for (final d in u.devices) {
-        var isTrusted = false;
-        for (final k in known) {
-          if (await _certValid(k, d.encPub, d.signPub, d.certSig)) {
-            isTrusted = true;
-            break;
-          }
-        }
+        // Which trusted keys certify it: if only keys a verified reset retired, the server signed
+        // it out at the reset, whatever it says now.
+        final certifiedBy = [
+          for (final k in known)
+            if (await _certValid(k, d.encPub, d.signPub, d.certSig)) k,
+        ];
+        final isTrusted = certifiedBy.isNotEmpty;
         final valid = isTrusted || (!mine && await _certValid(u.identityPub, d.encPub, d.signPub, d.certSig));
         await _db.putDevice(DeviceRow(
           id: d.id,
@@ -83,12 +106,23 @@ class Directory {
           encPub: d.encPub,
           signPub: d.signPub,
           certSig: d.certSig,
-          revoked: d.revoked,
+          revoked: d.revoked || (isTrusted && certifiedBy.every(retired.contains)),
           certValid: valid,
           trusted: isTrusted,
         ));
       }
     }
+    if (firstSight) await _db.setMeta(ChatDb.adminsPinnedKey, '1');
+    for (final w in t.witnessed) {
+      await _db.recordReset(
+        id: w.reset.id,
+        userId: w.userId,
+        signerUserId: w.reset.signerUserId,
+        signerKind: w.reset.signerKind,
+        createdAt: w.reset.createdAt,
+      );
+    }
+    return t.acknowledged;
   }
 
   static Set<String> _known(UserRow? u) {

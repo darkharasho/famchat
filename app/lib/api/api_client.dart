@@ -28,26 +28,77 @@ class ApiClient {
   /// end within 44 s, inside the server's 60 s grace for a refresh whose response was lost.
   static const refreshTimeout = Duration(seconds: 8);
 
+  /// [resetClaimSig] (base64url) is required for a reset link: the claim key's signature over the new identity key.
   Future<RedeemResult> redeemInvite({
     required String token,
     required String deviceName,
     required String platform,
     required DeviceCert cert,
+    String? resetClaimSig,
   }) async {
     final j = await _send('POST', '/auth/invite/redeem', body: {
       'token': token,
       'deviceName': deviceName,
       'platform': platform,
       ...cert.toJson(),
+      'resetClaimSig': ?resetClaimSig,
     });
-    return _parse(201, () => RedeemResult(
-          userId: j!['userId'] as String,
-          deviceId: j['deviceId'] as String,
-          isAdmin: j['isAdmin'] as bool,
-          accessToken: j['accessToken'] as String,
-          refreshToken: j['refreshToken'] as String,
-        ));
+    return _parse(201, () => _redeemResult(j!));
   }
+
+  static RedeemResult _redeemResult(Map<String, Object?> j) => RedeemResult(
+        userId: j['userId'] as String,
+        deviceId: j['deviceId'] as String,
+        isAdmin: j['isAdmin'] as bool,
+        accessToken: j['accessToken'] as String,
+        refreshToken: j['refreshToken'] as String,
+      );
+
+  /// Unauthenticated: whose recovery key [recoveryPub] (base64url) is, and their identity key now.
+  Future<({String userId, String identityPub})> recoverLookup(String recoveryPub) async {
+    final j = await _send('POST', '/auth/recover/lookup', body: {'recoveryPub': recoveryPub});
+    return _parse(200, () => (userId: j!['userId'] as String, identityPub: j['identityPub'] as String));
+  }
+
+  /// Unauthenticated: signs a new device in to the admin account the recovery key belongs to.
+  /// [body] holds the signed reset statement, the claim and the new device's keys (docs/protocol.md).
+  Future<RedeemResult> recover(Map<String, Object?> body) async {
+    final j = await _send('POST', '/auth/recover', body: body);
+    return _parse(201, () => _redeemResult(j!));
+  }
+
+  /// Admin: resets [userId] with a statement signed by this user's identity key. Returns the
+  /// server's invite URL (without the claim seed).
+  Future<({String resetId, String inviteUrl, DateTime expiresAt})> resetUser(
+    String userId, {
+    required String resetId,
+    required String oldIdentityPub,
+    required String claimPub,
+    required int createdAt,
+    required String sig,
+  }) =>
+      _authed((t) async {
+        final j = await _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/reset', bearer: t, body: {
+          'resetId': resetId,
+          'oldIdentityPub': oldIdentityPub,
+          'claimPub': claimPub,
+          'createdAt': createdAt,
+          'sig': sig,
+        });
+        return _parse(201, () => (
+              resetId: j!['resetId'] as String,
+              inviteUrl: j['inviteUrl'] as String,
+              expiresAt: DateTime.fromMillisecondsSinceEpoch(j['expiresAt'] as int),
+            ));
+      });
+
+  /// Admin: makes [userId] an admin too; [sig] is this admin's signed promotion (base64url).
+  Future<void> makeAdmin(String userId, {required String sig}) => _authed(
+      (t) => _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/admin', bearer: t, body: {'sig': sig}));
+
+  /// Admin: registers this admin's recovery key (base64url) with the identity key's signature over it.
+  Future<void> setRecoveryKey({required String recoveryPub, required String sig}) =>
+      _authed((t) => _send('POST', '/admin/recovery-key', bearer: t, body: {'recoveryPub': recoveryPub, 'sig': sig}));
 
   Future<TokenPair> refresh(String refreshToken) async {
     final j = await _send('POST', '/auth/refresh', body: {'refreshToken': refreshToken}, timeout: refreshTimeout);
@@ -61,6 +112,7 @@ class ApiClient {
               deviceId: j['deviceId'] as String,
               name: j['name'] as String,
               isAdmin: j['isAdmin'] as bool,
+              recoveryCodeSet: j['recoveryCodeSet'] == true,
             ));
       });
 

@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
+import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
+import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
+import { resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
 import { bearer, requireAdmin, requireAuth } from "../middleware/auth";
@@ -13,6 +16,10 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   let diff = 0;
   for (let i = 0; i < ha.length; i++) diff |= ha.charCodeAt(i) ^ hb.charCodeAt(i);
   return diff === 0;
+}
+
+export function inviteUrl(env: Env, token: string): string {
+  return `${env.APP_ORIGIN}/join#${token}`;
 }
 
 /** Bootstrap invites (createdBy = null) are only inserted while no user exists, in the same statement. */
@@ -27,7 +34,7 @@ async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, cr
     .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
   if (res.meta.changes !== 1) throw new ApiError("already_bootstrapped");
-  return { inviteToken: token, inviteUrl: `${env.APP_ORIGIN}/join#${token}`, expiresAt };
+  return { inviteToken: token, inviteUrl: inviteUrl(env, token), expiresAt };
 }
 
 export const admin = new Hono<AppEnv>();
@@ -58,4 +65,90 @@ admin.get("/usage", requireAuth, requireAdmin, async (c) => {
     files: counts?.live ?? 0,
     expiredFiles: counts?.expired ?? 0,
   });
+});
+
+/**
+ * Resets a user who lost every device. The body is a statement signed by the caller's identity key
+ * (docs/protocol.md "Account resets"). Their devices are revoked and their chats rotated at once;
+ * the returned one-time link signs them in again with a new identity key on the same account.
+ */
+admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
+  const userId = c.req.param("id");
+  const adminId = c.get("userId");
+  const body = await readJson(c);
+  const now = Date.now();
+  const resetId = body.resetId;
+  if (!isUlid(resetId)) throw new ApiError("invalid_request");
+  const oldIdentityPub = pubKey(body.oldIdentityPub);
+  const claimPub = pubKey(body.claimPub);
+  const sig = signature(body.sig);
+  const createdAt = freshTime(body.createdAt, now);
+  if (userId === adminId) throw new ApiError("invalid_request");
+
+  const [target, signer] = await Promise.all([
+    db.prepare("SELECT name, identity_pub FROM users WHERE id = ?").bind(userId).first<{ name: string; identity_pub: string }>(),
+    db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
+  ]);
+  if (!target) throw new ApiError("not_found");
+  if (!signer) throw new ApiError("unauthorized");
+  const statement = { resetId, userId, signerUserId: adminId, signerKind: "admin" as const, oldIdentityPub, claimPub, createdAt };
+  if (!(await verifyEd25519(signer, sig, resetMessage(statement)))) throw new ApiError("invalid_request");
+  if (oldIdentityPub !== target.identity_pub) throw new ApiError("conflict");
+
+  const token = randomToken();
+  const expiresAt = now + INVITE_TTL_MS;
+  await resetAccount(c.env, {
+    statement,
+    sig,
+    signerPub: signer,
+    recoverySig: null,
+    actorId: adminId,
+    now,
+    invite: { tokenHash: await sha256Hex(token), name: target.name, createdBy: adminId, expiresAt },
+  });
+  return c.json({ resetId, inviteToken: token, inviteUrl: inviteUrl(c.env, token), expiresAt }, 201);
+});
+
+/**
+ * Makes another member an admin (the second admin the setup flow asks for). `sig` is the caller's
+ * identity key over `"famchat-admin-v1" ‖ str(userId) ‖ str(callerId)`, so other devices can check
+ * that an admin they trust made the promotion.
+ */
+admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
+  const userId = c.req.param("id");
+  const by = c.get("userId");
+  const sig = signature((await readJson(c)).sig);
+  const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
+  if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
+  const res = await db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+    .bind(by, signer, sig, userId).run();
+  if (res.meta.changes !== 1) throw new ApiError("not_found");
+  await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
+  return c.body(null, 204);
+});
+
+/**
+ * Registers the public half of the caller's admin recovery key (derived on their device from a
+ * printed code the server never sees), signed by their identity key. Replaces an earlier one.
+ */
+admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("userId");
+  const body = await readJson(c);
+  const recoveryPub = pubKey(body.recoveryPub);
+  const sig = signature(body.sig);
+  const identityPub = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(userId).first<string>("identity_pub");
+  if (!identityPub || !(await verifyEd25519(identityPub, sig, recoveryKeyMessage(userId, recoveryPub)))) {
+    throw new ApiError("invalid_request");
+  }
+  try {
+    await db.prepare("UPDATE users SET recovery_pub = ?, recovery_sig = ? WHERE id = ?").bind(recoveryPub, sig, userId).run();
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) throw new ApiError("conflict");
+    throw e;
+  }
+  await logEvent(db, { kind: "recovery_key_set", userId, actorId: userId });
+  return c.body(null, 204);
 });

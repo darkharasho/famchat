@@ -46,9 +46,20 @@ class RedeemResult {
 }
 
 class Me {
-  const Me({required this.userId, required this.deviceId, required this.name, required this.isAdmin});
+  const Me({required this.userId, required this.deviceId, required this.name, required this.isAdmin, this.recoveryCodeSet = false});
   final String userId, deviceId, name;
   final bool isAdmin;
+
+  /// An admin recovery code was saved (its key is registered).
+  final bool recoveryCodeSet;
+}
+
+/// `POST /admin/users/:id/reset`: the one-time link that signs the user in again. [url] already
+/// carries the claim key seed after the token (`/join#<token>.<seed>`); it never went to the server.
+class ResetLink {
+  const ResetLink({required this.resetId, required this.url, required this.expiresAt});
+  final String resetId, url;
+  final DateTime expiresAt;
 }
 
 class DeviceInfo {

@@ -72,9 +72,11 @@ class _ListPane extends ConsumerWidget {
             onSelected: (v) => switch (v) {
               'spikes' => context.go('/spikes'),
               'storage' => context.go('/storage'),
+              'family' => context.go('/family'),
               _ => confirmSignOut(context, ref),
             },
             itemBuilder: (context) => [
+              if (admin) const PopupMenuItem(value: 'family', child: Text('Family')),
               if (admin) const PopupMenuItem(value: 'storage', child: Text('Storage')),
               const PopupMenuItem(value: 'spikes', child: Text('Platform spikes')),
               const PopupMenuItem(value: 'signout', child: Text('Sign out')),
@@ -82,7 +84,17 @@ class _ListPane extends ConsumerWidget {
           ),
         ],
       ),
-      body: ChatList(selectedId: selectedId),
+      body: Column(children: [
+        // Admin setup: the recovery code is the last resort if every admin device is lost.
+        if (admin && ref.watch(meProvider).value?.recoveryCodeSet == false)
+          MaterialBanner(
+            key: const Key('admin-setup-banner'),
+            leading: const Icon(Icons.key_outlined),
+            content: const Text('Save your admin recovery code, and consider making a second admin.'),
+            actions: [TextButton(onPressed: () => context.go('/family'), child: const Text('Set up'))],
+          ),
+        Expanded(child: ChatList(selectedId: selectedId)),
+      ]),
     );
   }
 }

@@ -24,7 +24,10 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   await next();
 });
 
+/** Admin status comes from the database, so a promotion counts at once (not after a refresh). */
 export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
-  if (!c.get("isAdmin")) throw new ApiError("forbidden");
+  const isAdmin = await c.env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(c.get("userId")).first<number>("is_admin");
+  if (isAdmin !== 1) throw new ApiError("forbidden");
+  c.set("isAdmin", true);
   await next();
 });

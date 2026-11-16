@@ -61,6 +61,8 @@ export async function resetDb(): Promise<void> {
     env.DB.prepare("DELETE FROM chats"),
     env.DB.prepare("DELETE FROM devices"),
     env.DB.prepare("DELETE FROM invites"),
+    env.DB.prepare("DELETE FROM resets"),
+    env.DB.prepare("DELETE FROM events"),
     env.DB.prepare("DELETE FROM users"),
   ]);
   for (;;) {
