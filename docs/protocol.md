@@ -1,83 +1,144 @@
-# FamChat protocol
+# FamChat protocol (REST + WebSocket)
 
-The REST and WebSocket contract between the FamChat client and the Worker at `https://famchat.dev/api`.
+The contract between the Flutter client (`app/`) and the Worker (`server/`). The server code is the
+reference; this document says what clients may rely on.
 
 ## Conventions
 
-- JSON request and response bodies.
-- Binary values (keys, signatures, tokens) are **base64url without padding**.
-- Times are Unix **milliseconds**.
-- IDs are ULIDs (26 characters, Crockford base32).
-- Errors are `{"error": "<code>"}`:
+- Origin `https://famchat.dev`; every REST path is under `/api`. JSON in and out.
+- Auth: `Authorization: Bearer <access token>` (15 min, from `/api/auth/refresh`). Missing/invalid → 401.
+- Errors: `{"error": code}` with these statuses:
 
-| Code | Status | Meaning |
-|---|---|---|
-| `invalid_request` | 400 | Malformed body, bad field, or a device certificate that doesn't verify |
-| `unauthorized` | 401 | Missing, invalid or expired token; revoked device; wrong bootstrap secret |
-| `forbidden` | 403 | Authenticated but not allowed (for example, not an admin) |
-| `not_found` | 404 | Unknown route or resource |
-| `already_bootstrapped` | 409 | Bootstrap was called after a user exists |
-| `invite_invalid` | 410 | Invite unknown, expired or already used |
-| `internal` | 500 | Unexpected server error |
+  | code | status | meaning |
+  |---|---|---|
+  | `invalid_request` | 400 | malformed body or query, or an operation the target doesn't allow |
+  | `unauthorized` | 401 | no valid token, ticket or refresh token |
+  | `forbidden` | 403 | signed in but not allowed (e.g. removing someone from a group you didn't create) |
+  | `not_found` | 404 | doesn't exist **or you aren't a member** (chats never leak existence) |
+  | `already_bootstrapped` | 409 | bootstrap after the first user exists |
+  | `wraps_mismatch` | 409 | wraps don't cover exactly the devices the server expects; refresh `/users` and the chat, re-wrap, retry |
+  | `epoch_exists` | 409 | someone else created this epoch first; fetch its wraps |
+  | `stale_epoch` | 409 | the chat's current epoch isn't the one you named (or isn't created yet) |
+  | `invite_invalid` | 410 | used or expired invite |
+  | `upgrade_required` | 426 | `/api/ws` without a WebSocket upgrade |
+  | `internal` | 500 | bug or outage; retry later |
 
-## Tokens
+- Times are Unix milliseconds. Ids are ULIDs (26 chars, Crockford base32). **Chat and message ids are
+  made by the client** (wrap and envelope signatures bind them, so they must exist before the request).
+- Binary values are base64url without padding.
 
-- **Access token:** HS256 JWT, valid 15 minutes, claims `{sub: userId, dev: deviceId, adm: boolean, exp}`.
-  Send it as `Authorization: Bearer <accessToken>`. A revoked device's token stops working immediately.
-- **Refresh token:** an opaque 32-byte value. Each refresh returns a new one. Store it in the platform's secure storage,
-  and make sure only one refresh runs at a time per device.
-  - If a refresh response is lost, the previous token is accepted again for **60 seconds** after the rotation and
-    returns a fresh pair.
-  - Presenting the previous token after that window is treated as theft: the device is revoked and must be set up again.
-
-## Device certificate
-
-Each device has an X25519 key (`encPub`) and an Ed25519 key (`signPub`). The user's Ed25519 identity key
-(`identityPub`) signs this byte string:
+## Shapes
 
 ```
-UTF-8 "famchat-device-cert-v1" (22 bytes) || encPub (32 bytes) || signPub (32 bytes)
+User      = {id, name, isAdmin, identityPub, devices: Device[]}
+Device    = {id, name, platform, encPub, signPub, certSig, revoked}
+Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
+             lastSeq, lastMessageAt: number|null, createdAt, members: Member[]}
+Member    = {userId, joinedSeq, lastReadSeq}
+Message   = {chatId, seq, id, senderUserId, senderDeviceId, envelope: Envelope, createdAt}
+Envelope  = {v: 1, epoch, nonce, ct, sig}                                  (spec "Messages")
+Wrap      = {chatId, epoch, recipientDeviceId, wrapperDeviceId, sealed, sig} (spec "Signed wraps")
 ```
 
-The result is `certSig` (64 bytes). Public keys are exactly 32 bytes.
+`certSig` is the identity key's Ed25519 signature over `"famchat-device-cert-v1" ‖ encPub ‖ signPub`.
+Clients must check it against the user's (trusted-on-first-use) `identityPub` before using a device's keys.
 
-## Endpoints
+Plaintext inside an envelope is UTF-8 JSON:
+`{"kind":"text","text":"..."}` or `{"kind":"reaction","target":"<messageId>","emoji":"👍"}`
+(`"emoji":""` removes your reaction; the latest reaction per user and target wins). Later plans add
+`photo` and `voice`; clients show unknown kinds as unsupported rather than failing.
 
-### `GET /api/health`
-→ `200 {"ok": true}`
+## REST
 
-### `POST /api/admin/bootstrap`
-Creates the first admin's invite. It works only while no users exist.
-- Header: `Authorization: Bearer <BOOTSTRAP_SECRET>`
-- Body: `{"name": string}`, trimmed, 1–40 characters
-- → `201 {"inviteToken", "inviteUrl", "expiresAt"}`, where `inviteUrl` is `https://famchat.dev/join#<inviteToken>`
-- Errors: 401 for a wrong secret, 409 `already_bootstrapped`, 400 for a bad name
+### Auth and devices (plans 1 and 4)
+- `POST /auth/invite/redeem`, `POST /auth/refresh`, `GET /me`, `GET /devices`, `DELETE /devices/:id`
+  (revoking also closes that device's WebSocket), `POST /admin/invites`, `POST /admin/bootstrap`.
 
-### `POST /api/admin/invites` (admin)
-- Body: `{"name": string}`, trimmed, 1–40 characters. This becomes the new member's display name.
-- → `201 {"inviteToken", "inviteUrl", "expiresAt"}`. Invites last 7 days and work once.
-- Errors: 401, 403, 400
+### Directory
+- `GET /users` → `{users: User[]}`: every family member and every device, revoked ones included
+  (`revoked: true`) so old signatures still verify. Wrap only for devices with `revoked: false`.
 
-### `POST /api/auth/invite/redeem`
-Creates the user and their first device.
-- Body: `{"token", "deviceName" (1–60 chars), "platform" (ios|android|macos|windows|linux|web), "identityPub", "encPub", "signPub", "certSig"}`
-- → `201 {"userId", "deviceId", "isAdmin", "accessToken", "refreshToken"}`
-- Errors: 400 for a bad field or certificate (the invite stays usable), 410 `invite_invalid`
-- Retrying with the same invite **and the same keys** within 10 minutes of a successful redeem returns `201` again,
-  for the same user and device, with new tokens. This covers a lost response.
-- A bootstrap (admin) invite stops working as soon as any user exists.
+### Chats
+- `GET /chats` → `{chats: Chat[]}` (yours, newest activity first). `GET /chats/:id` → `{chat}`.
+- `POST /chats` → `201 {chat, created: true}` or `200 {chat, created: false}`.
+  - Direct: `{id, kind: "direct", userId, wraps}`. At most one per pair: if it exists, you get it back
+    (your wraps are ignored).
+  - Group: `{id, kind: "group", title (1–60), userIds (others, ≥1), wraps}`.
+  - `wraps`: epoch 1, exactly one per live device of every member (you included), all with
+    `wrapperDeviceId` = your device. Re-posting an id you created returns it.
+- `POST /chats/:id/members {userIds, wraps}` → `{chat}`. Groups only. Wraps for the **current** epoch
+  must cover every live device of the new users; wraps for older epochs (so they can read history) may
+  be included. New members' `joinedSeq` is the chat's `lastSeq`. Fails with `stale_epoch` while the
+  current epoch isn't created yet.
+  Adding someone to a **direct** chat isn't allowed: clients create a new group instead.
+- `DELETE /chats/:id/members/:userId` → 204. Groups only. Yourself = leave; someone else = remove
+  (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`.
+- `POST /chats/:id/epochs {epoch, wraps}` → `201 {chat}`. Creates the current epoch's key: `epoch` must
+  equal `currentEpoch` and wraps must cover exactly the live devices of current members. The first
+  member device wins; the rest get `epoch_exists` and fetch the wraps instead.
+- `GET /chats/:id/messages?after=N` (ascending, seq > N) or `?before=N` (the latest `limit` rows with
+  seq < N, returned ascending); `limit` 1–200, default 100 → `{messages: Message[]}`.
 
-### `POST /api/auth/refresh`
-- Body: `{"refreshToken"}`
-- → `200 {"accessToken", "refreshToken"}`. The old refresh token keeps working only for the 60-second grace window.
-- Errors: 400 for a missing token, 401 for an unknown or revoked one, or for an old token reused after the window
-  (which also revokes the device)
+### Keys
+- `GET /keys/wraps[?chatId=]` → `{wraps: Wrap[]}` addressed to your device, for chats you're in.
+- `PUT /keys/wraps {wraps}` → `{added}`. Missing-wrap repair: each wrap's `wrapperDeviceId` is your
+  device, its epoch exists, and its recipient is a live device of a current member. Existing wraps are
+  never replaced (first wrap wins).
+- `GET /keys/missing` → `{missing: [{chatId, epoch, deviceId}]}`: live member devices with no wrap for
+  an epoch that **your** device holds a wrap for.
 
-### `GET /api/devices`
-- → `200 {"devices": [{"id", "name", "platform", "createdAt", "lastSeen", "current"}]}`: the caller's active devices,
-  with `current` set on the calling device
+### Accepting a wrap (client rule)
+Accept a wrap only if `wrapperDeviceId` is a device whose cert verifies against its user's identity key,
+that user is a current member of the chat, and the wrap's signature verifies with that device's
+`signPub` over `"famchat-wrap-v1" ‖ str(chatId) ‖ u32(epoch) ‖ str(recipientDeviceId) ‖ str(wrapperDeviceId) ‖ sealed`.
 
-### `DELETE /api/devices/:id`
-Revokes one of the caller's own devices, including the calling device (signing out).
-- → `204`. The device's tokens and push token are cleared at once.
-- Errors: 404 if the device isn't the caller's, doesn't exist or is already revoked
+## WebSocket
+
+1. `POST /ws/ticket` (authed) → `{ticket, expiresAt}`: one use, valid 30 s.
+2. Open `wss://famchat.dev/api/ws?ticket=<ticket>`. Bad/used/expired ticket or revoked device → 401.
+
+Frames are JSON text. One socket per device carries every chat.
+
+### Client → hub
+| frame | effect |
+|---|---|
+| `{type:"send", id, chatId, envelope}` | store and fan out a message (below) |
+| `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
+| `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
+| `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
+
+### Hub → client
+| frame | when |
+|---|---|
+| `{type:"hello", online:[userId]}` | right after connecting |
+| `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
+| `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
+| `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
+| `{type:"msg", message: Message}` | a new message in one of your chats (not echoed to the sending socket) |
+| `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
+| `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
+| `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
+| `{type:"removed", chatId}` | you left or were removed |
+| `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
+| close code 4001 | this device was revoked |
+
+### `send` rules
+- `envelope.v == 1`, `nonce`/`ct`/`sig` base64url, JSON ≤ 64 KiB, `envelope.epoch == currentEpoch` and
+  that epoch created; otherwise `invalid_request` / `stale_epoch`. Not a member → `not_member`.
+- **Idempotent on `id`:** resending an id from the same device and chat returns the original `ack`
+  (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`.
+- Sends are processed one at a time; `seq` per chat is gap-free and `msg` frames go out in `seq` order.
+  Clients still treat a `seq` above `lastSeen + 1` as a gap and fetch `?after=lastSeen`.
+- On `stale_epoch`, get the chat, create or fetch the current epoch's key, re-encrypt **with the same
+  id**, and resend.
+
+### Sync
+On every (re)connect: `GET /users`, `GET /chats`, `GET /keys/wraps`, then per chat
+`GET /chats/:id/messages?after=<highest seq stored>` until a short page, then `GET /keys/missing` and
+add wraps you can, then resend the outbox.
+
+### Hooks for later plans
+- Push (plan 9): `FamilyHub.push.notify({chatId, senderUserId, messageId, userIds})` is called for members
+  with no open socket after each new message; it's a no-op until plan 9 replaces it with a Queue producer.
+- Device pairing / revocation (plan 6): a new device gets history through missing-wrap repair
+  (`/keys/missing` + `PUT /keys/wraps`); revocation should bump epochs like a leave does.

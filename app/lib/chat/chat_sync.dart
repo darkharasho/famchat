@@ -1,0 +1,605 @@
+// The chat engine: keeps the local database in step with the server and the hub.
+// Sync on every connect (directory, chats, keys, history after the last seq, repair, outbox),
+// live events, sending through an outbox with idempotent ids, reactions, read receipts,
+// typing and presence. The UI only reads the database and the two ephemeral streams.
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:drift/drift.dart' show Value;
+
+import '../api/models.dart';
+import '../crypto/encoding.dart';
+import '../crypto/envelope.dart';
+import '../crypto/keys.dart';
+import 'chat_keys.dart';
+import 'db/chat_db.dart';
+import 'directory.dart';
+import 'hub_link.dart';
+import 'plaintext.dart';
+import 'ulid.dart';
+import 'wire.dart';
+
+class ChatSync {
+  ChatSync({
+    required this.db,
+    required this.api,
+    required this.hub,
+    required this.me,
+    Directory? directory,
+    ChatKeys? keys,
+    this.typingTtl = const Duration(seconds: 5),
+    this.typingThrottle = const Duration(seconds: 3),
+    this.syncRetryDelays = const [Duration(seconds: 2), Duration(seconds: 10), Duration(seconds: 30), Duration(minutes: 1)],
+    DateTime Function()? now,
+  })  : directory = directory ?? Directory(db, api, me),
+        _now = now ?? DateTime.now {
+    this.keys = keys ?? ChatKeys(db: db, api: api, directory: this.directory, me: me);
+  }
+
+  final ChatDb db;
+  final ChatApi api;
+  final HubLink hub;
+  final LocalIdentity me;
+  final Directory directory;
+  late final ChatKeys keys;
+  final Duration typingTtl, typingThrottle;
+
+  /// After a failed connect-sync, while still connected: wait these (the last repeats) and retry.
+  final List<Duration> syncRetryDelays;
+  final DateTime Function() _now;
+
+  static const pageSize = 100;
+
+  /// Sends rejected with stale_epoch are retried this many times before they fail.
+  static const maxStaleRetries = 3;
+
+  final _subs = <StreamSubscription<Object?>>[];
+  Future<void> _chain = Future.value();
+  final _inflight = <String>{};
+  final _staleRetries = <String, int>{};
+  final _lastTypingSent = <String, DateTime>{};
+
+  /// Chats whose wraps were already fetched during the current queued job (one fetch per pass).
+  final _keysFetched = <String>{};
+  Timer? _syncRetry;
+  int _syncFailures = 0;
+
+  Set<String> _online = {};
+  final _onlineCtl = StreamController<Set<String>>.broadcast();
+  final _typing = <String, Map<String, Timer>>{};
+  final _typingCtl = StreamController<Map<String, Set<String>>>.broadcast();
+
+  /// Users with at least one connected device.
+  Stream<Set<String>> get online => _onlineCtl.stream;
+  Set<String> get onlineNow => Set.unmodifiable(_online);
+
+  /// chat id → users typing there now.
+  Stream<Map<String, Set<String>>> get typingUsers => _typingCtl.stream;
+  Set<String> typingNow(String chatId) => {...?_typing[chatId]?.keys};
+
+  /// Completes when the work queued so far (sync, events, sends) is done.
+  Future<void> get idle async {
+    for (;;) {
+      final c = _chain;
+      await c;
+      await Future<void>.delayed(Duration.zero);
+      if (identical(c, _chain)) return;
+    }
+  }
+
+  Future<void> start() async {
+    db.myUserId = me.userId;
+    await db.bindDevice(me.deviceId);
+    _subs.add(hub.events.listen((e) => _enqueue(() => _onEvent(e))));
+    _subs.add(hub.connection.listen((up) {
+      if (up) {
+        _enqueue(_connectSync);
+      } else {
+        _syncRetry?.cancel();
+        _inflight.clear();
+        _setOnline({});
+        for (final t in _typing.values.expand((m) => m.values)) {
+          t.cancel();
+        }
+        _typing.clear();
+        _emitTyping();
+      }
+    }));
+    await hub.start();
+  }
+
+  Future<void> stop() async {
+    _syncRetry?.cancel();
+    for (final s in _subs) {
+      await s.cancel();
+    }
+    _subs.clear();
+    await hub.stop();
+    for (final t in _typing.values.expand((m) => m.values)) {
+      t.cancel();
+    }
+    _typing.clear();
+  }
+
+  /// Runs [f] after everything queued before it; a failure is logged, not propagated, so one bad
+  /// event can't stall the queue.
+  Future<void> _enqueue(Future<void> Function() f) {
+    final next = _chain.then((_) {
+      _keysFetched.clear();
+      return f();
+    }).catchError((Object e, StackTrace st) {
+      // ignore: avoid_print
+      if (e is! NetworkException && e is! SignedOutException) print('chat sync: $e\n$st');
+    });
+    _chain = next;
+    return next;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Sync
+
+  /// [syncAll] for a new connection: the outbox is flushed even if the sync fails, and a failed
+  /// sync is retried with backoff while the connection stays up.
+  Future<void> _connectSync() async {
+    _syncRetry?.cancel();
+    try {
+      await syncAll();
+      _syncFailures = 0;
+    } catch (_) {
+      if (hub.connected) {
+        final delay = syncRetryDelays[_syncFailures < syncRetryDelays.length ? _syncFailures : syncRetryDelays.length - 1];
+        _syncFailures++;
+        _syncRetry = Timer(delay, () => _enqueue(_connectSync));
+      }
+      try {
+        await _flushOutbox();
+      } catch (_) {
+        // Sends need only the epoch key; anything else waits for the retry.
+      }
+      rethrow;
+    }
+  }
+
+  /// What a (re)connect runs: directory, chats, keys, history, repair, outbox.
+  Future<void> syncAll() async {
+    await directory.refresh();
+    final chats = await api.chats();
+    final ids = {for (final c in chats) c.id};
+    for (final local in await db.allChats()) {
+      if (!ids.contains(local.id)) await db.deleteChat(local.id);
+    }
+    for (final c in chats) {
+      await db.upsertChat(c);
+      // A read made while offline: the server still has an older position for me.
+      final server = c.members.where((m) => m.userId == me.userId).firstOrNull?.lastReadSeq ?? 0;
+      final local = (await db.chatById(c.id))!.myLastReadSeq;
+      if (local > server) hub.send({'type': 'read', 'chatId': c.id, 'seq': local});
+    }
+    await keys.fetch();
+    for (final c in chats) {
+      try {
+        await keys.ensureCurrentEpoch(c.id);
+      } on ApiException {
+        // Retried on the next sync or event.
+      }
+    }
+    for (final c in chats) {
+      await _catchUp(c.id);
+    }
+    await _retryUndecryptable();
+    try {
+      await keys.repairMissing();
+    } on ApiException {
+      // Someone else's device state changed meanwhile; next sync.
+    }
+    await _flushOutbox();
+  }
+
+  /// Fetches every message after the chat's synced seq.
+  Future<void> _catchUp(String chatId) async {
+    for (;;) {
+      final chat = await db.chatById(chatId);
+      if (chat == null) return;
+      final page = await api.messages(chatId, after: chat.syncedSeq, limit: pageSize);
+      for (final m in page) {
+        await _apply(m, catchingUp: true);
+      }
+      if (page.length < pageSize) return;
+    }
+  }
+
+  Future<void> _apply(MessageDto m, {bool catchingUp = false}) async {
+    var chat = await db.chatById(m.chatId);
+    if (chat == null) {
+      await _refreshChat(m.chatId);
+      chat = await db.chatById(m.chatId);
+      if (chat == null) return;
+      if (!catchingUp) return _catchUp(m.chatId);
+    }
+    if (m.seq <= chat.syncedSeq) return;
+    if (m.seq > chat.syncedSeq + 1 && !catchingUp) return _catchUp(m.chatId);
+    final existing = await db.messageById(m.id);
+    if (existing != null) {
+      if (existing.seq == null) await db.ackMessage(m.id, seq: m.seq, createdAt: m.createdAt);
+      _inflight.remove(m.id);
+    } else {
+      await db.insertMessageIfAbsent(await _decrypt(m));
+    }
+    await db.setSyncedSeq(m.chatId, m.seq);
+    await db.noteActivity(m.chatId, m.seq, m.createdAt);
+  }
+
+  /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, unknown,
+  /// undecryptable (key not held yet; envelope kept), invalid (fails verification for good).
+  Future<MessageRow> _decrypt(MessageDto m) async {
+    final base = MessageRow(
+      id: m.id,
+      chatId: m.chatId,
+      seq: m.seq,
+      senderUserId: m.senderUserId,
+      senderDeviceId: m.senderDeviceId,
+      kind: 'invalid',
+      body: null,
+      targetId: null,
+      envelope: null,
+      createdAt: m.createdAt,
+      state: 'sent',
+    );
+    final Envelope env;
+    try {
+      env = Envelope.fromJson(m.envelope);
+    } on CryptoFailure {
+      return base;
+    }
+    final waiting = base.copyWith(kind: 'undecryptable', envelope: Value(jsonEncode(m.envelope)));
+    final VerifiedDevice? device;
+    try {
+      device = await directory.device(m.senderDeviceId);
+    } catch (_) {
+      return waiting; // couldn't ask the directory; retried on the next sync
+    }
+    if (device == null || device.userId != m.senderUserId) return base;
+    // A sender under a changed, unacknowledged identity key waits for the user's OK.
+    if (!device.trusted) return waiting;
+    var key = await keys.key(m.chatId, env.epoch);
+    if (key == null && _keysFetched.add(m.chatId)) {
+      try {
+        await keys.fetch(chatId: m.chatId);
+      } on ApiException {
+        // Stays undecryptable; a later keys event retries.
+      } on NetworkException {
+        // Same.
+      }
+      key = await keys.key(m.chatId, env.epoch);
+    }
+    if (key == null) return waiting;
+    final Plaintext p;
+    try {
+      p = Plaintext.decode(await decryptEnvelope(
+        envelope: env,
+        chatKey: key,
+        chatId: m.chatId,
+        messageId: m.id,
+        senderDeviceId: m.senderDeviceId,
+        senderSignPub: device.signPub,
+      ));
+    } on CryptoFailure {
+      return base;
+    } on FormatException {
+      return base;
+    }
+    final body = jsonEncode(p.toJson());
+    return switch (p) {
+      TextBody() => base.copyWith(kind: 'text', body: Value(body)),
+      ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
+      UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
+    };
+  }
+
+  Future<void> _retryUndecryptable() async {
+    for (final r in await db.undecryptable()) {
+      final env = r.envelope;
+      if (env == null || r.seq == null) continue;
+      final row = await _decrypt(MessageDto(
+        chatId: r.chatId,
+        seq: r.seq!,
+        id: r.id,
+        senderUserId: r.senderUserId,
+        senderDeviceId: r.senderDeviceId,
+        envelope: (jsonDecode(env) as Map).cast<String, Object?>(),
+        createdAt: r.createdAt,
+      ));
+      if (row.kind != 'undecryptable') await db.replaceMessage(row);
+    }
+  }
+
+  Future<void> _refreshChat(String chatId) async {
+    try {
+      await db.upsertChat(await api.chat(chatId));
+    } on ApiException catch (e) {
+      if (e.code != 'not_found') rethrow;
+      await db.deleteChat(chatId);
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Events
+
+  Future<void> _onEvent(Map<String, Object?> e) async {
+    switch (e['type']) {
+      case 'msg':
+        final m = e['message'];
+        if (m is Map<String, Object?>) await _apply(MessageDto.fromJson(m));
+      case 'ack':
+        await _onAck(e);
+      case 'error':
+        await _onSendError(e);
+      case 'chat':
+        final chatId = e['chatId'] as String;
+        await _refreshChat(chatId);
+        if (await db.chatById(chatId) == null) return;
+        await keys.fetch(chatId: chatId);
+        await keys.ensureCurrentEpoch(chatId);
+        await _catchUp(chatId);
+        await _retryUndecryptable();
+        await _flushOutbox();
+      case 'removed':
+        await db.deleteChat(e['chatId'] as String);
+      case 'keys':
+        await keys.fetch(chatId: e['chatId'] as String?);
+        await _retryUndecryptable();
+        await _flushOutbox();
+      case 'read':
+        final chatId = e['chatId'] as String, userId = e['userId'] as String, seq = e['seq'] as int;
+        await db.setMemberRead(chatId, userId, seq);
+        if (userId == me.userId) await db.setMyLastRead(chatId, seq);
+      case 'typing':
+        _onTyping(e['chatId'] as String, e['userId'] as String);
+      case 'hello':
+        _setOnline({...(e['online'] as List).cast<String>()});
+      case 'presence':
+        final u = e['userId'] as String;
+        _setOnline(e['online'] == true ? {..._online, u} : ({..._online}..remove(u)));
+    }
+  }
+
+  Future<void> _onAck(Map<String, Object?> e) async {
+    final id = e['id'] as String, seq = e['seq'] as int, at = e['createdAt'] as int;
+    _inflight.remove(id);
+    _staleRetries.remove(id);
+    final row = await db.messageById(id);
+    if (row == null) return;
+    if (row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
+    final chat = await db.chatById(row.chatId);
+    if (chat == null) return;
+    if (seq == chat.syncedSeq + 1) {
+      await db.setSyncedSeq(row.chatId, seq);
+      await db.noteActivity(row.chatId, seq, at);
+    } else if (seq > chat.syncedSeq + 1) {
+      await _catchUp(row.chatId);
+    }
+  }
+
+  Future<void> _onSendError(Map<String, Object?> e) async {
+    final id = e['id'];
+    if (id is! String) return;
+    _inflight.remove(id);
+    final row = await db.messageById(id);
+    if (row == null || row.state != 'pending') return;
+    switch (e['error']) {
+      case 'stale_epoch':
+        final n = (_staleRetries[id] ?? 0) + 1;
+        _staleRetries[id] = n;
+        if (n > maxStaleRetries) {
+          await db.setMessageState(id, 'failed');
+          return;
+        }
+        await _refreshChat(row.chatId);
+        if (await db.chatById(row.chatId) == null) {
+          await db.setMessageState(id, 'failed');
+          return;
+        }
+        await keys.ensureCurrentEpoch(row.chatId);
+        await _sendRow((await db.messageById(id))!);
+      case 'not_member':
+        await db.setMessageState(id, 'failed');
+        await _refreshChat(row.chatId);
+      case 'internal':
+        // Stays pending; resent on the next connect or flush.
+        break;
+      default:
+        await db.setMessageState(id, 'failed');
+    }
+  }
+
+  void _setOnline(Set<String> s) {
+    _online = s;
+    _onlineCtl.add(onlineNow);
+  }
+
+  void _onTyping(String chatId, String userId) {
+    final m = _typing[chatId] ??= {};
+    m[userId]?.cancel();
+    m[userId] = Timer(typingTtl, () {
+      _typing[chatId]?.remove(userId);
+      if (_typing[chatId]?.isEmpty ?? false) _typing.remove(chatId);
+      _emitTyping();
+    });
+    _emitTyping();
+  }
+
+  void _emitTyping() => _typingCtl.add({for (final e in _typing.entries) e.key: e.value.keys.toSet()});
+
+  // ---------------------------------------------------------------------------------------------
+  // Sending
+
+  Future<void> _flushOutbox() async {
+    if (!hub.connected) return;
+    for (final row in await db.pendingOutbox(me.deviceId)) {
+      if (_inflight.contains(row.id)) continue;
+      await _sendRow(row);
+    }
+  }
+
+  /// Encrypts [row] under the chat's current epoch (same id every time) and sends it.
+  Future<void> _sendRow(MessageRow row) async {
+    if (row.state != 'pending' || !hub.connected) return;
+    final ok = await keys.ensureCurrentEpoch(row.chatId);
+    final chat = await db.chatById(row.chatId);
+    if (chat == null) {
+      await db.setMessageState(row.id, 'failed');
+      return;
+    }
+    if (!ok) return; // waits for the epoch's key (a keys/chat event or the next sync retries)
+    final key = (await keys.key(row.chatId, chat.currentEpoch))!;
+    final env = await encryptEnvelope(
+      chatKey: key,
+      epoch: chat.currentEpoch,
+      chatId: row.chatId,
+      messageId: row.id,
+      senderDeviceId: me.deviceId,
+      signKey: me.keys.sign,
+      plaintext: utf8.encode(row.body!),
+    );
+    if (hub.send({'type': 'send', 'id': row.id, 'chatId': row.chatId, 'envelope': env.toJson()})) {
+      _inflight.add(row.id);
+    }
+  }
+
+  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId}) async {
+    final id = newUlid(_now());
+    await db.insertMessageIfAbsent(MessageRow(
+      id: id,
+      chatId: chatId,
+      seq: null,
+      senderUserId: me.userId,
+      senderDeviceId: me.deviceId,
+      kind: p.kind,
+      body: jsonEncode(p.toJson()),
+      targetId: targetId,
+      envelope: null,
+      createdAt: _now().millisecondsSinceEpoch,
+      state: 'pending',
+    ));
+    unawaited(_enqueue(_flushOutbox));
+    return id;
+  }
+
+  /// Queues a text message and returns its id. Throws [ArgumentError] for empty or too-long text.
+  Future<String> sendText(String chatId, String text) {
+    final t = validMessageText(text);
+    if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
+    return _enqueueMessage(chatId, TextBody(t));
+  }
+
+  /// Sets this user's reaction on [messageId]; an empty [emoji] removes it.
+  Future<void> react(String chatId, String messageId, String emoji) =>
+      _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
+
+  /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
+  /// their new devices get the chat keys this device holds.
+  Future<void> acknowledgeIdentity(String userId) async {
+    await directory.acknowledgeIdentity(userId);
+    await _enqueue(() async {
+      await _retryUndecryptable();
+      await keys.repairMissing();
+    });
+  }
+
+  /// Puts a failed message back in the outbox.
+  Future<void> retry(String messageId) async {
+    await db.setMessageState(messageId, 'pending');
+    unawaited(_enqueue(_flushOutbox));
+  }
+
+  /// Marks everything stored in [chatId] as read (locally and on the server).
+  Future<void> markRead(String chatId) async {
+    final chat = await db.chatById(chatId);
+    final newest = await db.maxSeq(chatId);
+    if (chat == null || newest == null || newest <= chat.myLastReadSeq) return;
+    await db.setMyLastRead(chatId, newest);
+    hub.send({'type': 'read', 'chatId': chatId, 'seq': newest});
+  }
+
+  /// Call on every keystroke; sends at most one typing event per [typingThrottle].
+  void typing(String chatId) {
+    final now = _now();
+    final last = _lastTypingSent[chatId];
+    if (last != null && now.difference(last) < typingThrottle) return;
+    if (hub.send({'type': 'typing', 'chatId': chatId})) _lastTypingSent[chatId] = now;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Chats and membership
+
+  /// The direct chat with [userId], created if there is none (the server dedupes per pair).
+  Future<String> openDirect(String userId) async {
+    for (final c in await db.allChats()) {
+      if (c.kind != 'direct') continue;
+      final members = {for (final m in await db.membersOf(c.id)) m.userId};
+      if (members.length == 2 && members.contains(userId) && members.contains(me.userId)) return c.id;
+    }
+    return _create('direct', null, [userId]);
+  }
+
+  Future<String> createGroup(String title, List<String> userIds) => _create('group', title.trim(), userIds);
+
+  Future<String> _create(String kind, String? title, List<String> userIds) async {
+    final others = userIds.where((u) => u != me.userId).toSet().toList();
+    final id = newUlid(_now());
+    final key = newChatKey();
+    for (var attempt = 0;; attempt++) {
+      final devices = await directory.liveDevices([me.userId, ...others]);
+      if (attempt == 0 && others.any((u) => !devices.any((d) => d.userId == u))) {
+        await directory.refresh();
+        continue;
+      }
+      final wraps = await keys.wrapKey(chatId: id, epoch: 1, key: key, devices: await directory.liveDevices([me.userId, ...others]));
+      try {
+        final r = await api.createChat(id: id, kind: kind, title: title, userIds: others, wraps: wraps);
+        if (r.chat.id == id) await db.putKey(id, 1, key);
+        await db.upsertChat(r.chat);
+        if (r.chat.id != id) {
+          await keys.fetch(chatId: r.chat.id);
+          unawaited(_enqueue(() => _catchUp(r.chat.id)));
+        }
+        return r.chat.id;
+      } on ApiException catch (e) {
+        if (e.code != 'wraps_mismatch' || attempt >= 2) rethrow;
+        await directory.refresh();
+      }
+    }
+  }
+
+  /// Adds people to a group; they get every epoch key this device holds, so they see the history.
+  /// Throws [ArgumentError] for a direct chat (the UI makes a new group instead).
+  Future<void> addMembers(String chatId, List<String> userIds) async {
+    final chat = await db.chatById(chatId);
+    if (chat == null) throw ArgumentError.value(chatId, 'chatId', 'unknown chat');
+    if (chat.kind == 'direct') throw ArgumentError.value(chatId, 'chatId', 'direct chats keep two people; create a group');
+    for (var attempt = 0;; attempt++) {
+      await keys.ensureCurrentEpoch(chatId);
+      final wraps = await keys.wrapsForNewDevices(chatId, userIds);
+      try {
+        await db.upsertChat(await api.addMembers(chatId, userIds, wraps));
+        return;
+      } on ApiException catch (e) {
+        if (attempt >= 2 || (e.code != 'wraps_mismatch' && e.code != 'stale_epoch')) rethrow;
+        await directory.refresh();
+        await _refreshChat(chatId);
+      }
+    }
+  }
+
+  Future<void> leave(String chatId) async {
+    await api.removeMember(chatId, me.userId);
+    await db.deleteChat(chatId);
+  }
+
+  /// Removes someone (group creator only). This device creates the new epoch right away.
+  Future<void> removeMember(String chatId, String userId) async {
+    await api.removeMember(chatId, userId);
+    await _refreshChat(chatId);
+    await keys.ensureCurrentEpoch(chatId);
+  }
+}

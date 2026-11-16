@@ -1,3 +1,8 @@
+import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/native.dart';
+import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/hub_link.dart';
+import 'package:famchat/chat/providers.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
@@ -17,7 +22,10 @@ Future<void> pumpApp(
   required SecureKv kv,
   List<Override> extra = const [],
 }) async {
-  await tester.pumpWidget(ProviderScope(overrides: [...sessionOverrides(server, kv), ...extra], child: const FamChatApp()));
+  await tester.pumpWidget(ProviderScope(
+    overrides: [...sessionOverrides(server, kv), ...quietChatOverrides(), ...extra],
+    child: const FamChatApp(),
+  ));
   await tester.pumpAndSettle();
 }
 
@@ -30,4 +38,35 @@ GoRouter appRouter(WidgetTester tester) => appContainer(tester).read(routerProvi
 Future<void> signInDirectly(WidgetTester tester, FakeServer server, {String name = 'Mom', bool admin = false}) async {
   await appContainer(tester).read(sessionProvider.notifier).join(token: server.addInvite(name: name, admin: admin), deviceName: 'Pixel');
   await tester.pumpAndSettle();
+}
+
+/// An in-memory chat database and a hub that never connects, for tests about other screens.
+List<Override> quietChatOverrides() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+  return [
+    chatDbProvider.overrideWith((ref) {
+      final db = ChatDb(NativeDatabase.memory());
+      ref.onDispose(db.close);
+      return db;
+    }),
+    hubLinkProvider.overrideWith((ref) => _IdleHub()),
+    // No drift stream queries: their close timers would trip the pending-timer check.
+    chatListProvider.overrideWith((ref) => Stream.value(const <ChatListItem>[])),
+    usersProvider.overrideWith((ref) => Stream.value(const <String, UserRow>{})),
+  ];
+}
+
+class _IdleHub implements HubLink {
+  @override
+  Stream<Map<String, Object?>> get events => const Stream.empty();
+  @override
+  Stream<bool> get connection => const Stream.empty();
+  @override
+  bool get connected => false;
+  @override
+  bool send(Map<String, Object?> msg) => false;
+  @override
+  Future<void> start() async {}
+  @override
+  Future<void> stop() async {}
 }

@@ -50,6 +50,12 @@ export const BASE = "https://famchat.dev";
 
 export async function resetDb(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM ws_tickets"),
+    env.DB.prepare("DELETE FROM messages"),
+    env.DB.prepare("DELETE FROM chat_key_wraps"),
+    env.DB.prepare("DELETE FROM chat_epochs"),
+    env.DB.prepare("DELETE FROM chat_members"),
+    env.DB.prepare("DELETE FROM chats"),
     env.DB.prepare("DELETE FROM devices"),
     env.DB.prepare("DELETE FROM invites"),
     env.DB.prepare("DELETE FROM users"),

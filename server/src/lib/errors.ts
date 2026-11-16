@@ -5,6 +5,10 @@ export type ErrorCode =
   | "not_found"
   | "already_bootstrapped"
   | "invite_invalid"
+  | "wraps_mismatch"
+  | "epoch_exists"
+  | "stale_epoch"
+  | "upgrade_required"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -14,6 +18,10 @@ const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
   already_bootstrapped: 409,
   invite_invalid: 410,
+  wraps_mismatch: 409,
+  epoch_exists: 409,
+  stale_epoch: 409,
+  upgrade_required: 426,
   internal: 500,
 };
 

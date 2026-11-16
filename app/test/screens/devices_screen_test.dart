@@ -26,7 +26,7 @@ void main() {
     await pumpApp(tester, server: server, kv: kv);
     await signInDirectly(tester, server, name: 'Gran');
     expect(find.text('Hi, Gran'), findsOneWidget);
-    expect(find.text('Chats coming soon'), findsOneWidget);
+    expect(find.text('No chats yet'), findsOneWidget);
   });
 
   testWidgets('devices list marks the current device', (tester) async {

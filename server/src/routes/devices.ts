@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { ApiError } from "../lib/errors";
+import { hubStub } from "../hub";
 import { requireAuth } from "../middleware/auth";
 
 export const devices = new Hono<AppEnv>();
@@ -34,5 +35,10 @@ devices.delete("/:id", async (c) => {
     .bind(Date.now(), c.req.param("id"), c.get("userId"))
     .run();
   if (res.meta.changes !== 1) throw new ApiError("not_found");
+  try {
+    await hubStub(c.env).disconnectDevice(c.req.param("id"));
+  } catch (e) {
+    console.error("hub disconnect failed", e);
+  }
   return c.body(null, 204);
 });

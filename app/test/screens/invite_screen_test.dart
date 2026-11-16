@@ -40,7 +40,7 @@ void main() {
     expect(find.byTooltip('Invite someone'), findsNothing);
     appRouter(tester).go('/invite');
     await tester.pumpAndSettle();
-    expect(find.text('Chats coming soon'), findsOneWidget);
+    expect(find.text('No chats yet'), findsOneWidget);
   });
 
   testWidgets('admin status from the server shows the invite action', (tester) async {
