@@ -1,0 +1,56 @@
+#!/bin/sh
+# The AppImage's entry point (build-appimage.sh copies it in).
+HERE="$(dirname "$(readlink -f "$0")")"
+
+# Voice playback needs libmpv. Use the system's when it has one (media_kit finds it by name);
+# otherwise the copy bundled in usr/lib.
+has_system_mpv() {
+  for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /usr/local/lib; do
+    for f in "$d"/libmpv.so "$d"/libmpv.so.2 "$d"/libmpv.so.1; do
+      [ -e "$f" ] && return 0
+    done
+  done
+  return 1
+}
+if [ -z "$LIBMPV_LIBRARY_PATH" ] && [ -f "$HERE/usr/lib/libmpv.name" ] && ! has_system_mpv; then
+  LIBMPV_LIBRARY_PATH="$HERE/usr/lib/$(cat "$HERE/usr/lib/libmpv.name")"
+  export LIBMPV_LIBRARY_PATH
+fi
+
+# Desktop integration: a launcher named after the app id (dev.famchat.app), so desktops show
+# FamChat's icon on its windows and group them with the launcher. If an AppImage manager already
+# made a launcher for FamChat, ours stays out of the menu. FAMCHAT_NO_DESKTOP_INTEGRATION=1 skips.
+integrate() {
+  data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  apps="$data/applications"
+  icons="$data/icons/hicolor/512x512/apps"
+  entry="$apps/dev.famchat.app.desktop"
+  mkdir -p "$apps" "$icons" || return
+  cmp -s "$HERE/dev.famchat.app.png" "$icons/dev.famchat.app.png" ||
+    cp -f "$HERE/dev.famchat.app.png" "$icons/dev.famchat.app.png"
+  nodisplay=false
+  for f in "$apps"/*.desktop; do
+    [ "$f" = "$entry" ] || [ ! -f "$f" ] && continue
+    grep -qs '^StartupWMClass=dev\.famchat\.app$' "$f" && nodisplay=true && break
+  done
+  tmp="$entry.tmp.$$"
+  {
+    echo '[Desktop Entry]'
+    echo 'Type=Application'
+    echo 'Name=FamChat'
+    echo 'Comment=Private family messenger'
+    echo "Exec=\"$APPIMAGE\" %U"
+    echo "TryExec=$APPIMAGE"
+    echo 'Icon=dev.famchat.app'
+    echo 'Categories=Network;InstantMessaging;Chat;'
+    echo 'StartupWMClass=dev.famchat.app'
+    echo 'Terminal=false'
+    echo "NoDisplay=$nodisplay"
+  } > "$tmp" || return
+  if cmp -s "$tmp" "$entry"; then rm -f "$tmp"; else mv -f "$tmp" "$entry"; fi
+}
+if [ -n "$APPIMAGE" ] && [ -z "$FAMCHAT_NO_DESKTOP_INTEGRATION" ]; then
+  integrate 2>/dev/null
+fi
+
+exec "$HERE/famchat" "$@"
