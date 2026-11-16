@@ -6,6 +6,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "routes": [{ "pattern": "famchat.dev", "custom_domain": true }],
+  // The Flutter web app (`flutter build web`, copied here by scripts/deploy.sh). Paths that aren't
+  // a file get index.html so go_router can handle them; /api/* always runs the Worker instead.
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
   "vars": { "APP_ORIGIN": "https://famchat.dev" },
   "d1_databases": [
     {
