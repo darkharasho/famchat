@@ -77,6 +77,9 @@ void main() {
     // Sign-in pages are never remembered.
     sessionRedirect(const SessionLoading(), '/join', pending: pending);
     expect(pending.value, isNull);
+    sessionRedirect(const SessionLoading(), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV', pending: pending);
+    sessionRedirect(const SessionLoading(), '/recover', pending: pending);
+    expect(pending.value, isNull);
   });
 
   test('chatRoute accepts only chat ids', () {
