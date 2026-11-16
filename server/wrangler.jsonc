@@ -5,12 +5,13 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "routes": [{ "pattern": "famchat.dev", "custom_domain": true }],
   "vars": { "APP_ORIGIN": "https://famchat.dev" },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "famchat",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "5287eb70-0fd6-42fa-960e-0d7e99877ae9",
       "migrations_dir": "migrations"
     }
   ]
