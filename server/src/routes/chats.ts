@@ -6,6 +6,7 @@ import {
 import { ApiError } from "../lib/errors";
 import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
+import { messageOut } from "../lib/messages";
 import { notify } from "../notify";
 
 export const chats = new Hono<AppEnv>();
@@ -210,17 +211,3 @@ chats.get("/:id/messages", async (c) => {
   }
   return c.json({ messages: rows.map(messageOut) });
 });
-
-export function messageOut(r: {
-  chat_id: string; seq: number; id: string; sender_user_id: string; sender_device_id: string; envelope: string; created_at: number;
-}) {
-  return {
-    chatId: r.chat_id,
-    seq: r.seq,
-    id: r.id,
-    senderUserId: r.sender_user_id,
-    senderDeviceId: r.sender_device_id,
-    envelope: JSON.parse(r.envelope) as unknown,
-    createdAt: r.created_at,
-  };
-}

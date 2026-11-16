@@ -76,8 +76,9 @@ The client keeps a local SQLite cache (drift; wasm on web) plus an outbox for me
 - `GET/DELETE /api/devices` lists or revokes your devices
 - `GET /api/me` returns the signed-in user's id, device id, name and admin flag
 - `POST /api/admin/invites`, `POST /api/admin/users/:id/reset` (admin only)
-- `GET/POST /api/chats`, `GET /api/chats/:id/messages`
-- `GET/PUT /api/keys/*` publishes and fetches public device keys and wrapped chat keys
+- `GET /api/users` lists the family with every device's public keys and certificate
+- `GET/POST /api/chats`, `GET /api/chats/:id`, `POST/DELETE /api/chats/:id/members`, `POST /api/chats/:id/epochs`, `GET /api/chats/:id/messages`
+- `GET/PUT /api/keys/*` fetches and adds wrapped chat keys (`/keys/wraps`, `/keys/missing`); device public keys come from `/api/users`
 - `POST /api/media`, `GET /api/media/:key` upload and download encrypted media through the Worker
 - `GET /api/ws` opens the WebSocket to FamilyHub (authenticated with a short-lived one-time ticket from `POST /api/ws/ticket`)
 
