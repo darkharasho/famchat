@@ -122,13 +122,35 @@ describe("POST /api/auth/refresh", () => {
     expect(seen).toBeGreaterThan(0);
   });
 
-  it("old refresh token rejected", async () => {
+  it("old token retried within grace -> new pair (lost response)", async () => {
+    const d = await redeemNewDevice();
+    expect((await refresh({ refreshToken: d.refreshToken })).status).toBe(200); // response "lost"
+    const retry = await refresh({ refreshToken: d.refreshToken });
+    expect(retry.status).toBe(200);
+    const pair = await retry.json<{ refreshToken: string }>();
+    expect((await refresh({ refreshToken: pair.refreshToken })).status).toBe(200);
+  });
+
+  it("old token reused after grace -> 401 and device revoked", async () => {
     const d = await redeemNewDevice();
     const first = await (await refresh({ refreshToken: d.refreshToken })).json<{ refreshToken: string }>();
+    await env.DB.prepare("UPDATE devices SET refreshed_at = ? WHERE id = ?").bind(Date.now() - 120_000, d.deviceId).run();
     const reused = await refresh({ refreshToken: d.refreshToken });
     expect(reused.status).toBe(401);
     expect(await reused.json()).toEqual({ error: "unauthorized" });
-    expect((await refresh({ refreshToken: first.refreshToken })).status).toBe(200);
+    expect((await refresh({ refreshToken: first.refreshToken })).status).toBe(401);
+    const revoked = await env.DB.prepare("SELECT revoked_at FROM devices WHERE id = ?").bind(d.deviceId).first<number>("revoked_at");
+    expect(revoked).toBeGreaterThan(0);
+  });
+
+  it("grace retry does not extend the window", async () => {
+    const d = await redeemNewDevice();
+    await refresh({ refreshToken: d.refreshToken });
+    const t = Date.now() - 50_000;
+    await env.DB.prepare("UPDATE devices SET refreshed_at = ? WHERE id = ?").bind(t, d.deviceId).run();
+    expect((await refresh({ refreshToken: d.refreshToken })).status).toBe(200);
+    const after = await env.DB.prepare("SELECT refreshed_at FROM devices WHERE id = ?").bind(d.deviceId).first<number>("refreshed_at");
+    expect(after).toBe(t);
   });
 
   it("revoked device -> 401", async () => {
@@ -140,5 +162,60 @@ describe("POST /api/auth/refresh", () => {
   it("unknown token -> 401; missing body -> 400", async () => {
     expect((await refresh({ refreshToken: "nope" })).status).toBe(401);
     expect((await refresh({})).status).toBe(400);
+  });
+});
+
+import { app } from "../src/index";
+import { createExecutionContext } from "cloudflare:test";
+
+describe("redeem robustness", () => {
+  it("retry with same keys within 10 min re-issues tokens for the same device", async () => {
+    const token = await insertInvite();
+    const keys = await makeKeys();
+    const first = await (await redeem(await redeemBody(token, keys))).json<{ userId: string; deviceId: string; refreshToken: string }>();
+    const retry = await redeem(await redeemBody(token, keys));
+    expect(retry.status).toBe(201);
+    const again = await retry.json<{ userId: string; deviceId: string; refreshToken: string; accessToken: string }>();
+    expect(again.userId).toBe(first.userId);
+    expect(again.deviceId).toBe(first.deviceId);
+    expect(await count("users")).toBe(1);
+    expect((await refresh({ refreshToken: again.refreshToken })).status).toBe(200);
+  });
+
+  it("retry with different keys -> 410", async () => {
+    const token = await insertInvite();
+    await redeem(await redeemBody(token));
+    expect((await redeem(await redeemBody(token))).status).toBe(410);
+  });
+
+  it("retry after 10 min -> 410", async () => {
+    const token = await insertInvite();
+    const keys = await makeKeys();
+    await redeem(await redeemBody(token, keys));
+    await env.DB.prepare("UPDATE invites SET used_at = ?").bind(Date.now() - 11 * 60_000).run();
+    expect((await redeem(await redeemBody(token, keys))).status).toBe(410);
+  });
+
+  it("missing TOKEN_SECRET -> 500 and invite not used", async () => {
+    const token = await insertInvite();
+    const req = new Request(`${BASE}/api/auth/invite/redeem`, jsonReq("POST", await redeemBody(token)));
+    const res = await app.fetch(req, { ...env, TOKEN_SECRET: "" }, createExecutionContext());
+    expect(res.status).toBe(500);
+    expect(await count("users")).toBe(0);
+    expect((await redeem(await redeemBody(token))).status).toBe(201);
+  });
+});
+
+describe("bootstrap invites after first user", () => {
+  const bootstrap = (name: string) =>
+    SELF.fetch(`${BASE}/api/admin/bootstrap`, jsonReq("POST", { name }, { authorization: "Bearer test-bootstrap-secret" }));
+
+  it("a second unused bootstrap invite is dead once any user exists", async () => {
+    const a = await (await bootstrap("Michael")).json<{ inviteToken: string }>();
+    const b = await (await bootstrap("Michael")).json<{ inviteToken: string }>();
+    expect((await redeem(await redeemBody(b.inviteToken))).status).toBe(201);
+    const late = await redeem(await redeemBody(a.inviteToken));
+    expect(late.status).toBe(410);
+    expect(await count("users")).toBe(1);
   });
 });

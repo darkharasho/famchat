@@ -91,7 +91,9 @@ export async function insertInvite(opts: { admin?: boolean; name?: string; expir
   const token = randomToken();
   const now = Date.now();
   await env.DB.prepare(
-    "INSERT INTO invites (token_hash, name, make_admin, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+    // Like real data: only the very first invite has no creator (a bootstrap invite).
+    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
+     VALUES (?, ?, ?, (SELECT id FROM users ORDER BY created_at LIMIT 1), ?, ?)`,
   )
     .bind(await sha256Hex(token), opts.name ?? "Mom", opts.admin ? 1 : 0, now, opts.expiresAt ?? now + 86_400_000)
     .run();

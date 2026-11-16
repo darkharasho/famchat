@@ -24,8 +24,11 @@ The REST and WebSocket contract between the FamChat client and the Worker at `ht
 
 - **Access token:** HS256 JWT, valid 15 minutes, claims `{sub: userId, dev: deviceId, adm: boolean, exp}`.
   Send it as `Authorization: Bearer <accessToken>`. A revoked device's token stops working immediately.
-- **Refresh token:** an opaque 32-byte value. Each refresh returns a new one, and the old one stops working.
-  Store it in the platform's secure storage.
+- **Refresh token:** an opaque 32-byte value. Each refresh returns a new one. Store it in the platform's secure storage,
+  and make sure only one refresh runs at a time per device.
+  - If a refresh response is lost, the previous token is accepted again for **60 seconds** after the rotation and
+    returns a fresh pair.
+  - Presenting the previous token after that window is treated as theft: the device is revoked and must be set up again.
 
 ## Device certificate
 
@@ -60,11 +63,15 @@ Creates the user and their first device.
 - Body: `{"token", "deviceName" (1–60 chars), "platform" (ios|android|macos|windows|linux|web), "identityPub", "encPub", "signPub", "certSig"}`
 - → `201 {"userId", "deviceId", "isAdmin", "accessToken", "refreshToken"}`
 - Errors: 400 for a bad field or certificate (the invite stays usable), 410 `invite_invalid`
+- Retrying with the same invite **and the same keys** within 10 minutes of a successful redeem returns `201` again,
+  for the same user and device, with new tokens. This covers a lost response.
+- A bootstrap (admin) invite stops working as soon as any user exists.
 
 ### `POST /api/auth/refresh`
 - Body: `{"refreshToken"}`
-- → `200 {"accessToken", "refreshToken"}`. The old refresh token is now invalid.
-- Errors: 400 for a missing token, 401 for an unknown, reused or revoked one
+- → `200 {"accessToken", "refreshToken"}`. The old refresh token keeps working only for the 60-second grace window.
+- Errors: 400 for a missing token, 401 for an unknown or revoked one, or for an old token reused after the window
+  (which also revokes the device)
 
 ### `GET /api/devices`
 - → `200 {"devices": [{"id", "name", "platform", "createdAt", "lastSeen", "current"}]}`: the caller's active devices,

@@ -14,15 +14,18 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
+/** Bootstrap invites (createdBy = null) are only inserted while no user exists, in the same statement. */
 async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
-  await env.DB.prepare(
-    "INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+  const res = await env.DB.prepare(
+    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
+     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users)`,
   )
-    .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt)
+    .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
+  if (res.meta.changes !== 1) throw new ApiError("already_bootstrapped");
   return { inviteToken: token, inviteUrl: `${env.APP_ORIGIN}/join#${token}`, expiresAt };
 }
 
@@ -34,8 +37,6 @@ admin.post("/bootstrap", async (c) => {
     throw new ApiError("unauthorized");
   }
   const inviteName = name((await readJson(c)).name, 40);
-  const anyUser = await c.env.DB.prepare("SELECT 1 FROM users LIMIT 1").first();
-  if (anyUser) throw new ApiError("already_bootstrapped");
   return c.json(await createInvite(c.env, inviteName, true, null), 201);
 });
 

@@ -28,7 +28,7 @@ devices.get("/", async (c) => {
 
 devices.delete("/:id", async (c) => {
   const res = await c.env.DB.prepare(
-    `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, push_token = NULL
+    `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
      WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
   )
     .bind(Date.now(), c.req.param("id"), c.get("userId"))
