@@ -14,7 +14,9 @@ users.use(requireAuth);
 users.get("/", async (c) => {
   const db = c.env.DB;
   const [u, d, r] = await db.batch([
-    db.prepare("SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig FROM users ORDER BY created_at"),
+    db.prepare(
+      "SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig, deleted_at FROM users ORDER BY created_at",
+    ),
     db.prepare(
       "SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices ORDER BY created_at",
     ),
@@ -44,7 +46,7 @@ users.get("/", async (c) => {
   }
   type U = {
     id: string; name: string; is_admin: number; identity_pub: string;
-    admin_by: string | null; admin_signer_pub: string | null; admin_sig: string | null;
+    admin_by: string | null; admin_signer_pub: string | null; admin_sig: string | null; deleted_at: number | null;
   };
   return c.json({
     users: (u.results as U[]).map((x) => ({
@@ -56,6 +58,9 @@ users.get("/", async (c) => {
       adminProof: x.admin_sig ? { byUserId: x.admin_by, signerPub: x.admin_signer_pub, sig: x.admin_sig } : null,
       devices: byUser.get(x.id) ?? [],
       resets: resets.get(x.id) ?? [],
+      // A deleted account stays listed (its devices' certificates and resets still verify), named
+      // "Deleted user" with every device revoked. Clients don't offer it for new chats.
+      deleted: x.deleted_at !== null,
     })),
   });
 });

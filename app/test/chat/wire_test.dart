@@ -78,6 +78,9 @@ void main() {
       expect(u.devices.single.userId, 'U1');
       expect(u.devices.single.revoked, isFalse);
       expect(u.isAdmin, isTrue);
+      expect(u.deleted, isFalse);
+      final gone = UserDto.fromJson({'id': 'U2', 'name': 'Deleted user', 'isAdmin': false, 'identityPub': 'bb', 'devices': [], 'deleted': true});
+      expect(gone.deleted, isTrue);
     });
 
     test('message keeps the envelope map', () {

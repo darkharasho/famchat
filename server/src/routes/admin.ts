@@ -4,6 +4,7 @@ import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
 import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
+import { deleteAccount } from "../lib/delete-account";
 import { resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
@@ -22,14 +23,17 @@ export function inviteUrl(env: Env, token: string): string {
   return `${env.APP_ORIGIN}/join#${token}`;
 }
 
-/** Bootstrap invites (createdBy = null) are only inserted while no user exists, in the same statement. */
+/**
+ * Bootstrap invites (createdBy = null) are only inserted while no user exists (or every user has
+ * deleted their account), in the same statement.
+ */
 async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
   const res = await env.DB.prepare(
     `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
-     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users)`,
+     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL)`,
   )
     .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
@@ -87,7 +91,7 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   if (userId === adminId) throw new ApiError("invalid_request");
 
   const [target, signer] = await Promise.all([
-    db.prepare("SELECT name, identity_pub FROM users WHERE id = ?").bind(userId).first<{ name: string; identity_pub: string }>(),
+    db.prepare("SELECT name, identity_pub FROM users WHERE id = ? AND deleted_at IS NULL").bind(userId).first<{ name: string; identity_pub: string }>(),
     db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
   ]);
   if (!target) throw new ApiError("not_found");
@@ -122,7 +126,9 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   const sig = signature((await readJson(c)).sig);
   const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
   if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
-  const res = await db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+  const res = await db.prepare(
+    "UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL",
+  )
     .bind(by, signer, sig, userId).run();
   if (res.meta.changes !== 1) throw new ApiError("not_found");
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
@@ -150,5 +156,18 @@ admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
     throw e;
   }
   await logEvent(db, { kind: "recovery_key_set", userId, actorId: userId });
+  return c.body(null, 204);
+});
+
+/**
+ * Removes another member from the family: deletes their account exactly as DELETE /me does
+ * (docs/protocol.md "Deleting an account"), for a member who asked to be removed or who is gone.
+ * The caller is an admin, so the family keeps one. Yourself: use DELETE /me.
+ */
+admin.delete("/users/:id", requireAuth, requireAdmin, async (c) => {
+  const userId = c.req.param("id");
+  const adminId = c.get("userId");
+  if (userId === adminId) throw new ApiError("invalid_request");
+  await deleteAccount(c.env, userId, adminId);
   return c.body(null, 204);
 });

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete your FamChat account</title>
+  <style>
+    body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #1f2328; }
+    h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+    @media (prefers-color-scheme: dark) { body { background: #111418; color: #e6e8eb; } a { color: #8ab4f8; } }
+  </style>
+</head>
+<body>
+<h1>Delete your FamChat account</h1>
+<p>Last updated: November 16, 2026</p>
+
+<p>FamChat is a private, invite-only messenger for one family. You can delete your FamChat account
+at any time, in any of these ways.</p>
+
+<h2>How to delete your account</h2>
+<ol>
+  <li><strong>In the app:</strong> open <strong>Settings</strong>, scroll to the bottom and tap
+  <strong>Delete my account</strong>. Type <strong>DELETE</strong> to confirm. This works on any of
+  your signed-in devices, on every platform.</li>
+  <li><strong>Ask a family admin:</strong> an admin can open <strong>Settings → Family
+  members</strong>, choose you and tap <strong>Remove from family</strong>. This deletes your account
+  exactly as above.</li>
+  <li><strong>If you've lost all your devices</strong> and can't reach an admin, request deletion at
+  <a href="https://github.com/darkharasho/famchat/issues">github.com/darkharasho/famchat/issues</a>.
+  Don't include personal information in the issue: just ask for an account deletion, and we'll reply
+  there to arrange confirming who you are privately before deleting the account.</li>
+</ol>
+<p>If you're your family's only admin and others are still in the family, make someone else an admin
+first (Settings → Family members → Make admin), so the family isn't left without one.</p>
+
+<h2>What is deleted</h2>
+<p>Deletion happens immediately, as soon as you confirm (or the admin removes you):</p>
+<ul>
+  <li><strong>Your account and name.</strong> Your name is replaced with "Deleted user", and your
+  admin role and admin recovery code are removed. Your account can't be restored or signed in to.</li>
+  <li><strong>Your devices.</strong> Every device is signed out; its device name, sign-in tokens and
+  push notification token are deleted. Pending sign-in links and invites you created stop working.</li>
+  <li><strong>Your chats.</strong> You leave every chat, and the remaining members' apps switch to new
+  encryption keys that you don't have.</li>
+  <li><strong>Everything you sent:</strong> the encrypted messages, reactions, photos and voice messages
+  you sent are deleted from the FamChat server and its storage.</li>
+  <li><strong>On your devices:</strong> the app deletes its keys, messages and cached media at once on
+  the device you deleted from, and on your other devices as soon as they're next online.</li>
+</ul>
+
+<h2>What is kept</h2>
+<ul>
+  <li><strong>Copies on other family members' devices.</strong> Messages are end-to-end encrypted, so
+  the server can't reach copies other members' apps already downloaded. They stay on those devices
+  until deleted there.</li>
+  <li><strong>Messages others sent</strong> in chats you were in stay with them.</li>
+  <li><strong>An anonymous placeholder:</strong> a "Deleted user" entry with a random account ID, and
+  your public encryption keys and those of your old devices (no device names), so other members' apps
+  can still check the signatures on messages they already have. Public keys can't be used to read
+  anything.</li>
+  <li><strong>A log entry</strong> recording that the account was deleted, when, and whether you or an
+  admin did it (by account ID).</li>
+  <li><strong>Database backups:</strong> the server's database provider (Cloudflare) keeps a
+  point-in-time history of the database for up to 30 days for disaster recovery. After that, deleted
+  data is gone from it too. Deleted photos and voice messages aren't kept in any backup.</li>
+</ul>
+
+<p>See the <a href="privacy.html">privacy policy</a> for everything FamChat stores.</p>
+</body>
+</html>

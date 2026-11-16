@@ -24,6 +24,7 @@ class _User {
   SimpleKeyPair identity;
   Uint8List identityPub;
   bool isAdmin = false;
+  bool deleted = false;
   AdminProofDto? adminProof;
   final resets = <_Reset>[];
 }
@@ -139,6 +140,9 @@ class FakeChatBackend {
   int now() => _clock += 10;
 
   String _id(String p) => '01J$p${(_ids++).toString().padLeft(22, '0')}';
+
+  /// Marks [userId]'s account deleted in the directory (docs/protocol.md "Deleting an account").
+  void markDeleted(String userId) => _users[userId]!.deleted = true;
 
   Future<TestDevice> addUser(String name) async {
     final identity = await newIdentityKey();
@@ -500,6 +504,7 @@ class FakeChatApi implements ChatApi {
             isAdmin: u.isAdmin,
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.adminProof,
+            deleted: u.deleted,
             identityPub: b64url(u.identityPub),
             devices: [
               for (final d in b._devices.values.where((d) => d.userId == u.id))

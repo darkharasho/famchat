@@ -2007,6 +2007,20 @@ class $LocalUsersTable extends LocalUsers
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _deletedMeta = const VerificationMeta(
+    'deleted',
+  );
+  @override
+  late final GeneratedColumn<bool> deleted = GeneratedColumn<bool>(
+    'deleted',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("deleted" IN (0, 1))',
+    ),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2016,6 +2030,7 @@ class $LocalUsersTable extends LocalUsers
     trustedIdentityPub,
     knownIdentityPubs,
     pinnedAdmin,
+    deleted,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2090,6 +2105,12 @@ class $LocalUsersTable extends LocalUsers
         ),
       );
     }
+    if (data.containsKey('deleted')) {
+      context.handle(
+        _deletedMeta,
+        deleted.isAcceptableOrUnknown(data['deleted']!, _deletedMeta),
+      );
+    }
     return context;
   }
 
@@ -2127,6 +2148,10 @@ class $LocalUsersTable extends LocalUsers
         DriftSqlType.bool,
         data['${effectivePrefix}pinned_admin'],
       )!,
+      deleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}deleted'],
+      ),
     );
   }
 
@@ -2155,6 +2180,10 @@ class UserRow extends DataClass implements Insertable<UserRow> {
   /// pairing handover), or promoted by an admin it trusts (lib/chat/resets.dart). The server's
   /// [isAdmin] alone doesn't make anyone's reset count.
   final bool pinnedAdmin;
+
+  /// The account was deleted (docs/protocol.md "Deleting an account"): kept so old messages and
+  /// certificates still resolve, but not offered for new chats. Null means not deleted.
+  final bool? deleted;
   const UserRow({
     required this.id,
     required this.name,
@@ -2163,6 +2192,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     required this.trustedIdentityPub,
     required this.knownIdentityPubs,
     required this.pinnedAdmin,
+    this.deleted,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2174,6 +2204,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     map['trusted_identity_pub'] = Variable<String>(trustedIdentityPub);
     map['known_identity_pubs'] = Variable<String>(knownIdentityPubs);
     map['pinned_admin'] = Variable<bool>(pinnedAdmin);
+    if (!nullToAbsent || deleted != null) {
+      map['deleted'] = Variable<bool>(deleted);
+    }
     return map;
   }
 
@@ -2186,6 +2219,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       trustedIdentityPub: Value(trustedIdentityPub),
       knownIdentityPubs: Value(knownIdentityPubs),
       pinnedAdmin: Value(pinnedAdmin),
+      deleted: deleted == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deleted),
     );
   }
 
@@ -2204,6 +2240,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       ),
       knownIdentityPubs: serializer.fromJson<String>(json['knownIdentityPubs']),
       pinnedAdmin: serializer.fromJson<bool>(json['pinnedAdmin']),
+      deleted: serializer.fromJson<bool?>(json['deleted']),
     );
   }
   @override
@@ -2217,6 +2254,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       'trustedIdentityPub': serializer.toJson<String>(trustedIdentityPub),
       'knownIdentityPubs': serializer.toJson<String>(knownIdentityPubs),
       'pinnedAdmin': serializer.toJson<bool>(pinnedAdmin),
+      'deleted': serializer.toJson<bool?>(deleted),
     };
   }
 
@@ -2228,6 +2266,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     String? trustedIdentityPub,
     String? knownIdentityPubs,
     bool? pinnedAdmin,
+    Value<bool?> deleted = const Value.absent(),
   }) => UserRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -2236,6 +2275,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
     knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
     pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
+    deleted: deleted.present ? deleted.value : this.deleted,
   );
   UserRow copyWithCompanion(LocalUsersCompanion data) {
     return UserRow(
@@ -2254,6 +2294,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       pinnedAdmin: data.pinnedAdmin.present
           ? data.pinnedAdmin.value
           : this.pinnedAdmin,
+      deleted: data.deleted.present ? data.deleted.value : this.deleted,
     );
   }
 
@@ -2266,7 +2307,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ..write('identityPub: $identityPub, ')
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
           ..write('knownIdentityPubs: $knownIdentityPubs, ')
-          ..write('pinnedAdmin: $pinnedAdmin')
+          ..write('pinnedAdmin: $pinnedAdmin, ')
+          ..write('deleted: $deleted')
           ..write(')'))
         .toString();
   }
@@ -2280,6 +2322,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     trustedIdentityPub,
     knownIdentityPubs,
     pinnedAdmin,
+    deleted,
   );
   @override
   bool operator ==(Object other) =>
@@ -2291,7 +2334,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           other.identityPub == this.identityPub &&
           other.trustedIdentityPub == this.trustedIdentityPub &&
           other.knownIdentityPubs == this.knownIdentityPubs &&
-          other.pinnedAdmin == this.pinnedAdmin);
+          other.pinnedAdmin == this.pinnedAdmin &&
+          other.deleted == this.deleted);
 }
 
 class LocalUsersCompanion extends UpdateCompanion<UserRow> {
@@ -2302,6 +2346,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
   final Value<String> trustedIdentityPub;
   final Value<String> knownIdentityPubs;
   final Value<bool> pinnedAdmin;
+  final Value<bool?> deleted;
   final Value<int> rowid;
   const LocalUsersCompanion({
     this.id = const Value.absent(),
@@ -2311,6 +2356,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.trustedIdentityPub = const Value.absent(),
     this.knownIdentityPubs = const Value.absent(),
     this.pinnedAdmin = const Value.absent(),
+    this.deleted = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalUsersCompanion.insert({
@@ -2321,6 +2367,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     required String trustedIdentityPub,
     this.knownIdentityPubs = const Value.absent(),
     this.pinnedAdmin = const Value.absent(),
+    this.deleted = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2335,6 +2382,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Expression<String>? trustedIdentityPub,
     Expression<String>? knownIdentityPubs,
     Expression<bool>? pinnedAdmin,
+    Expression<bool>? deleted,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2346,6 +2394,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
         'trusted_identity_pub': trustedIdentityPub,
       if (knownIdentityPubs != null) 'known_identity_pubs': knownIdentityPubs,
       if (pinnedAdmin != null) 'pinned_admin': pinnedAdmin,
+      if (deleted != null) 'deleted': deleted,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2358,6 +2407,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Value<String>? trustedIdentityPub,
     Value<String>? knownIdentityPubs,
     Value<bool>? pinnedAdmin,
+    Value<bool?>? deleted,
     Value<int>? rowid,
   }) {
     return LocalUsersCompanion(
@@ -2368,6 +2418,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       trustedIdentityPub: trustedIdentityPub ?? this.trustedIdentityPub,
       knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
       pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
+      deleted: deleted ?? this.deleted,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2396,6 +2447,9 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     if (pinnedAdmin.present) {
       map['pinned_admin'] = Variable<bool>(pinnedAdmin.value);
     }
+    if (deleted.present) {
+      map['deleted'] = Variable<bool>(deleted.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2412,6 +2466,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
           ..write('knownIdentityPubs: $knownIdentityPubs, ')
           ..write('pinnedAdmin: $pinnedAdmin, ')
+          ..write('deleted: $deleted, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4653,6 +4708,7 @@ typedef $$LocalUsersTableCreateCompanionBuilder = LocalUsersCompanion Function({
   required String trustedIdentityPub,
   Value<String> knownIdentityPubs,
   Value<bool> pinnedAdmin,
+  Value<bool?> deleted,
   Value<int> rowid,
 });
 typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
@@ -4663,6 +4719,7 @@ typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
   Value<String> trustedIdentityPub,
   Value<String> knownIdentityPubs,
   Value<bool> pinnedAdmin,
+  Value<bool?> deleted,
   Value<int> rowid,
 });
 
@@ -4707,6 +4764,11 @@ class $$LocalUsersTableFilterComposer
 
   ColumnFilters<bool> get pinnedAdmin => $composableBuilder(
     column: $table.pinnedAdmin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4754,6 +4816,11 @@ class $$LocalUsersTableOrderingComposer
     column: $table.pinnedAdmin,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalUsersTableAnnotationComposer
@@ -4793,6 +4860,9 @@ class $$LocalUsersTableAnnotationComposer
     column: $table.pinnedAdmin,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get deleted =>
+      $composableBuilder(column: $table.deleted, builder: (column) => column);
 }
 
 class $$LocalUsersTableTableManager
@@ -4830,6 +4900,7 @@ class $$LocalUsersTableTableManager
                 Value<String> trustedIdentityPub = const Value.absent(),
                 Value<String> knownIdentityPubs = const Value.absent(),
                 Value<bool> pinnedAdmin = const Value.absent(),
+                Value<bool?> deleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion(
                 id: id,
@@ -4839,6 +4910,7 @@ class $$LocalUsersTableTableManager
                 trustedIdentityPub: trustedIdentityPub,
                 knownIdentityPubs: knownIdentityPubs,
                 pinnedAdmin: pinnedAdmin,
+                deleted: deleted,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4850,6 +4922,7 @@ class $$LocalUsersTableTableManager
                 required String trustedIdentityPub,
                 Value<String> knownIdentityPubs = const Value.absent(),
                 Value<bool> pinnedAdmin = const Value.absent(),
+                Value<bool?> deleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion.insert(
                 id: id,
@@ -4859,6 +4932,7 @@ class $$LocalUsersTableTableManager
                 trustedIdentityPub: trustedIdentityPub,
                 knownIdentityPubs: knownIdentityPubs,
                 pinnedAdmin: pinnedAdmin,
+                deleted: deleted,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

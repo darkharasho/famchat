@@ -1,5 +1,5 @@
-// Admin: the family. Reset someone who lost every device, make a second admin, save the admin
-// recovery code, and the links to invites and media storage.
+// Admin: the family. Reset someone who lost every device, make a second admin, remove someone
+// from the family, save the admin recovery code, and the links to invites and media storage.
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -20,7 +20,8 @@ class FamilyScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final family = ref.watch(familyProvider);
+    // Deleted accounts stay in the directory but are no longer family.
+    final family = ref.watch(familyProvider).whenData((all) => [for (final u in all) if (!u.deleted) u]);
     final me = ref.watch(meProvider).value;
     final session = ref.watch(sessionProvider);
     final myId = session is SignedIn ? session.session.userId : null;
@@ -178,10 +179,15 @@ class _UserTile extends ConsumerWidget {
           : PopupMenuButton<String>(
               key: Key('family-menu-${user.id}'),
               tooltip: 'Actions for ${user.name}',
-              onSelected: (v) => v == 'reset' ? _reset(context, ref) : _makeAdmin(context, ref),
+              onSelected: (v) => switch (v) {
+                'reset' => _reset(context, ref),
+                'remove' => _remove(context, ref),
+                _ => _makeAdmin(context, ref),
+              },
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'reset', child: Text('Reset account')),
                 if (!user.isAdmin) const PopupMenuItem(value: 'admin', child: Text('Make admin')),
+                const PopupMenuItem(value: 'remove', child: Text('Remove from family')),
               ],
             ),
     );
@@ -224,6 +230,39 @@ class _UserTile extends ConsumerWidget {
             : apiErrorMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
+    }
+  }
+
+  Future<void> _remove(BuildContext context, WidgetRef ref) async {
+    final name = user.name;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove $name from the family?'),
+        content: Text(
+          "This deletes $name's account: their devices are signed out, they leave every chat, and the "
+          'messages, photos and voice messages they sent are deleted from FamChat. It can\'t be undone. '
+          'To let $name back in later, send a new invite.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('confirm-remove'),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ref.read(apiClientProvider).removeUser(user.id);
+      ref.invalidate(familyProvider);
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name was removed')));
+    } catch (e) {
+      ref.invalidate(familyProvider);
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
     }
   }
 
