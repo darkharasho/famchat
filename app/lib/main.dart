@@ -1,4 +1,3 @@
-import 'package:cryptography_flutter/cryptography_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -6,7 +5,6 @@ import 'router.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterCryptography.enable();
   runApp(const ProviderScope(child: FamChatApp()));
 }
 
