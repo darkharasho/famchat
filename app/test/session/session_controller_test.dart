@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:famchat/api/models.dart';
 import 'package:famchat/crypto/encoding.dart';
+import 'package:famchat/platform_info.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:famchat/session/stored_session.dart';
@@ -69,7 +70,7 @@ void main() {
     }
     final device = server.devices[session.deviceId]!;
     expect(device.name, 'Pixel');
-    expect(device.platform, 'android');
+    expect(device.platform, serverPlatform());
     expect(device.cert['signPub'], b64url(await (await session.deviceKeys()).signPub()));
     expect(device.refresh, session.refreshToken);
     // The access token from the redeem is used without a refresh.
