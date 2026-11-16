@@ -39,10 +39,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
-      - name: Install Linux build deps, libmpv and a null audio sink
+      - name: Install Linux build deps (incl. libsecret for flutter_secure_storage), libmpv and a null audio sink
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev pulseaudio xvfb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev libsecret-1-dev pulseaudio xvfb
           pulseaudio --start --exit-idle-time=-1 || echo 'pulseaudio did not start; audio may have no sink'
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
