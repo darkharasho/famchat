@@ -249,4 +249,28 @@ void main() {
     await tester.pump();
     expect(platform.installed, hasLength(1));
   });
+
+  testWidgets('the web app links to the desktop and phone apps', (tester) async {
+    Uri? opened;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        appDownloadsProvider.overrideWithValue((u) async {
+          opened = u;
+          return true;
+        }),
+      ],
+      child: const MaterialApp(home: Scaffold(body: Column(children: [AppVersionGroup()]))),
+    ));
+    expect(find.text('Get the apps'), findsOneWidget);
+    await tester.tap(find.text('Get the apps'));
+    await tester.pump();
+    expect(opened?.path, '/download.html');
+  });
+
+  testWidgets('installed apps show no download link', (tester) async {
+    await tester.pumpWidget(const ProviderScope(
+      child: MaterialApp(home: Scaffold(body: Column(children: [AppVersionGroup()]))),
+    ));
+    expect(find.text('Get the apps'), findsNothing);
+  });
 }
