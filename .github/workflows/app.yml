@@ -166,8 +166,11 @@ jobs:
           arch: x86_64
           target: google_apis
           working-directory: app
-          # The emulator reaches the host's echo server at 10.0.2.2.
-          script: bash -c "set -o pipefail; flutter test integration_test --dart-define=ECHO_URL=ws://10.0.2.2:8787/echo 2>&1 | tee spikes.log"
+          # The emulator reaches the host's echo server at 10.0.2.2. Profile mode (AOT) because a
+          # debug (JIT) build on the CI emulator ran 100 envelopes in about 65 s, which isn't
+          # representative of the release builds users run; the same Dart code takes under 1 s on
+          # every other target.
+          script: bash -c "set -o pipefail; flutter drive --profile --driver=test_driver/integration_test.dart --target=integration_test/spikes_test.dart --dart-define=ECHO_URL=ws://10.0.2.2:8787/echo 2>&1 | tee spikes.log"
       - name: Spike summary
         if: always()
         run: grep -h '^SPIKE ' spikes.log >> "$GITHUB_STEP_SUMMARY" || true
