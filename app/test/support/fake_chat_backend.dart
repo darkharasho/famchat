@@ -520,6 +520,9 @@ class FakeHubLink implements HubLink {
   /// The hub stores messages from this device but doesn't fan them out (to create gaps elsewhere).
   bool holdFanOut = false;
 
+  /// Event types this device never receives (to leave its local state stale on purpose).
+  final dropEventTypes = <String>{};
+
   /// Frames this device sent, in order.
   final sent = <Map<String, Object?>>[];
 
@@ -544,7 +547,7 @@ class FakeHubLink implements HubLink {
 
   void _deliver(Map<String, Object?> event) {
     Future(() {
-      if (_connected && !_events.isClosed) _events.add(event);
+      if (_connected && !_events.isClosed && !dropEventTypes.contains(event['type'])) _events.add(event);
     });
   }
 

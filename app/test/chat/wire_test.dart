@@ -143,6 +143,16 @@ void main() {
     expect(newUlid(), isNot(newUlid()));
   });
 
+  test('ulids made in the same millisecond sort in creation order', () {
+    final t = DateTime.fromMillisecondsSinceEpoch(5000);
+    final ids = [for (var i = 0; i < 200; i++) newUlid(t)];
+    expect([...ids]..sort(), ids);
+    expect(ids.toSet(), hasLength(200));
+    // A clock that steps back doesn't break the order either.
+    final back = newUlid(DateTime.fromMillisecondsSinceEpoch(4000));
+    expect(back.compareTo(ids.last), greaterThan(0));
+  });
+
   group('plaintext', () {
     test('text and reaction round-trip', () {
       expect(Plaintext.decode(const TextBody('hi').encode()), isA<TextBody>().having((t) => t.text, 'text', 'hi'));

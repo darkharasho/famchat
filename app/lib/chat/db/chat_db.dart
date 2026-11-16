@@ -238,7 +238,8 @@ class ChatDb extends _$ChatDb {
   Future<MessageRow?> messageById(String id) =>
       (select(localMessages)..where((m) => m.id.equals(id))).getSingleOrNull();
 
-  Future<void> replaceMessage(MessageRow m) => into(localMessages).insertOnConflictUpdate(m);
+  /// Overwrites every column, nulls included.
+  Future<void> replaceMessage(MessageRow m) => into(localMessages).insertOnConflictUpdate(m.toCompanion(false));
 
   Future<void> ackMessage(String id, {required int seq, required int createdAt}) =>
       (update(localMessages)..where((m) => m.id.equals(id))).write(
@@ -248,10 +249,10 @@ class ChatDb extends _$ChatDb {
   Future<void> setMessageState(String id, String state) =>
       (update(localMessages)..where((m) => m.id.equals(id))).write(LocalMessagesCompanion(state: Value(state)));
 
-  /// This device's unsent messages, oldest first.
+  /// This device's unsent messages in creation order (ids are monotonic ULIDs).
   Future<List<MessageRow>> pendingOutbox(String deviceId) => (select(localMessages)
         ..where((m) => m.senderDeviceId.equals(deviceId) & m.state.equals('pending'))
-        ..orderBy([(m) => OrderingTerm(expression: m.createdAt), (m) => OrderingTerm(expression: m.id)]))
+        ..orderBy([(m) => OrderingTerm(expression: m.id)]))
       .get();
 
   Future<List<MessageRow>> undecryptable() =>
