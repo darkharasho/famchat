@@ -349,13 +349,16 @@ class ChatSync {
       case 'device':
         // A device was added (pairing) or revoked: refresh who gets wraps. A new one gets the keys
         // this device holds now, instead of when some member next reconnects.
-        await directory.refresh();
-        if (e['revoked'] != true) {
-          try {
-            await keys.repairMissing();
-          } on ApiException {
-            // Membership changed meanwhile; the next sync repairs.
-          }
+        final acked = await directory.refresh();
+        if (acked.isNotEmpty) await _retryUndecryptable();
+        if (e['revoked'] != true || acked.isNotEmpty) await _repair();
+      case 'reset':
+        // An account was reset (or the reset was claimed): a verified one is trusted without the
+        // manual banner, and the user's new device gets the history from this one.
+        final acked = await directory.refresh();
+        if (acked.isNotEmpty) {
+          await _retryUndecryptable();
+          await _repair();
         }
       case 'keys':
         await keys.fetch(chatId: e['chatId'] as String?);
@@ -372,6 +375,14 @@ class ChatSync {
       case 'presence':
         final u = e['userId'] as String;
         _setOnline(e['online'] == true ? {..._online, u} : ({..._online}..remove(u)));
+    }
+  }
+
+  Future<void> _repair() async {
+    try {
+      await keys.repairMissing();
+    } on ApiException {
+      // Membership changed meanwhile; the next sync repairs.
     }
   }
 

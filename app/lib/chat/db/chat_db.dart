@@ -1,5 +1,7 @@
 // The device's local chat store (drift): the UI reads only from here. Plaintext of decrypted messages
 // and chat keys live here; the database belongs to one signed-in device (see [ChatDb.bindDevice]).
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 
@@ -119,6 +121,25 @@ class LocalDevices extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Verified account resets this device saw happen (lib/chat/resets.dart "witnessed"): each shows a
+/// banner in every chat shared with the reset user until dismissed there.
+@DataClassName('ResetRow')
+class LocalResets extends Table {
+  TextColumn get id => text()();
+  TextColumn get userId => text()();
+  TextColumn get signerUserId => text()();
+
+  /// `admin` or `recovery`.
+  TextColumn get signerKind => text()();
+  IntColumn get createdAt => integer()();
+
+  /// JSON list of chat ids where the banner was dismissed.
+  TextColumn get dismissedChats => text().withDefault(const Constant('[]'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DataClassName('MetaRow')
 class Meta extends Table {
   TextColumn get key => text()();
@@ -140,12 +161,19 @@ class ChatListItem {
   int get activity => [chat.createdAt, chat.lastMessageAt ?? 0, last?.createdAt ?? 0].reduce((a, b) => a > b ? a : b);
 }
 
-@DriftDatabase(tables: [LocalChats, LocalMembers, LocalMessages, LocalKeys, LocalUsers, LocalDevices, Meta])
+@DriftDatabase(tables: [LocalChats, LocalMembers, LocalMessages, LocalKeys, LocalUsers, LocalDevices, LocalResets, Meta])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          if (from < 2) await m.createTable(localResets);
+        },
+      );
 
   // --- device binding ---
 
@@ -371,6 +399,52 @@ class ChatDb extends _$ChatDb {
       (select(localDevices)..where((d) => d.userId.isIn(userIds))).get();
 
   Future<void> putDevice(DeviceRow d) => into(localDevices).insertOnConflictUpdate(d);
+
+  // --- reset banners ---
+
+  /// Records a witnessed reset once (a later call keeps the dismissals).
+  Future<void> recordReset({
+    required String id,
+    required String userId,
+    required String signerUserId,
+    required String signerKind,
+    required int createdAt,
+  }) =>
+      into(localResets).insert(
+        LocalResetsCompanion.insert(
+          id: id,
+          userId: userId,
+          signerUserId: signerUserId,
+          signerKind: signerKind,
+          createdAt: createdAt,
+        ),
+        mode: InsertMode.insertOrIgnore,
+      );
+
+  Future<List<ResetRow>> allResets() => select(localResets).get();
+
+  /// Resets of [userIds] whose banner wasn't dismissed in [chatId], oldest first.
+  Stream<List<ResetRow>> watchResetBanners(String chatId, Iterable<String> userIds) => (select(localResets)
+        ..where((r) => r.userId.isIn(userIds))
+        ..orderBy([(r) => OrderingTerm(expression: r.createdAt)]))
+      .watch()
+      .map((rows) => [for (final r in rows) if (!_ids(r.dismissedChats).contains(chatId)) r]);
+
+  Future<void> dismissResetBanner(String resetId, String chatId) => transaction(() async {
+        final row = await (select(localResets)..where((r) => r.id.equals(resetId))).getSingleOrNull();
+        if (row == null) return;
+        final ids = {..._ids(row.dismissedChats), chatId};
+        await (update(localResets)..where((r) => r.id.equals(resetId)))
+            .write(LocalResetsCompanion(dismissedChats: Value(jsonEncode(ids.toList()))));
+      });
+
+  static Set<String> _ids(String json) {
+    try {
+      return {...(jsonDecode(json) as List).cast<String>()};
+    } on FormatException {
+      return {};
+    }
+  }
 }
 
 /// The app's database file (IndexedDB/OPFS via wasm on the web).

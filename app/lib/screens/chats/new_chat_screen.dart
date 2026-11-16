@@ -31,7 +31,7 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
   void initState() {
     super.initState();
     final sync = ref.read(chatSyncProvider);
-    if (sync != null) unawaited(sync.directory.refresh().catchError((_) {}));
+    if (sync != null) unawaited(sync.directory.refresh().then((_) {}, onError: (Object _) {}));
   }
 
   @override

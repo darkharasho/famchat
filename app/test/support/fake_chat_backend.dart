@@ -14,6 +14,7 @@ import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/device_cert.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/crypto/reset.dart';
 import 'package:famchat/crypto/wrap.dart';
 import 'package:famchat/media/media_api.dart';
 
@@ -22,6 +23,33 @@ class _User {
   final String id, name;
   SimpleKeyPair identity;
   Uint8List identityPub;
+  bool isAdmin = false;
+  final resets = <_Reset>[];
+}
+
+/// A signed reset (server/src/routes/admin.ts, auth.ts redeem).
+class _Reset {
+  _Reset(this.id, this.signerUserId, this.signerPub, this.oldIdentityPub, this.claim, this.claimPub, this.createdAt, this.sig);
+  final String id, signerUserId;
+  final Uint8List signerPub, oldIdentityPub, claimPub, sig;
+  final SimpleKeyPair claim;
+  final int createdAt;
+  Uint8List? newIdentityPub, claimSig;
+
+  ResetDto dto() => ResetDto(
+        id: id,
+        signerUserId: signerUserId,
+        signerKind: 'admin',
+        signerPub: b64url(signerPub),
+        recoverySig: null,
+        oldIdentityPub: b64url(oldIdentityPub),
+        claimPub: b64url(claimPub),
+        createdAt: createdAt,
+        sig: b64url(sig),
+        newIdentityPub: newIdentityPub == null ? null : b64url(newIdentityPub!),
+        claimSig: claimSig == null ? null : b64url(claimSig!),
+        completedAt: newIdentityPub == null ? null : createdAt + 1,
+      );
 }
 
 class _Device {
@@ -163,6 +191,47 @@ class FakeChatBackend {
       d.revoked = true;
     }
     return addDevice(userId);
+  }
+
+  void setAdmin(String userId, [bool admin = true]) => _users[userId]!.isAdmin = admin;
+
+  /// `POST /admin/users/:id/reset` signed by [by]'s identity key: [userId]'s devices are revoked
+  /// (chats rotate), everyone gets a `reset` event. Returns the reset id.
+  Future<String> adminReset(String userId, {required String by}) async {
+    final u = _users[userId]!, admin = _users[by]!;
+    final claim = await newIdentityKey();
+    final id = _id('R');
+    final at = now();
+    final st = ResetStatement(
+      resetId: id,
+      userId: userId,
+      signerUserId: by,
+      signerKind: 'admin',
+      oldIdentityPub: u.identityPub,
+      claimPub: await publicKeyOf(claim),
+      createdAt: at,
+    );
+    u.resets.add(_Reset(id, by, admin.identityPub, u.identityPub, claim, st.claimPub, at, await signReset(st, admin.identity)));
+    for (final d in _devices.values.where((d) => d.userId == userId && !d.revoked).toList()) {
+      revoke(d.id);
+    }
+    _notify(_users.keys, {'type': 'reset', 'userId': userId, 'resetId': id});
+    return id;
+  }
+
+  /// Redeeming the reset link: a new identity key (claimed with the link's claim key, or with some
+  /// other key if [badClaim]) and a first device; `device` and `reset` events.
+  Future<TestDevice> claimReset(String userId, String resetId, {bool badClaim = false}) async {
+    final u = _users[userId]!;
+    final r = u.resets.firstWhere((r) => r.id == resetId);
+    u.identity = await newIdentityKey();
+    u.identityPub = await publicKeyOf(u.identity);
+    r.newIdentityPub = u.identityPub;
+    r.claimSig = await signResetClaim(badClaim ? await newIdentityKey() : r.claim, resetId: resetId, newIdentityPub: u.identityPub);
+    final d = await addDevice(userId);
+    _notify(_sharing(userId), {'type': 'device', 'userId': userId, 'deviceId': d.deviceId});
+    _notify(_users.keys, {'type': 'reset', 'userId': userId, 'resetId': resetId});
+    return d;
   }
 
   /// Gives [deviceId] a certificate signed by some other identity (a server-forged device).
@@ -414,7 +483,8 @@ class FakeChatApi implements ChatApi {
           UserDto(
             id: u.id,
             name: u.name,
-            isAdmin: false,
+            isAdmin: u.isAdmin,
+            resets: [for (final r in u.resets) r.dto()],
             identityPub: b64url(u.identityPub),
             devices: [
               for (final d in b._devices.values.where((d) => d.userId == u.id))

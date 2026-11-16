@@ -44,11 +44,21 @@ class DeviceDto {
 }
 
 class UserDto {
-  const UserDto({required this.id, required this.name, required this.isAdmin, required this.identityPub, required this.devices});
+  const UserDto({
+    required this.id,
+    required this.name,
+    required this.isAdmin,
+    required this.identityPub,
+    required this.devices,
+    this.resets = const [],
+  });
 
   final String id, name, identityPub;
   final bool isAdmin;
   final List<DeviceDto> devices;
+
+  /// The user's signed account resets, oldest first: their identity key history.
+  final List<ResetDto> resets;
 
   factory UserDto.fromJson(Map<String, Object?> j) {
     final id = _f<String>(j, 'id');
@@ -58,8 +68,48 @@ class UserDto {
       isAdmin: _f(j, 'isAdmin'),
       identityPub: _f(j, 'identityPub'),
       devices: [for (final d in _list(j, 'devices')) DeviceDto.fromJson(id, d)],
+      resets: j['resets'] == null ? const [] : [for (final r in _list(j, 'resets')) ResetDto.fromJson(r)],
     );
   }
+}
+
+/// A signed account reset as the directory lists it (docs/protocol.md "Account resets"). Unverified:
+/// lib/chat/resets.dart decides what it proves.
+class ResetDto {
+  const ResetDto({
+    required this.id,
+    required this.signerUserId,
+    required this.signerKind,
+    required this.signerPub,
+    required this.recoverySig,
+    required this.oldIdentityPub,
+    required this.claimPub,
+    required this.createdAt,
+    required this.sig,
+    required this.newIdentityPub,
+    required this.claimSig,
+    required this.completedAt,
+  });
+
+  final String id, signerUserId, signerKind, signerPub, oldIdentityPub, claimPub, sig;
+  final String? recoverySig, newIdentityPub, claimSig;
+  final int createdAt;
+  final int? completedAt;
+
+  factory ResetDto.fromJson(Map<String, Object?> j) => ResetDto(
+        id: _f(j, 'id'),
+        signerUserId: _f(j, 'signerUserId'),
+        signerKind: _f(j, 'signerKind'),
+        signerPub: _f(j, 'signerPub'),
+        recoverySig: _f<String?>(j, 'recoverySig'),
+        oldIdentityPub: _f(j, 'oldIdentityPub'),
+        claimPub: _f(j, 'claimPub'),
+        createdAt: _f(j, 'createdAt'),
+        sig: _f(j, 'sig'),
+        newIdentityPub: _f<String?>(j, 'newIdentityPub'),
+        claimSig: _f<String?>(j, 'claimSig'),
+        completedAt: _f<int?>(j, 'completedAt'),
+      );
 }
 
 class MemberDto {
