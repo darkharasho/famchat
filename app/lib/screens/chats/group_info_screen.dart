@@ -5,7 +5,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../sign_out.dart' show apiErrorMessage;
-import 'chat_list.dart' show ChatAvatar;
+import '../../theme/tokens.dart';
+import '../../widgets/common.dart';
+import '../../widgets/person_avatar.dart';
 
 /// Members, add people, leave, and (for the creator) remove.
 class GroupInfoScreen extends ConsumerStatefulWidget {
@@ -67,65 +69,84 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     final creator = chat.createdBy == me;
     final title = chatTitle(chat, members, users, me);
     final sorted = [...members]..sort((a, b) => (users[a.userId]?.name ?? '').compareTo(users[b.userId]?.name ?? ''));
+    final s = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: Text(group ? 'Group info' : 'Chat info'),
         leading: BackButton(onPressed: () => context.go('/chats/$chatId')),
       ),
-      body: ListView(children: [
-        const SizedBox(height: 16),
-        Center(child: ChatAvatar(label: title, group: group, radius: 36)),
-        const SizedBox(height: 8),
-        Center(child: Text(title, style: theme.textTheme.titleLarge)),
-        const SizedBox(height: 16),
-        ListTile(
-          leading: const Icon(Icons.person_add_alt_outlined),
-          title: const Text('Add people'),
-          subtitle: group ? null : const Text('Starts a new group; this chat stays between you two'),
-          enabled: !_busy,
-          onTap: () => group
-              ? context.go('/chats/$chatId/add')
-              : context.go('/new?with=${otherMember(chat, members, me) ?? ''}'),
+      body: ListView(padding: EdgeInsets.only(bottom: Space.xxl + MediaQuery.paddingOf(context).bottom), children: [
+        ContentWidth(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const SizedBox(height: Space.lg),
+            Center(
+              child: PersonAvatar(
+                label: title,
+                colorKey: group ? chat.id : (otherMember(chat, members, me) ?? chat.id),
+                group: group,
+                radius: 44,
+              ),
+            ),
+            const SizedBox(height: Space.md),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+              child: Text(title, textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
+            ),
+            const SizedBox(height: Space.xl),
+            SettingsGroup(children: [
+              ListTile(
+                leading: const TileIcon(Icons.person_add_alt_rounded),
+                title: const Text('Add people'),
+                subtitle: group ? null : const Text('Starts a new group; this chat stays between you two'),
+                enabled: !_busy,
+                onTap: () => group
+                    ? context.go('/chats/$chatId/add')
+                    : context.go('/new?with=${otherMember(chat, members, me) ?? ''}'),
+              ),
+            ]),
+            SettingsGroup(title: '${members.length} members', children: [
+              for (final m in sorted)
+                ListTile(
+                  leading: PersonAvatar(
+                    label: users[m.userId]?.name ?? '?',
+                    colorKey: m.userId,
+                    online: online.contains(m.userId),
+                    ringColor: theme.cardTheme.color,
+                  ),
+                  title: Text(m.userId == me ? '${users[m.userId]?.name ?? 'You'} (you)' : users[m.userId]?.name ?? 'Unknown'),
+                  subtitle: m.userId == chat.createdBy ? const Text('Created the group') : null,
+                  trailing: group && creator && m.userId != me
+                      ? IconButton(
+                          tooltip: 'Remove ${users[m.userId]?.name ?? ''}',
+                          icon: const Icon(Icons.person_remove_outlined),
+                          onPressed: _busy || sync == null
+                              ? null
+                              : () async {
+                                  final name = users[m.userId]?.name ?? 'them';
+                                  if (!await _confirm('Remove $name?',
+                                      "$name won't see new messages. The group gets a new key.", 'Remove')) {
+                                    return;
+                                  }
+                                  await _run(() => sync.removeMember(chatId, m.userId));
+                                },
+                        )
+                      : null,
+                ),
+            ]),
+            if (group)
+              SettingsGroup(children: [
+                ListTile(
+                  leading: TileIcon(Icons.logout_rounded, color: s.onErrorContainer, background: s.errorContainer),
+                  title: Text('Leave group', style: TextStyle(color: s.error)),
+                  enabled: !_busy && sync != null,
+                  onTap: () async {
+                    if (!await _confirm('Leave $title?', "You won't get new messages from this group.", 'Leave')) return;
+                    if (await _run(() => sync!.leave(chatId)) && mounted) _goHome();
+                  },
+                ),
+              ]),
+          ]),
         ),
-        const Divider(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text('${members.length} members', style: theme.textTheme.titleSmall),
-        ),
-        for (final m in sorted)
-          ListTile(
-            leading: ChatAvatar(label: users[m.userId]?.name ?? '?', online: online.contains(m.userId)),
-            title: Text(m.userId == me ? '${users[m.userId]?.name ?? 'You'} (you)' : users[m.userId]?.name ?? 'Unknown'),
-            subtitle: m.userId == chat.createdBy ? const Text('Created the group') : null,
-            trailing: group && creator && m.userId != me
-                ? IconButton(
-                    tooltip: 'Remove ${users[m.userId]?.name ?? ''}',
-                    icon: const Icon(Icons.person_remove_outlined),
-                    onPressed: _busy || sync == null
-                        ? null
-                        : () async {
-                            final name = users[m.userId]?.name ?? 'them';
-                            if (!await _confirm('Remove $name?',
-                                "$name won't see new messages. The group gets a new key.", 'Remove')) {
-                              return;
-                            }
-                            await _run(() => sync.removeMember(chatId, m.userId));
-                          },
-                  )
-                : null,
-          ),
-        if (group) ...[
-          const Divider(),
-          ListTile(
-            leading: Icon(Icons.logout, color: theme.colorScheme.error),
-            title: Text('Leave group', style: TextStyle(color: theme.colorScheme.error)),
-            enabled: !_busy && sync != null,
-            onTap: () async {
-              if (!await _confirm('Leave $title?', "You won't get new messages from this group.", 'Leave')) return;
-              if (await _run(() => sync!.leave(chatId)) && mounted) _goHome();
-            },
-          ),
-        ],
       ]),
     );
   }

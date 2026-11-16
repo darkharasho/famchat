@@ -141,7 +141,7 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
       if (scanner != null) ...[
         const SizedBox(height: 16),
         ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(20),
           child: SizedBox(
             key: ValueKey('scanner-$_scanGeneration'),
             height: 280,
@@ -156,10 +156,10 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
         enabled: !_busy,
         autocorrect: false,
         textCapitalization: TextCapitalization.characters,
+        style: const TextStyle(fontSize: 18, letterSpacing: 1.5, fontFeatures: [FontFeature.tabularFigures()]),
         decoration: const InputDecoration(
           labelText: 'Code',
           hintText: 'XXXX-XXXX-XXXX-XXXX',
-          border: OutlineInputBorder(),
         ),
         onSubmitted: _lookup,
       ),
@@ -177,7 +177,7 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
   List<Widget> _confirm(ThemeData theme) {
     final p = _pending!;
     return [
-      Icon(Icons.devices_rounded, size: 48, color: theme.colorScheme.primary),
+      Center(child: _Badge(icon: Icons.devices_rounded)),
       const SizedBox(height: 16),
       Text('Add "${p.deviceName}" (${platformLabel(p.platform)})?',
           textAlign: TextAlign.center, style: theme.textTheme.titleLarge),
@@ -201,11 +201,29 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
   }
 
   List<Widget> _done(ThemeData theme) => [
-        Icon(Icons.check_circle_rounded, size: 48, color: theme.colorScheme.primary),
+        Center(child: _Badge(icon: Icons.check_rounded)),
         const SizedBox(height: 16),
         Text('"${_pending!.deviceName}" was approved. Finish on the new device.',
             textAlign: TextAlign.center, style: theme.textTheme.titleMedium),
         const SizedBox(height: 24),
         FilledButton(onPressed: () => context.go('/devices'), child: const Text('Done')),
       ];
+}
+
+/// A round amber badge with an icon, heading a step.
+class _Badge extends StatelessWidget {
+  const _Badge({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(color: s.secondaryContainer, shape: BoxShape.circle),
+      child: Icon(icon, size: 36, color: s.onSecondaryContainer),
+    );
+  }
 }

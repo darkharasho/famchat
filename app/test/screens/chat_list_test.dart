@@ -80,7 +80,7 @@ void main() {
     setWindow(tester, const Size(1000, 800));
     await seed(tester);
     await pumpChatApp(tester, alice);
-    expect(find.text('Select a chat'), findsOneWidget);
+    expect(find.text('Pick a chat'), findsOneWidget);
     await tester.tap(find.text('Bob'));
     await settle(tester);
     expect(find.byType(ConversationView), findsOneWidget);

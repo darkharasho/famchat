@@ -23,7 +23,7 @@ To turn push on, once:
    opens a PR with the two config files. If the key can't be created automatically it tells you where
    to download one; then `scripts/setup-firebase.sh --key-file <file>`.
 2. Merge that PR, deploy (`scripts/deploy.sh`), and release the apps.
-3. On a phone, allow notifications, then Devices → "Send a test notification".
+3. On a phone, allow notifications, then Settings → Notifications → "Send a test notification".
 
 How it works: `FamilyHub` puts a job on the `famchat-push` Queue for members with no open socket
 (sockets silent for 90 s are dropped first); the Worker's `queue()` handler sends one FCM HTTP v1

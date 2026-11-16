@@ -6,6 +6,9 @@ import '../api/models.dart';
 import '../platform_info.dart';
 import '../session/invite_link.dart';
 import '../session/session_controller.dart';
+import '../dev_tools.dart';
+import '../theme/tokens.dart';
+import '../widgets/onboarding_frame.dart';
 
 /// First launch: redeem an invite link, creating this user's keys and first device.
 class JoinScreen extends ConsumerStatefulWidget {
@@ -76,110 +79,102 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
     final theme = Theme.of(context);
     final session = ref.watch(sessionProvider);
     final notice = session is SignedOut ? session.message : null;
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(Icons.forum_rounded, size: 56, color: theme.colorScheme.primary),
-                  const SizedBox(height: 16),
-                  Text('Join FamChat', textAlign: TextAlign.center, style: theme.textTheme.headlineMedium),
-                  const SizedBox(height: 8),
-                  Text(
-                    _linkToken == null
-                        ? 'Paste the invite link someone in your family sent you.'
-                        : 'Joining with the invite link you opened.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  if (notice != null) ...[
-                    const SizedBox(height: 16),
-                    Card(
-                      color: theme.colorScheme.secondaryContainer,
-                      child: Padding(padding: const EdgeInsets.all(12), child: Text(notice)),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  if (_linkToken == null)
-                    TextField(
-                      key: const Key('invite-field'),
-                      controller: _invite,
-                      enabled: !_busy,
-                      decoration: const InputDecoration(
-                        labelText: 'Invite link',
-                        hintText: 'https://famchat.dev/join#…',
-                        border: OutlineInputBorder(),
-                      ),
-                      autocorrect: false,
-                      onSubmitted: (_) => _join(),
-                    )
-                  else
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _busy ? null : () => setState(() => _linkToken = null),
-                        child: const Text('Use a different link'),
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    key: const Key('device-name-field'),
-                    controller: _deviceName,
-                    enabled: !_busy,
-                    maxLength: 60,
-                    decoration: const InputDecoration(
-                      labelText: 'Name for this device',
-                      helperText: 'So you can tell your devices apart.',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _join(),
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
-                  ],
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    key: const Key('join-button'),
-                    onPressed: _busy ? null : _join,
-                    child: _busy
-                        ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Join'),
-                  ),
-                  const SizedBox(height: 24),
-                  OutlinedButton.icon(
-                    key: const Key('pair-link'),
-                    onPressed: _busy ? null : () => context.go('/pair'),
-                    icon: const Icon(Icons.qr_code_2_rounded),
-                    label: const Text('Sign in with another device'),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Already use FamChat on a phone or computer? Approve this device from there.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    key: const Key('recover-link'),
-                    onPressed: _busy ? null : () => context.go('/recover'),
-                    child: const Text('Recover admin account'),
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () => context.go('/spikes'),
-                    child: const Text('Platform spikes'),
-                  ),
-                ],
+    return OnboardingFrame(
+      title: 'Join FamChat',
+      subtitle: "A private home for your family's messages, photos and voice notes.",
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _linkToken == null
+                ? 'Paste the invite link someone in your family sent you.'
+                : 'Joining with the invite link you opened.',
+            style: theme.textTheme.bodyLarge,
+          ),
+          if (notice != null) ...[
+            const SizedBox(height: Space.lg),
+            Card(
+              color: theme.colorScheme.secondaryContainer,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+              child: Padding(
+                padding: const EdgeInsets.all(Space.lg),
+                child: Text(notice, style: TextStyle(color: theme.colorScheme.onSecondaryContainer)),
               ),
             ),
+          ],
+          const SizedBox(height: Space.xl),
+          if (_linkToken == null)
+            TextField(
+              key: const Key('invite-field'),
+              controller: _invite,
+              enabled: !_busy,
+              decoration: const InputDecoration(
+                labelText: 'Invite link',
+                hintText: 'https://famchat.dev/join#…',
+                prefixIcon: Icon(Icons.link_rounded),
+              ),
+              autocorrect: false,
+              keyboardType: TextInputType.url,
+              onSubmitted: (_) => _join(),
+            )
+          else
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _busy ? null : () => setState(() => _linkToken = null),
+                child: const Text('Use a different link'),
+              ),
+            ),
+          const SizedBox(height: Space.lg),
+          TextField(
+            key: const Key('device-name-field'),
+            controller: _deviceName,
+            enabled: !_busy,
+            maxLength: 60,
+            decoration: const InputDecoration(
+              labelText: 'Name for this device',
+              helperText: 'So you can tell your devices apart.',
+              prefixIcon: Icon(Icons.smartphone_rounded),
+            ),
+            onSubmitted: (_) => _join(),
           ),
-        ),
+          if (_error != null) ...[
+            const SizedBox(height: Space.sm),
+            Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+          ],
+          const SizedBox(height: Space.lg),
+          FilledButton(
+            key: const Key('join-button'),
+            onPressed: _busy ? null : _join,
+            child: _busy
+                ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Join'),
+          ),
+          const OrDivider(),
+          OutlinedButton.icon(
+            key: const Key('pair-link'),
+            onPressed: _busy ? null : () => context.go('/pair'),
+            icon: const Icon(Icons.qr_code_2_rounded),
+            label: const Text('Sign in with another device'),
+          ),
+          const SizedBox(height: Space.sm),
+          Text(
+            'Already use FamChat on a phone or computer? Approve this device from there.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: Space.lg),
+          TextButton(
+            key: const Key('recover-link'),
+            onPressed: _busy ? null : () => context.go('/recover'),
+            child: const Text('Recover admin account'),
+          ),
+          if (ref.watch(developerToolsProvider))
+            TextButton(
+              onPressed: () => context.go('/spikes'),
+              child: const Text('Platform spikes'),
+            ),
+        ],
       ),
     );
   }

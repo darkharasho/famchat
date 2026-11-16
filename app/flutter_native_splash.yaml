@@ -1,0 +1,14 @@
+# Launch screen: the mark on dusk, in light and dark alike (the brand's one fixed moment).
+# Regenerate: dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#2E2550"
+  image: "assets/brand/famchat-glyph.png"
+  android_12:
+    color: "#2E2550"
+    image: "assets/brand/famchat-glyph.png"
+    icon_background_color: "#2E2550"
+  android: true
+  ios: true
+  web: true
+  web_image_mode: center
+  fullscreen: false

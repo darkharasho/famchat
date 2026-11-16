@@ -16,7 +16,7 @@
 # 4. Commits the two config files on a branch "firebase-config", pushes it and opens a PR.
 #
 # Then: merge the PR, deploy (scripts/deploy.sh or the deploy workflow), cut a release for the apps,
-# and check with "Send a test notification" on the Devices screen of a phone that allowed
+# and check with "Send a test notification" in Settings on a phone that allowed
 # notifications. No GitHub secrets are needed: the config files are committed (they aren't secret).
 set -euo pipefail
 
@@ -77,6 +77,6 @@ Done. Next:
   1. Merge the firebase-config PR (CI builds every platform with Firebase on).
   2. Deploy: scripts/deploy.sh (web app + Worker with the push queue consumer).
   3. Release the apps (release workflow) so phones get the Firebase config.
-  4. On a phone: open FamChat, allow notifications, then Devices -> "Send a test notification".
+  4. On a phone: open FamChat, allow notifications, then Settings -> "Send a test notification".
      Or lock the phone and have someone send you a message.
 EOF

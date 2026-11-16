@@ -5,7 +5,7 @@ import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/push/firebase_options.dart';
-import 'package:famchat/screens/devices_screen.dart' show pushTestSummary;
+import 'package:famchat/push/notification_settings.dart' show pushTestSummary;
 import 'package:famchat/push/local_notifier.dart';
 import 'package:famchat/push/notifications.dart';
 import 'package:famchat/push/push_messaging.dart';

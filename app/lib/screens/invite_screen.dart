@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../api/models.dart';
 import '../session/session_controller.dart';
+import '../theme/tokens.dart';
 import 'sign_out.dart';
 
 /// Admin only: create a one-time invite link for a new family member.
@@ -58,7 +59,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
     final created = _created;
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: () => context.go('/')),
+        leading: BackButton(onPressed: () => context.go('/settings')),
         title: const Text('Invite someone'),
       ),
       body: Center(
@@ -74,14 +75,20 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
   }
 
   Widget _form(ThemeData theme) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Text('They get a link that signs them in on their first device.'),
-        const SizedBox(height: 16),
+        Text('Who is joining?', style: theme.textTheme.headlineSmall),
+        const SizedBox(height: Space.sm),
+        Text(
+          'They get a one-time link that signs them in on their first device.',
+          style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: Space.xl),
         TextField(
           key: const Key('invite-name-field'),
           controller: _name,
           enabled: !_busy,
           maxLength: 40,
-          decoration: const InputDecoration(labelText: 'Their name', border: OutlineInputBorder()),
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Their name'),
           onSubmitted: (_) => _create(),
         ),
         if (_error != null) Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
@@ -101,14 +108,17 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
       Text('Invite for $name', style: theme.textTheme.titleLarge),
       const SizedBox(height: 12),
       Card(
-        child: Padding(padding: const EdgeInsets.all(16), child: SelectableText(invite.inviteUrl)),
+        child: Padding(
+          padding: const EdgeInsets.all(Space.lg),
+          child: SelectableText(invite.inviteUrl, style: theme.textTheme.bodyLarge),
+        ),
       ),
       const SizedBox(height: 8),
       Text('Only share this with $name. It works once and expires on $expires.'),
       const SizedBox(height: 16),
       FilledButton.icon(
         key: const Key('copy-invite-button'),
-        icon: const Icon(Icons.copy),
+        icon: const Icon(Icons.copy_rounded),
         label: const Text('Copy link'),
         onPressed: () => _copy(invite.inviteUrl),
       ),
