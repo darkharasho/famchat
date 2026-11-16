@@ -51,6 +51,8 @@ export const BASE = "https://famchat.dev";
 export async function resetDb(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM pair_sessions"),
+    env.DB.prepare("DELETE FROM media"),
+    env.DB.prepare("UPDATE media_usage SET bytes = 0"),
     env.DB.prepare("DELETE FROM ws_tickets"),
     env.DB.prepare("DELETE FROM messages"),
     env.DB.prepare("DELETE FROM chat_key_wraps"),
@@ -61,6 +63,11 @@ export async function resetDb(): Promise<void> {
     env.DB.prepare("DELETE FROM invites"),
     env.DB.prepare("DELETE FROM users"),
   ]);
+  for (;;) {
+    const list = await env.MEDIA.list({ limit: 1000 });
+    if (list.objects.length === 0) break;
+    await env.MEDIA.delete(list.objects.map((o) => o.key));
+  }
 }
 
 /** Inserts a user + device row directly and returns an access token for it. */

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:famchat/api/api_client.dart';
 import 'package:famchat/api/models.dart';
@@ -161,12 +162,61 @@ void main() {
     });
 
     test('unknown kinds keep their whole body for a later version', () {
-      final p = Plaintext.decode(utf8.encode('{"kind":"photo","key":"abc","w":2048}'));
-      expect(p.toJson(), {'kind': 'photo', 'key': 'abc', 'w': 2048});
+      final p = Plaintext.decode(utf8.encode('{"kind":"sticker","key":"abc","w":2048}'));
+      expect(p.toJson(), {'kind': 'sticker', 'key': 'abc', 'w': 2048});
+    });
+
+    PhotoBody photo() => PhotoBody(
+          mediaKey: '01JMEDAA000000000000000000',
+          thumbKey: '01JTHMB0000000000000000000',
+          key: Uint8List.fromList(List.filled(32, 1)),
+          sha256: Uint8List.fromList(List.filled(32, 2)),
+          thumbSha256: Uint8List.fromList(List.filled(32, 3)),
+          width: 2048,
+          height: 1536,
+          bytes: 512000,
+          mime: 'image/jpeg',
+        );
+
+    test('photo round-trips', () {
+      expect(photo().toJson(), {
+        'kind': 'photo',
+        'mediaKey': '01JMEDAA000000000000000000',
+        'thumbKey': '01JTHMB0000000000000000000',
+        'key': b64url(List.filled(32, 1)),
+        'sha256': b64url(List.filled(32, 2)),
+        'thumbSha256': b64url(List.filled(32, 3)),
+        'width': 2048,
+        'height': 1536,
+        'bytes': 512000,
+        'mime': 'image/jpeg',
+      });
+      final p = Plaintext.decode(photo().encode()) as PhotoBody;
+      expect(p.toJson(), photo().toJson());
+      expect(p.key, List.filled(32, 1));
+    });
+
+    test('photo with a short key or bad field is rejected', () {
+      for (final bad in <Map<String, Object?>>[
+        {'key': b64url(List.filled(31, 1))},
+        {'sha256': 'not base64!'},
+        {'thumbSha256': b64url(List.filled(33, 1))},
+        {'width': 0},
+        {'height': '10'},
+        {'bytes': -1},
+        {'mediaKey': ''},
+        {'mediaKey': '..'},
+        {'thumbKey': '01jthmb0000000000000000000'},
+        {'thumbKey': null},
+        {'mime': 7},
+      ]) {
+        final j = {...photo().toJson(), ...bad};
+        expect(() => Plaintext.decode(utf8.encode(jsonEncode(j))), throwsFormatException, reason: '$bad');
+      }
     });
 
     test('unknown kinds are kept, broken bodies throw', () {
-      expect(Plaintext.decode(utf8.encode('{"kind":"photo","x":1}')), isA<UnknownBody>().having((u) => u.kind, 'kind', 'photo'));
+      expect(Plaintext.decode(utf8.encode('{"kind":"sticker","x":1}')), isA<UnknownBody>().having((u) => u.kind, 'kind', 'sticker'));
       expect(() => Plaintext.decode(utf8.encode('nope')), throwsFormatException);
       expect(() => Plaintext.decode(utf8.encode('{"kind":"text"}')), throwsFormatException);
       expect(() => Plaintext.decode(utf8.encode('{"text":"x"}')), throwsFormatException);

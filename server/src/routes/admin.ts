@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 import { ApiError } from "../lib/errors";
+import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
 import { bearer, requireAdmin, requireAuth } from "../middleware/auth";
@@ -43,4 +44,18 @@ admin.post("/bootstrap", async (c) => {
 admin.post("/invites", requireAuth, requireAdmin, async (c) => {
   const inviteName = name((await readJson(c)).name, 40);
   return c.json(await createInvite(c.env, inviteName, false, c.get("userId")), 201);
+});
+
+/** Media storage: live bytes against the cap, and how many objects are live or expired. */
+admin.get("/usage", requireAuth, requireAdmin, async (c) => {
+  const counts = await c.env.DB.prepare(
+    "SELECT COALESCE(SUM(expired_at IS NULL), 0) AS live, COALESCE(SUM(expired_at IS NOT NULL), 0) AS expired FROM media",
+  ).first<{ live: number; expired: number }>();
+  return c.json({
+    usedBytes: await mediaUsage(c.env.DB),
+    capBytes: MEDIA_CAP,
+    evictToBytes: MEDIA_TARGET,
+    files: counts?.live ?? 0,
+    expiredFiles: counts?.expired ?? 0,
+  });
 });

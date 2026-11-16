@@ -18,7 +18,7 @@ void main() {
         if (a != b) expect(b.startsWith(a), isFalse, reason: '$a is a prefix of $b');
       }
     }
-    expect(famchatDomains, containsAll(['famchat-pair-keys-v1', 'famchat-pair-bundle-v1', 'famchat-wrap-v1']));
+    expect(famchatDomains, containsAll(['famchat-pair-keys-v1', 'famchat-pair-bundle-v1', 'famchat-wrap-v1', 'famchat-media-v1']));
   });
 
   group('keys MAC', () {

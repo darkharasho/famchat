@@ -4,6 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env";
 import { isUlid } from "./lib/chatdb";
+import { evictOldest } from "./lib/media";
 import { messageOut } from "./lib/messages";
 
 /** A message for members with no open socket. Plan 9 turns this into a Queue job for FCM. */
@@ -36,6 +37,9 @@ export class FamilyHub extends DurableObject<Env> {
 
   /** Sends run one at a time, so seqs are handed out and fanned out in order. */
   private sends: Promise<void> = Promise.resolve();
+
+  /** Media evictions run one at a time, so two uploads past the cap never both evict. */
+  private evictions: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -114,6 +118,13 @@ export class FamilyHub extends DurableObject<Env> {
       }
       this.goneOffline(ws);
     }
+  }
+
+  /** Expires the oldest media while the family is over the cap; returns how many objects. */
+  async evictMedia(): Promise<number> {
+    const run = this.evictions.then(() => evictOldest(this.env, (userIds, event) => this.notify(userIds, event)));
+    this.evictions = run.catch(() => {});
+    return (await run).length;
   }
 
   onlineUserIds(exclude?: WebSocket): string[] {

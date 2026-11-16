@@ -6,6 +6,10 @@
 	<string>FamChat uses the camera to scan the code shown on a new device you are signing in.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>FamChat uses the microphone to record voice messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>FamChat lets you choose photos to send to your family.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>FamChat uses the camera to take photos you send to your family.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

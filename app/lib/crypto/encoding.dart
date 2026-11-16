@@ -12,6 +12,7 @@ const domainEnvelope = 'famchat-envelope-v1';
 const domainSealedBox = 'famchat-sealed-box-v1';
 const domainPairKeys = 'famchat-pair-keys-v1';
 const domainPairBundle = 'famchat-pair-bundle-v1';
+const domainMedia = 'famchat-media-v1';
 
 const famchatDomains = [
   domainDeviceCert,
@@ -20,6 +21,7 @@ const famchatDomains = [
   domainSealedBox,
   domainPairKeys,
   domainPairBundle,
+  domainMedia,
 ];
 
 /// Thrown for every failure to verify, open, decrypt or parse crypto data.

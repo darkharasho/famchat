@@ -11,6 +11,9 @@ export type ErrorCode =
   | "upgrade_required"
   | "rate_limited"
   | "pairing_invalid"
+  | "too_large"
+  | "media_expired"
+  | "conflict"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -26,6 +29,9 @@ const STATUS: Record<ErrorCode, number> = {
   upgrade_required: 426,
   rate_limited: 429,
   pairing_invalid: 410,
+  too_large: 413,
+  media_expired: 410,
+  conflict: 409,
   internal: 500,
 };
 

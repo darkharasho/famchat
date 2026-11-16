@@ -22,6 +22,9 @@ reference; this document says what clients may rely on.
   | `invite_invalid` | 410 | used or expired invite |
   | `pairing_invalid` | 410 | pairing session expired, cancelled, or already claimed |
   | `rate_limited` | 429 | too many pairing sessions started; wait a few minutes |
+  | `conflict` | 409 | a media key already used by another device or for another chat |
+  | `media_expired` | 410 | the media was deleted by quota eviction (show "media expired") |
+  | `too_large` | 413 | upload over its kind's byte cap |
   | `upgrade_required` | 426 | `/api/ws` without a WebSocket upgrade |
   | `internal` | 500 | bug or outage; retry later |
 
@@ -46,9 +49,23 @@ Wrap      = {chatId, epoch, recipientDeviceId, wrapperDeviceId, sealed, sig} (sp
 Clients must check it against the user's (trusted-on-first-use) `identityPub` before using a device's keys.
 
 Plaintext inside an envelope is UTF-8 JSON:
-`{"kind":"text","text":"..."}` or `{"kind":"reaction","target":"<messageId>","emoji":"👍"}`
-(`"emoji":""` removes your reaction; the latest reaction per user and target wins). Later plans add
-`photo` and `voice`; clients show unknown kinds as unsupported rather than failing.
+`{"kind":"text","text":"..."}`, `{"kind":"reaction","target":"<messageId>","emoji":"👍"}`
+(`"emoji":""` removes your reaction; the latest reaction per user and target wins), or a photo:
+
+```
+{"kind":"photo", "mediaKey", "thumbKey",       media keys of the full image and the thumbnail
+ "key",                                       b64url 32-byte media key (fresh per photo)
+ "sha256", "thumbSha256",                     b64url SHA-256 of each encrypted blob (as stored)
+ "width", "height", "bytes", "mime":"image/jpeg"}   full image size in px; bytes = JPEG size
+```
+
+Plan 8 adds `voice`; clients keep unknown kinds (whole body) and show them as unsupported.
+
+### Media blobs
+Each blob is `nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 under the message's media key with
+`aad = "famchat-media-v1" ‖ str(purpose)`, purpose `"file"` (full photo, voice clip) or `"thumb"`.
+Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); thumbnails at most
+320 px. Before decrypting, check the blob's SHA-256 against the message.
 
 ## REST
 
@@ -130,6 +147,20 @@ of whatever the server shows. Member devices also add wraps for N on the `device
 - `GET /chats/:id/messages?after=N` (ascending, seq > N) or `?before=N` (the latest `limit` rows with
   seq < N, returned ascending); `limit` 1–200, default 100 → `{messages: Message[]}`.
 
+### Media
+- `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
+  (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
+  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb` or `voice`
+  with caps 15 MiB, 1 MiB and 8 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
+  Re-posting a key you already stored for the same chat and size returns `200` (safe retry); any
+  other reuse is `conflict`. Upload the blobs first, then send the message that references them.
+- `GET /media/:key` → the blob (`application/octet-stream`) for members of its chat (`not_found`
+  otherwise); `media_expired` (410) once evicted.
+- Quota: the family's live media is capped at 8 GiB. The upload that passes it makes the server delete
+  the oldest blobs (a message's blobs together) until the total is below 7.5 GiB; members of each
+  affected chat get `{type:"media_expired", chatId, keys}`.
+- `GET /admin/usage` (admin) → `{usedBytes, capBytes, evictToBytes, files, expiredFiles}`.
+
 ### Keys
 - `GET /keys/wraps[?chatId=]` → `{wraps: Wrap[]}` addressed to your device, for chats you're in.
 - `PUT /keys/wraps {wraps}` → `{added}`. Missing-wrap repair: each wrap's `wrapperDeviceId` is your
@@ -180,6 +211,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"removed", chatId}` | you left or were removed |
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
+| `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | close code 4001 | this device was revoked |
 
 ### `send` rules
@@ -206,4 +238,5 @@ add wraps you can, then resend the outbox.
 ## Signed and derived byte strings
 Every signature, MAC and key derivation starts with its own domain string, and no domain string is a
 prefix of another: `famchat-device-cert-v1`, `famchat-wrap-v1`, `famchat-envelope-v1`,
-`famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info).
+`famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info),
+`famchat-media-v1` (media AEAD associated data).
