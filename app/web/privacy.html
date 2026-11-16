@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FamChat privacy policy</title>
+  <style>
+    body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #1f2328; }
+    h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+    @media (prefers-color-scheme: dark) { body { background: #111418; color: #e6e8eb; } a { color: #8ab4f8; } }
+  </style>
+</head>
+<body>
+<h1>FamChat privacy policy</h1>
+<p>Last updated: November 16, 2026</p>
+
+<p>FamChat is a private, invite-only messenger for one family. Nobody can sign up on their own: an
+admin in the family invites each member. This policy covers the FamChat apps (iOS, Android, macOS,
+Windows, Linux and the web) and the FamChat server at famchat.dev.</p>
+
+<h2>Messages, photos and voice messages are end-to-end encrypted</h2>
+<p>Everything you send in a chat is encrypted on your device before it leaves it, with keys that only
+the devices of the chat's members hold. The server stores and relays the encrypted data but cannot
+read your messages, see your photos or listen to your voice messages.</p>
+
+<h2>What the server can see</h2>
+<ul>
+  <li><strong>Your account:</strong> the name you're shown under, whether you're an admin, and your
+  public keys.</li>
+  <li><strong>Your devices:</strong> each device's name (for example "Pixel 8"), its platform, when it
+  was added and last seen, and, if you allow notifications, a push token from Google or Apple.</li>
+  <li><strong>Chats:</strong> who is in each chat, group chat names, and when each encrypted message,
+  photo or voice message was sent, by whom and how large it is.</li>
+  <li><strong>Notifications:</strong> to show "New message from &lt;name&gt;", the server sends the
+  sender's name and the group's name to Google's or Apple's notification service. It never sends
+  message contents.</li>
+  <li><strong>Network addresses:</strong> when a new device asks to sign in, its IP address is kept with
+  that short-lived request to limit repeated attempts. It isn't stored with your account.</li>
+  <li><strong>Account events:</strong> a log of devices added or removed, invites and account resets,
+  which family admins can view.</li>
+</ul>
+
+<h2>What FamChat doesn't do</h2>
+<ul>
+  <li>No ads, no tracking and no analytics.</li>
+  <li>Your data is never sold or shared, except with the services that run FamChat (below).</li>
+  <li>FamChat doesn't read your contacts or your location.</li>
+</ul>
+
+<h2>Permissions</h2>
+<ul>
+  <li><strong>Camera:</strong> to take photos you send and to scan the code that signs in a new device.</li>
+  <li><strong>Microphone:</strong> to record voice messages, only while you're recording one.</li>
+  <li><strong>Photos:</strong> to pick photos you choose to send.</li>
+  <li><strong>Notifications:</strong> to tell you about new messages.</li>
+</ul>
+
+<h2>Services FamChat uses</h2>
+<ul>
+  <li><strong>Cloudflare</strong> hosts the server, the database and the encrypted media.</li>
+  <li><strong>Google Firebase Cloud Messaging</strong> and <strong>Apple Push Notification
+  service</strong> deliver notifications.</li>
+</ul>
+
+<h2>Keeping and deleting data</h2>
+<p>Encrypted messages and media are kept so your devices can sync your history. Removing a device
+from Settings revokes it and deletes its push token. To have your account and everything you've sent
+deleted, ask a family admin, or open an issue at the link below.</p>
+
+<h2>Children</h2>
+<p>FamChat is for members of one family, who may include children invited by a parent who is an
+admin. It contains no ads and nothing is shared with third parties for marketing.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy:
+<a href="https://github.com/darkharasho/famchat/issues">github.com/darkharasho/famchat/issues</a>.</p>
+</body>
+</html>
