@@ -57,7 +57,7 @@ Future<String?> previewText({
   }
 }
 
-/// The notification body: [preview] in a direct chat (or an unknown one), `Name: preview` in a group.
+/// The notification body: [preview] in a direct chat (or an unknown one or any non-group kind), `Name: preview` in a group.
 Future<String> previewBody({
   required ChatDb db,
   required String chatId,
@@ -66,7 +66,7 @@ Future<String> previewBody({
 }) async {
   try {
     final chat = await db.chatById(chatId);
-    if (chat == null || chat.kind == 'direct') return preview;
+    if (chat == null || chat.kind != 'group') return preview;
     final name = (await db.userById(senderUserId))?.name;
     return '${name ?? 'Someone'}: $preview';
   } catch (_) {

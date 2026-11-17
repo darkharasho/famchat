@@ -190,6 +190,11 @@ void main() {
       expect(await body(), 'hi');
     });
 
+    test('in a chat that is neither group nor direct is the bare preview', () async {
+      await chat('self');
+      expect(await body(), 'hi');
+    });
+
     test('in an unknown chat is the bare preview', () async {
       expect(await body(), 'hi');
     });
