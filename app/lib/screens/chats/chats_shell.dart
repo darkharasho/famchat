@@ -9,7 +9,6 @@ import '../../media/providers.dart';
 import '../../push/providers.dart';
 import '../../session/session_controller.dart';
 import '../../theme/tokens.dart';
-import '../../update/update_banner.dart';
 import '../../widgets/brand_mark.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
@@ -105,7 +104,6 @@ class _ListPane extends ConsumerWidget {
         ],
       ),
       body: Column(children: [
-        const UpdateBanner(),
         if (ref.watch(notifyOfferProvider))
           NoticeCard(
             key: const Key('notify-offer'),

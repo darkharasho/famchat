@@ -12,6 +12,7 @@ import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 import 'theme/app_theme.dart';
+import 'update/update_banner.dart';
 import 'voice/voice_io.dart';
 import 'window/title_bar.dart';
 
@@ -55,7 +56,10 @@ class FamChatApp extends ConsumerWidget {
       scaffoldMessengerKey: ref.watch(rootMessengerKeyProvider),
       routerConfig: ref.watch(routerProvider),
       // FamChat's own title bar over every screen on the desktop apps; nothing elsewhere.
-      builder: (context, child) => WindowFrame(child: child ?? const SizedBox.shrink()),
+      // The update popup floats over every screen.
+      builder: (context, child) => WindowFrame(
+        child: Stack(children: [child ?? const SizedBox.shrink(), const UpdatePrompt()]),
+      ),
     );
   }
 }

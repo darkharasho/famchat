@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
@@ -47,6 +49,50 @@ Future<void> downloadVerified(
   }
 }
 
+/// [downloadVerified] in a background isolate: streaming and hashing a 90 MB file on the UI isolate
+/// competes with every frame. Reports progress in whole percents.
+Future<void> downloadInBackground(ReleaseAsset asset, File target, void Function(double) onProgress) async {
+  final port = ReceivePort();
+  final done = Completer<void>();
+  port.listen((m) {
+    switch (m) {
+      case double p:
+        onProgress(p);
+      case null:
+        done.complete();
+      case (String error, bool expected):
+        done.completeError(expected ? UpdateException(error) : Exception(error));
+    }
+  });
+  try {
+    await Isolate.spawn(_downloadIsolate, (asset, target.path, port.sendPort));
+    await done.future;
+  } finally {
+    port.close();
+  }
+}
+
+Future<void> _downloadIsolate((ReleaseAsset, String, SendPort) args) async {
+  final (asset, path, send) = args;
+  final client = http.Client();
+  var shown = -1;
+  try {
+    await downloadVerified(asset, client, File(path), (p) {
+      final percent = (p * 100).floor();
+      if (percent == shown) return;
+      shown = percent;
+      send.send(percent / 100);
+    });
+    send.send(null);
+  } on UpdateException catch (e) {
+    send.send((e.message, true));
+  } catch (e) {
+    send.send(('$e', false));
+  } finally {
+    client.close();
+  }
+}
+
 /// The AppImage replaces its own file (it runs from a mount, so the old file can be swapped).
 class LinuxAppImageUpdate implements UpdatePlatform {
   LinuxAppImageUpdate(this.appImagePath);
@@ -66,7 +112,7 @@ class LinuxAppImageUpdate implements UpdatePlatform {
   @override
   Future<String> download(ReleaseAsset asset, http.Client client, void Function(double) onProgress) async {
     final target = File(_staged);
-    await downloadVerified(asset, client, target, onProgress);
+    await downloadInBackground(asset, target, onProgress);
     final chmod = await Process.run('chmod', ['755', target.path]);
     if (chmod.exitCode != 0) throw const UpdateException("Couldn't make the update runnable.");
     return target.path;
@@ -96,7 +142,7 @@ class WindowsInstallerUpdate implements UpdatePlatform {
   Future<String> download(ReleaseAsset asset, http.Client client, void Function(double) onProgress) async {
     await _dir.create(recursive: true);
     final target = File('${_dir.path}\\FamChat-setup.exe');
-    await downloadVerified(asset, client, target, onProgress);
+    await downloadInBackground(asset, target, onProgress);
     return target.path;
   }
 

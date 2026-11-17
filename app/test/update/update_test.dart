@@ -6,7 +6,7 @@ import 'package:famchat/update/release_feed.dart';
 import 'package:famchat/update/update_banner.dart';
 import 'package:famchat/update/update_controller.dart';
 import 'package:famchat/update/update_platform.dart';
-import 'package:famchat/update/update_platform_io.dart' show downloadVerified;
+import 'package:famchat/update/update_platform_io.dart' show downloadInBackground, downloadVerified;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -41,19 +41,20 @@ String releaseJson({
     });
 
 class FakePlatform implements UpdatePlatform {
-  FakePlatform({this.platform = 'linux', this.canSelfInstall = true, this.failDownload = false});
+  FakePlatform({this.platform = 'linux', this.canSelfInstall = true, this.failDownload = false, this.progress = const [0.5]});
 
   @override
   final String platform;
   @override
   final bool canSelfInstall;
   final bool failDownload;
+  final List<double> progress;
   final downloaded = <String>[];
   final installed = <String>[];
 
   @override
   Future<String> download(ReleaseAsset asset, http.Client client, void Function(double) onProgress) async {
-    onProgress(0.5);
+    progress.forEach(onProgress);
     if (failDownload) throw const UpdateException("The download didn't match its checksum.");
     downloaded.add(asset.name);
     return '/tmp/${asset.name}';
@@ -62,6 +63,15 @@ class FakePlatform implements UpdatePlatform {
   @override
   Future<void> installAndRestart(String downloaded) async => installed.add(downloaded);
 }
+
+class _NoPlatform implements UpdatePlatform {
+  const _NoPlatform();
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
+http.Client _noClient() => throw UnimplementedError();
+Future<bool> _noOpen(Uri _) async => false;
 
 void main() {
   group('release feed', () {
@@ -129,6 +139,28 @@ void main() {
       final target = File('${dir.path}/a');
       await expectLater(downloadVerified(asset('00' * 32), client, target, (_) {}), throwsA(isA<UpdateException>()));
       expect(await target.exists(), isFalse);
+    });
+
+    test('downloads in a background isolate, off the UI thread', () async {
+      final body = List<int>.generate(300000, (i) => i % 251);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((req) => req.response
+        ..contentLength = body.length
+        ..add(body)
+        ..close());
+      final a = ReleaseAsset(
+          name: 'x', url: Uri.parse('http://127.0.0.1:${server.port}/x'), sha256: await sha(body), size: body.length);
+      final target = File('${dir.path}/bg');
+      final progress = <double>[];
+      await downloadInBackground(a, target, progress.add);
+      expect(await target.readAsBytes(), body);
+      expect(progress.last, 1.0);
+      await expectLater(
+        downloadInBackground(ReleaseAsset(name: 'x', url: a.url, sha256: '00' * 32, size: 1), File('${dir.path}/bad'), (_) {}),
+        throwsA(isA<UpdateException>().having((e) => e.message, 'message', contains('checksum'))),
+      );
+      expect(await File('${dir.path}/bad').exists(), isFalse);
     });
 
     test('refuses a download without a checksum, and an HTTP error', () async {
@@ -205,6 +237,24 @@ void main() {
       expect(platform.downloaded, isEmpty);
     });
 
+    test('reports download progress once per whole percent', () async {
+      // A real download reports every network chunk: thousands of them.
+      final platform = FakePlatform(progress: [for (var i = 0; i <= 10000; i++) i / 10000]);
+      final c = container(platform, body: releaseJson());
+      final seen = <double>[];
+      c.listen(updateProvider, (_, s) {
+        if (s is UpdateDownloading) seen.add(s.progress);
+      });
+      await c.read(updateProvider.notifier).check();
+      expect(seen.length, lessThanOrEqualTo(101));
+      expect(seen.last, 1.0);
+    });
+
+    test('checks soon after launch', () {
+      expect(const UpdateConfig(currentVersion: '1', platform: _NoPlatform(), newClient: _noClient, openUrl: _noOpen)
+          .firstCheckDelay, lessThanOrEqualTo(const Duration(seconds: 3)));
+    });
+
     test('reports a failed check without offering anything', () async {
       final c = container(FakePlatform(), status: 403);
       await c.read(updateProvider.notifier).check();
@@ -227,7 +277,7 @@ void main() {
     });
   });
 
-  testWidgets('the banner restarts into a downloaded update', (tester) async {
+  Future<FakePlatform> pumpPrompt(WidgetTester tester) async {
     final platform = FakePlatform();
     await tester.pumpWidget(ProviderScope(
       overrides: [
@@ -239,15 +289,33 @@ void main() {
           firstCheckDelay: const Duration(milliseconds: 1),
         )),
       ],
-      child: const MaterialApp(home: Scaffold(body: Column(children: [UpdateBanner()]))),
+      // Mounted over the whole app, the way main.dart does.
+      child: MaterialApp(
+        home: const Scaffold(body: Text('a chat')),
+        builder: (context, child) => Stack(children: [child!, const UpdatePrompt()]),
+      ),
     ));
     expect(find.byKey(const Key('update-ready')), findsNothing);
     await tester.pump(const Duration(milliseconds: 5));
     await tester.pumpAndSettle();
+    return platform;
+  }
+
+  testWidgets('a popup over any screen restarts into a downloaded update', (tester) async {
+    final platform = await pumpPrompt(tester);
+    expect(find.text('a chat'), findsOneWidget);
     expect(find.text('FamChat 1.2.0 is ready. Restart to update.'), findsOneWidget);
-    await tester.tap(find.text('Restart'));
+    await tester.tap(find.text('Restart now'));
     await tester.pump();
     expect(platform.installed, hasLength(1));
+  });
+
+  testWidgets('Later closes the update popup', (tester) async {
+    final platform = await pumpPrompt(tester);
+    await tester.tap(find.text('Later'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('update-ready')), findsNothing);
+    expect(platform.installed, isEmpty);
   });
 
   testWidgets('the web app links to the desktop and phone apps', (tester) async {
