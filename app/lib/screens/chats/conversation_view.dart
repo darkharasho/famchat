@@ -350,6 +350,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     return true;
   }
 
+  /// Phones and tablets, where taps elsewhere should put the keyboard away.
+  bool get _touch => {TargetPlatform.android, TargetPlatform.iOS}.contains(defaultTargetPlatform);
+
+  void _dismissInput() {
+    _focus.unfocus();
+    _closePicker();
+  }
+
   void _closePicker() {
     if (_pickerOpen) setState(() => _pickerOpen = false);
   }
@@ -1025,7 +1033,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ],
               ),
             Expanded(
-              child: visible.isEmpty
+              // Phones: a tap on the messages (not on a link or button in one) puts the keyboard
+              // or emoji picker away.
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _touch ? _dismissInput : null,
+                child: visible.isEmpty
                   ? EmptyState(
                       art: PersonAvatar(
                         label: title,
@@ -1054,6 +1067,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         return i < 0 ? null : i;
                       },
                     ),
+              ),
             ),
             if (typingNames.isNotEmpty)
               Padding(
