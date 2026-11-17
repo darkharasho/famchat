@@ -3,7 +3,7 @@ name: release
 # Native releases. A `v*` tag (or a manual run) builds every platform:
 #   iOS      -> TestFlight (App Store Connect API key; Xcode makes the distribution cert/profile)
 #   Android  -> Play internal testing (AAB signed with the FamChat upload key)
-#   macOS    -> Developer ID signed, notarized and stapled DMG
+#   macOS    -> Developer ID signed, notarized and stapled DMG, plus a Sparkle appcast.xml
 #   Windows  -> Inno Setup installer, signed with Azure Artifact Signing (checked Valid)
 #   Linux    -> AppImage
 # On a tag, the desktop files are published as the latest GitHub release, which installed desktop
@@ -306,9 +306,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dmg"
           app="$RUNNER_TEMP/dmg/FamChat.app"
           ditto build/macos/Build/Products/Release/famchat.app "$app"
+          # Sparkle's feed goes only into signed builds, so local builds never offer an update.
+          plutil -insert SUFeedURL -string \
+            "https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml" "$app/Contents/Info.plist"
           sign() { codesign --force --timestamp --options runtime --keychain signing_temp.keychain --sign "$identity" "$@"; }
           while IFS= read -r -d '' f; do sign "$f"; done \
             < <(find "$app/Contents" \( -name '*.dylib' -o -name '*.so' \) -type f -print0)
+          # Sparkle's helpers, innermost first (the framework itself is signed with the others below).
+          sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+          [ -d "$sparkle" ] || { echo "::error::Sparkle.framework is missing from the app."; exit 1; }
+          sign "$sparkle/XPCServices/Installer.xpc"
+          sign --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+          sign "$sparkle/Autoupdate"
+          sign "$sparkle/Updater.app"
           for fw in "$app"/Contents/Frameworks/*.framework; do [ -e "$fw" ] && sign "$fw"; done
           sign --entitlements macos/Runner/Release.entitlements "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
@@ -483,6 +493,42 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with: { pattern: desktop-*, path: dist, merge-multiple: true }
+      # Sparkle's feed for the Mac app: the DMG, signed with the EdDSA key whose public half is
+      # SUPublicEDKey in macos/Runner/Info.plist. Tag builds only: drafts aren't "latest".
+      - name: Write the Sparkle appcast
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SPARKLE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          dmg="dist/FamChat-$NAME-macos.dmg"
+          [ -f "$dmg" ] || { echo "::error::$dmg is missing."; exit 1; }
+          [ -n "$SPARKLE_KEY" ] || { echo "::error::SPARKLE_ED_PRIVATE_KEY isn't set."; exit 1; }
+          key="$RUNNER_TEMP/sparkle.pem"
+          (umask 077
+            { printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'; printf %s "$SPARKLE_KEY" | base64 -d; } \
+              | openssl pkey -inform DER -out "$key")
+          sig="$(openssl pkeyutl -sign -inkey "$key" -rawin -in "$dmg" | base64 -w0)"
+          rm -f "$key"
+          repo="https://github.com/$GITHUB_REPOSITORY"
+          cat > dist/appcast.xml <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>FamChat</title>
+              <item>
+                <title>FamChat $NAME</title>
+                <pubDate>$(date -R)</pubDate>
+                <link>$repo/releases/tag/$GITHUB_REF_NAME</link>
+                <sparkle:version>$NUMBER</sparkle:version>
+                <sparkle:shortVersionString>$NAME</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+                <enclosure url="$repo/releases/download/$GITHUB_REF_NAME/FamChat-$NAME-macos.dmg"
+                  length="$(stat -c %s "$dmg")" type="application/octet-stream" sparkle:edSignature="$sig"/>
+              </item>
+            </channel>
+          </rss>
+          XML
+          cat dist/appcast.xml
       - name: Create the release
         run: |
           ls -l dist

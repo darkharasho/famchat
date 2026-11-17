@@ -32,5 +32,14 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle (packages/famchat_updater). release.yml adds SUFeedURL to signed builds. -->
+	<key>SUPublicEDKey</key>
+	<string>CKUUz1MK5b8ttejgS7Xy1euWKe6nyy6STpdJWM1Z/Xo=</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
 </dict>
 </plist>
