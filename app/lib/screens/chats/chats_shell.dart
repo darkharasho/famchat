@@ -40,6 +40,11 @@ class ChatsShell extends ConsumerWidget {
     ref.watch(chatSyncProvider); // starts the chat engine
     ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
     ref.watch(notificationsProvider); // push registration, desktop notifications
+    ref.listen(familyApprovalsProvider, (_, next) {
+      if (next case AsyncData(:final value)) {
+        ref.read(rootMessengerKeyProvider).currentState?.showSnackBar(SnackBar(content: Text('${value.name} was approved')));
+      }
+    });
     final id = chatId;
     // Cmd on Apple platforms (where Ctrl+K and Ctrl+N edit text), Ctrl elsewhere.
     final apple = {TargetPlatform.macOS, TargetPlatform.iOS}.contains(defaultTargetPlatform);

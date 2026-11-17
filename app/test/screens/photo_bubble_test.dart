@@ -163,6 +163,8 @@ void main() {
     });
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
+    await tester.tap(find.byKey(const Key('settings-families')));
+    await settle(tester);
     await tester.tap(find.text('Media storage'));
     await settle(tester);
     expect(find.text('Media storage'), findsOneWidget);
@@ -175,6 +177,8 @@ void main() {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);
     await tester.tap(find.byTooltip('Settings'));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('settings-families')));
     await settle(tester);
     expect(find.text('Media storage'), findsNothing);
     go(tester, '/settings/storage');

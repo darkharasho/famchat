@@ -19,11 +19,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets("a member's settings: their name, devices and sign out, no admin pages", (tester) async {
+  testWidgets("a member's settings: their name, devices, families and sign out, no admin pages", (tester) async {
     await openSettings(tester);
     expect(find.text('Gran'), findsWidgets); // the header and the Your name row
     expect(find.textContaining('Family member'), findsOneWidget);
     expect(find.text('Devices'), findsOneWidget);
+    expect(find.byKey(const Key('settings-families')), findsOneWidget);
     expect(find.text('Sign out'), findsOneWidget);
     expect(find.byKey(const Key('settings-family')), findsNothing);
     expect(find.text('Invite someone'), findsNothing);
@@ -31,15 +32,26 @@ void main() {
     expect(find.text('Platform spikes'), findsNothing);
   });
 
-  testWidgets("an admin's settings add the family pages", (tester) async {
+  testWidgets('the Families tile names my families', (tester) async {
+    server.extraFamilies.add({
+      'id': 4, 'name': 'Club', 'status': 'approved', 'role': 'member', 'owner': false, 'memberCount': 2, 'createdAt': 2,
+    });
+    await openSettings(tester);
+    expect(find.descendant(of: find.byKey(const Key('settings-families')), matching: find.text('Family, Club')),
+        findsOneWidget);
+  });
+
+  testWidgets("an admin reaches the family's members, invites and storage through Families", (tester) async {
     await openSettings(tester, admin: true);
     expect(find.textContaining('Family admin'), findsOneWidget);
-    expect(find.byKey(const Key('settings-family')), findsOneWidget);
-    expect(find.text('Invite someone'), findsOneWidget);
-    expect(find.text('Media storage'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('settings-family')));
+    expect(find.byKey(const Key('settings-family')), findsNothing, reason: 'the old Family group is gone');
+    await tester.tap(find.byKey(const Key('settings-families')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('settings-storage')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('family-tile-1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('recovery-code-card')), findsOneWidget);
+    expect(find.text('Invite someone'), findsOneWidget);
   });
 
   testWidgets('developer tools show the platform spikes', (tester) async {

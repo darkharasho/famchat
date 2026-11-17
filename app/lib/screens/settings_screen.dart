@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../api/models.dart';
 import '../chat/chat_sync.dart';
 import '../chat/providers.dart';
 import '../dev_tools.dart';
@@ -46,6 +47,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final session = state is SignedIn ? state.session : null;
     final admin = session?.isAdmin ?? false;
     final myId = ref.watch(myUserIdProvider);
+    final reviewer = ref.watch(meProvider).value?.reviewer ?? false;
+    final familyNames = [for (final f in ref.watch(familiesProvider).value ?? const <Family>[]) f.name];
     // The directory has a rename at once; the session catches up at the next /me.
     final name = (myId == null ? null : ref.watch(usersProvider).value?[myId]?.name) ?? session?.name ?? 'You';
     Widget row(IconData icon, String title, String subtitle, String route, {Key? key}) => ListTile(
@@ -102,15 +105,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   key: const Key('settings-devices')),
             ]),
             const NotificationSettingsGroup(),
-            if (admin)
-              SettingsGroup(title: 'Family', children: [
-                row(Icons.diversity_3_rounded, 'Family members', 'Admins, account resets, recovery code', '/settings/family',
-                    key: const Key('settings-family')),
-                row(Icons.person_add_alt_rounded, 'Invite someone', 'A one-time link to join', '/settings/invite',
-                    key: const Key('settings-invite')),
-                row(Icons.photo_library_outlined, 'Media storage', 'Space used by photos and voice',
-                    '/settings/storage',
-                    key: const Key('settings-storage')),
+            if (!reviewer)
+              SettingsGroup(title: 'Families', children: [
+                row(Icons.diversity_3_rounded, 'Families', familyNames.isEmpty ? 'Start or join a family' : familyNames.join(', '),
+                    '/settings/families',
+                    key: const Key('settings-families')),
               ]),
             const AppVersionGroup(),
             if (ref.watch(developerToolsProvider))

@@ -272,10 +272,11 @@ void main() {
     final bob = await backend.addUser('Bob');
     addTearDown(bob.dispose);
     await alice.sync.idle;
+    final before = familiesChanged; // start() already reports the first connect
     backend.addFamilyRole(alice.d.userId, const FamilyRoleDto(id: 2, admin: false));
     backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: true));
     backend.familyEvent([alice.d.userId], 2);
-    await until(() async => familiesChanged == 1, reason: 'families callback');
+    await until(() async => familiesChanged > before, reason: 'families callback');
     await alice.sync.idle;
     expect(jsonDecode((await alice.d.db.userById(bob.userId))!.familyIds), [1, 2]);
   });

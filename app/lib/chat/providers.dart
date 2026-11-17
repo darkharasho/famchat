@@ -71,10 +71,25 @@ final chatSyncProvider = Provider<ChatSync?>((ref) {
 final familiesProvider = AsyncNotifierProvider<Families, List<Family>>(Families.new);
 
 class Families extends AsyncNotifier<List<Family>> {
+  List<Family>? _seen;
+  final _approved = StreamController<Family>.broadcast();
+
+  /// A family I asked for that the operator has approved since the last fetch.
+  Stream<Family> get approvals => _approved.stream;
+
   @override
   Future<List<Family>> build() async {
     if (ref.watch(myUserIdProvider) == null) return const [];
-    return ref.watch(apiClientProvider).families();
+    final now = await ref.watch(apiClientProvider).families();
+    final before = _seen;
+    _seen = now;
+    if (before != null && ref.mounted) {
+      for (final f in now) {
+        final was = before.where((p) => p.id == f.id).firstOrNull;
+        if (f.owner && f.status == 'approved' && was != null && was.status == 'pending') _approved.add(f);
+      }
+    }
+    return now;
   }
 
   /// Fetches the list again (after creating, joining, renaming or leaving a family).
@@ -83,6 +98,9 @@ class Families extends AsyncNotifier<List<Family>> {
     await future;
   }
 }
+
+/// Families of mine the operator approved (seen on a refresh); the shell shows a note for each.
+final familyApprovalsProvider = StreamProvider<Family>((ref) => ref.watch(familiesProvider.notifier).approvals);
 
 /// The approved families: the ones a chat or an invite can be for (pickers).
 final myFamiliesProvider = FutureProvider<List<Family>>(

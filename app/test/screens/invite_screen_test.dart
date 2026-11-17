@@ -21,6 +21,12 @@ void main() {
     await signInDirectly(tester, server, admin: true);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-families')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('family-tile-1')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Invite someone'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Invite someone'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('invite-name-field')), 'Grandpa');
@@ -39,8 +45,9 @@ void main() {
   testWidgets('non-admin has no invite action', (tester) async {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);
-    appRouter(tester).go('/settings');
+    appRouter(tester).go('/settings/families');
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('family-tile-1')), findsOneWidget);
     expect(find.text('Invite someone'), findsNothing);
     appRouter(tester).go('/settings/invite');
     await tester.pumpAndSettle();
@@ -51,7 +58,11 @@ void main() {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);
     server.users.values.single.isAdmin = true;
-    appRouter(tester).go('/settings');
+    appRouter(tester).go('/settings'); // opening Settings reads /me again
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-families')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('family-tile-1')));
     await tester.pumpAndSettle();
     expect(find.text('Invite someone'), findsOneWidget);
   });

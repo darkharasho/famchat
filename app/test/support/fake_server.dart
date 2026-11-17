@@ -96,6 +96,10 @@ class FakeServer {
   final devices = <String, FakeDevice>{};
   final invites = <String, FakeInvite>{};
 
+  /// The caller's families besides family 1 (`GET /families` rows: id, name, status, role, owner,
+  /// memberCount). Tests edit it to play the operator approving or declining.
+  final extraFamilies = <Map<String, Object?>>[];
+
   /// Every request as "METHOD /path -> status" (status 0 when the response was dropped).
   final log = <String>[];
   int refreshCalls = 0;
@@ -386,6 +390,27 @@ class FakeServer {
       target
         ..isAdmin = true
         ..adminProof = {'byUserId': by.id, 'signerPub': by.identityPub, 'sig': sig};
+      return http.Response('', 204);
+    }
+    if (r.method == 'GET' && path == '/api/families') {
+      final u = users[userId]!;
+      return _json({
+        'families': [
+          {'id': 1, 'name': 'Family', 'status': 'approved', 'role': u.isAdmin ? 'admin' : 'member', 'owner': u.isAdmin, 'memberCount': users.length, 'createdAt': 1},
+          ...extraFamilies,
+        ],
+      });
+    }
+    if (r.method == 'POST' && path == '/api/families') {
+      final name = _body(r)['name'];
+      if (name is! String || name.trim().isEmpty || name.trim().length > 40) return _err('invalid_request');
+      final family = {'id': 10 + extraFamilies.length, 'name': name.trim(), 'status': 'pending', 'role': 'admin', 'owner': true, 'memberCount': 1, 'createdAt': 2};
+      extraFamilies.add(family);
+      return _json({'family': family}, 201);
+    }
+    final leave = RegExp(r'^/api/families/(\d+)/members/([^/]+)$').firstMatch(path);
+    if (r.method == 'DELETE' && leave != null) {
+      extraFamilies.removeWhere((f) => f['id'] == int.parse(leave[1]!));
       return http.Response('', 204);
     }
     if (r.method == 'POST' && path == '/api/admin/recovery-key') {

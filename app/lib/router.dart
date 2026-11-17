@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart' show MaterialPage, MediaQuery;
 
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
+import 'screens/families_screen.dart';
 import 'screens/family_screen.dart';
 import 'screens/recover_screen.dart';
 import 'screens/recovery_code_screen.dart';
@@ -52,7 +53,8 @@ String? sessionRedirect(SessionState s, String location, {PendingLocation? pendi
         if (back == null) return '/';
         return sessionRedirect(s, back) ?? back;
       }
-      if ((location == '/settings/invite' || location == '/settings/storage' || location.startsWith('/settings/family')) &&
+      if ((location == '/settings/invite' || location == '/settings/storage' || location == '/settings/family' ||
+              location.startsWith('/settings/family/')) &&
           !session.isAdmin) {
         return '/';
       }
@@ -115,6 +117,12 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
               GoRoute(path: 'invite', builder: (context, state) => const InviteScreen()),
               GoRoute(path: 'storage', builder: (context, state) => const StorageScreen()),
+              GoRoute(
+                path: 'families',
+                builder: (context, state) => const FamiliesScreen(),
+                // The single-family screen, whatever the id, until it works per family.
+                routes: [GoRoute(path: ':id', builder: (context, state) => const FamilyScreen())],
+              ),
               GoRoute(
                 path: 'family',
                 builder: (context, state) => const FamilyScreen(),
