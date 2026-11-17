@@ -23,7 +23,8 @@ reference; this document says what clients may rely on.
   | `pairing_invalid` | 410 | pairing session expired, cancelled, or already claimed |
   | `rate_limited` | 429 | too many pairing sessions started; wait a few minutes |
   | `conflict` | 409 | a media key already used by another device or for another chat |
-  | `last_admin` | 409 | the only admin can't delete their account while anyone else is in the family |
+  | `last_admin` | 409 | the only admin can't delete their account, or leave a family, while anyone else is in it |
+| `admin_invite` | 409 | `POST /families/:id/join` with an invite that makes its holder an admin; it is meant for a new person, so it is not used up |
   | `media_expired` | 410 | the media was deleted by quota eviction (show "media expired") |
   | `too_large` | 413 | upload over its kind's byte cap |
   | `upgrade_required` | 426 | `/api/ws` without a WebSocket upgrade |
@@ -276,7 +277,8 @@ never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 charact
   approved family. Anything else is `410 invite_invalid`.
 - `POST /families/:id/join {inviteToken}` → `200 {family: Family}`: joins `:id` as a member with the
   caller's existing account and uses up the invite. `410 invite_invalid` if the invite is unusable or
-  is for another family; `409 conflict` if the caller is already a member (the invite stays usable).
+  is for another family; `409 conflict` if the caller is already a member and `409 admin_invite` if the
+  invite makes its holder an admin (in both cases the invite stays usable).
   Members get a `family` event.
 - Signed-out `POST /auth/invite/redeem` of a family invite joins that family, and is `410` if the
   family is not approved.
@@ -455,7 +457,11 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
      never adds that admin again. Ed25519 signatures are deterministic, so the same promoter
      promoting them again makes the same, revoked proof: on a device that saw the demotion they stay
      untrusted (fails safe: their resets get banners only); a proof from a different trusted admin
-     trusts them again. Revoked proofs aren't part of the pairing handover. A family the device has
+     trusts them again. Revoked proofs aren't part of the pairing handover. Only proofs this device has seen are revoked: a
+     proof it never saw can still re-trust a demoted admin, whether it predates the device's first
+     sight of them, comes from another signer, is on a device upgraded from schema 8, or is on a newly
+     paired device. Closing that needs a protocol change, such as a counter in the promotion statement,
+     which is planned for later. A family the device has
      seen keeps its pins frozen when the server stops listing it (the user left, or the server
      omits it or the user's whole entry): they don't count meanwhile, and if the family is listed
      again they are the starting point, so only never-seen families are trusted on first sight.
@@ -614,7 +620,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone sharing a family with them): `GET /users` and check it |
 | `{type:"account_deleted", userId}` | that account was deleted (to everyone who shared a family with them): `GET /users` ("Deleting an account") |
-| `{type:"family", familyId}` | a family you are in was renamed or otherwise changed: `GET /families` |
+| `{type:"family", familyId}` | a family you are in changed: it was renamed or approved, or someone joined, left or was removed, or became or stopped being an admin. Refetch `GET /families` and `GET /users` (the directory carries each family's admins and proofs) |
 | `{type:"profile", userId}` | that user changed their name or profile photo (to everyone sharing a family with them): `GET /users` ("Profile: name and photo") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |

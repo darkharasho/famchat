@@ -87,7 +87,7 @@ describe("POST /api/admin/users/:id/reset", () => {
     const admin = await insertUserWithDevice({ families: [{ id: f, role: "admin" }] });
     const target = await insertUserWithDevice({ name: "Cousin", families: [{ id: f }] });
     const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
-    expect((await postReset(admin, target.userId, r.body)).status).toBe(404);
+    expect((await postReset(admin, target.userId, r.body)).status).toBe(403);
   });
 
   it("an admin of the hidden family can't reset", async () => {

@@ -15,6 +15,7 @@ export type ErrorCode =
   | "media_expired"
   | "conflict"
   | "last_admin"
+  | "admin_invite"
   | "no_shared_family"
   | "internal";
 
@@ -35,6 +36,7 @@ const STATUS: Record<ErrorCode, number> = {
   media_expired: 410,
   conflict: 409,
   last_admin: 409,
+  admin_invite: 409,
   no_shared_family: 403,
   internal: 500,
 };

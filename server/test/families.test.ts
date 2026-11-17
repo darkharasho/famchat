@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api, createDirect, createGroup, type TestUser } from "./chat-helpers";
 import { newId } from "../src/lib/ids";
 import { errorResponse } from "../src/lib/errors";
-import { familyPeers, groupFamilyFor, sharingUserIds, shares } from "../src/lib/family";
+import { familyPeers, groupFamilyFor, removeFromFamily, sharingUserIds, shares } from "../src/lib/family";
 import { insertFamily, insertUserWithDevice, joinFamily, resetDb } from "./helpers";
 import { promotionMessage, promotionMessageV2 } from "../src/lib/reset";
 import { sign } from "./reset-helpers";
@@ -112,6 +112,21 @@ describe("POST /families/:id/admins/:userId", () => {
     expect(await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(dad.userId).first<number>("is_admin")).toBe(0);
     const ev = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'admin_promoted'").first<{ payload: string }>();
     expect(JSON.parse(ev!.payload)).toMatchObject({ familyId: f });
+  });
+
+  it("promoting sends the family a family event", async () => {
+    const f = await insertFamily();
+    const admin = await user([{ id: f, role: "admin" }]);
+    const dad = await user([{ id: f }]);
+    const other = await user([{ id: f }]);
+    const outsider = await user([{ id: 1 }]);
+    const sd = await socket(dad);
+    const so = await socket(other);
+    const sx = await socket(outsider);
+    expect((await promoteV2(admin, f, dad.userId)).status).toBe(204);
+    expect(await sd.next("family")).toEqual({ type: "family", familyId: f });
+    expect(await so.next("family")).toEqual({ type: "family", familyId: f });
+    await sx.none("family");
   });
 
   it("rejects a v1 proof on the per-family endpoint", async () => {
@@ -310,15 +325,15 @@ describe("family invites and joining", () => {
   type FamilyOut = { id: number; name: string; status: string; role: string; memberCount: number; owner: boolean };
   const famInvite = async (
     familyId: number,
-    o: { name?: string; createdBy?: string | null; expiresAt?: number; used?: boolean; revoked?: boolean; reviewer?: boolean; userId?: string } = {},
+    o: { makeAdmin?: boolean; name?: string; createdBy?: string | null; expiresAt?: number; used?: boolean; revoked?: boolean; reviewer?: boolean; userId?: string } = {},
   ) => {
     const token = randomToken();
     const now = Date.now();
     await env.DB.prepare(
       `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id, used_by, used_at, revoked_at, reviewer, user_id)
-       VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      await sha256Hex(token), o.name ?? "Auntie", o.createdBy ?? null, now, o.expiresAt ?? now + 86_400_000, familyId,
+      await sha256Hex(token), o.name ?? "Auntie", o.makeAdmin ? 1 : 0, o.createdBy ?? null, now, o.expiresAt ?? now + 86_400_000, familyId,
       o.used ? "someone" : null, o.used ? now : null, o.revoked ? now : null, o.reviewer ? 1 : 0, o.userId ?? null,
     ).run();
     return token;
@@ -414,6 +429,17 @@ describe("family invites and joining", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "conflict" });
     expect(await used(t)).toBeNull();
+  });
+
+  it("joining with an admin invite is rejected as admin_invite and the invite stays usable", async () => {
+    const f = await insertFamily();
+    const me = await user([{ id: 1 }]);
+    const t = await famInvite(f, { makeAdmin: true });
+    const res = await api(me.accessToken, "POST", `/families/${f}/join`, { inviteToken: t });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "admin_invite" });
+    expect(await used(t)).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 AS n FROM family_members WHERE user_id = ? AND family_id = ?").bind(me.userId, f).first()).toBeNull();
   });
 
   it("join with a token for another family is 410", async () => {
@@ -515,6 +541,21 @@ describe("leaving, removing and demoting", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "last_admin", familyId: f, familyName: "Cousins" });
     expect(await roleOf(f, a.userId)).toBe("admin");
+  });
+
+  it("removal is refused atomically when it would strand the family without an admin", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const a = await user([{ id: f, role: "admin" }]);
+    const kid = await user([{ id: f }]);
+    const group = await createGroup(a, [kid], "Cousins");
+    // the check passed earlier, but by now the other admin is gone: the batch itself must refuse
+    expect(await removeFromFamily(env, f, a.userId)).toBe(false);
+    expect(await roleOf(f, a.userId)).toBe("admin");
+    expect(await inChat(group.id, a.userId)).toBe(true);
+    expect(await epoch(group.id)).toBe(1);
+    expect(await owner(f)).toBe(null);
+    expect(await removeFromFamily(env, f, kid.userId)).toBe(true);
+    expect(await roleOf(f, kid.userId)).toBeNull();
   });
 
   it("sole member leaves a declined family", async () => {

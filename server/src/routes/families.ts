@@ -127,6 +127,7 @@ families.post("/:id/admins/:userId", async (c) => {
   }
   await db.batch(stmts);
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by, payload: { familyId } });
+  await notifyFamily(c.env, familyId);
   return c.body(null, 204);
 });
 
@@ -184,7 +185,10 @@ families.delete("/:id/members/:userId", async (c) => {
     if (role === null) throw new ApiError("not_found");
     if (role === "admin" || userId === fam.createdBy) throw new ApiError("forbidden");
   }
-  await removeFromFamily(c.env, familyId, userId);
+  if (!(await removeFromFamily(c.env, familyId, userId))) {
+    // the last-admin check above raced with another leave: the batch refused
+    throw new ApiError("last_admin", { familyId, familyName: fam.name });
+  }
   return c.body(null, 204);
 });
 
@@ -205,10 +209,10 @@ const USABLE_INVITE = `i.used_by IS NULL AND i.revoked_at IS NULL AND i.expires_
 async function usableInvite(db: D1Database, token: unknown) {
   if (typeof token !== "string" || token.length === 0 || token.length > 200) throw new ApiError("invite_invalid");
   const row = await db.prepare(
-    `SELECT i.family_id, i.name, f.name AS family_name
+    `SELECT i.family_id, i.name, i.make_admin, f.name AS family_name
      FROM invites i JOIN families f ON f.id = i.family_id
      WHERE i.token_hash = ? AND ${USABLE_INVITE}`,
-  ).bind(await sha256Hex(token), Date.now()).first<{ family_id: number; name: string; family_name: string }>();
+  ).bind(await sha256Hex(token), Date.now()).first<{ family_id: number; name: string; make_admin: number; family_name: string }>();
   if (!row) throw new ApiError("invite_invalid");
   return row;
 }
@@ -229,6 +233,8 @@ families.post("/:id/join", async (c) => {
   await getFamily(db, familyId);
   const inv = await usableInvite(db, token);
   if (inv.family_id !== familyId) throw new ApiError("invite_invalid");
+  // an admin invite is meant for a new person; don't spend it on an existing account
+  if (inv.make_admin === 1) throw new ApiError("admin_invite");
   if ((await familyRole(db, userId, familyId)) !== null) throw new ApiError("conflict");
   const hash = await sha256Hex(token as string);
   const now = Date.now();
@@ -236,7 +242,7 @@ families.post("/:id/join", async (c) => {
     db.prepare(
       `UPDATE invites SET used_by = ?, used_at = ?
        WHERE token_hash = ? AND family_id = ? AND used_by IS NULL AND revoked_at IS NULL AND expires_at > ?
-         AND user_id IS NULL AND reviewer = 0
+         AND user_id IS NULL AND reviewer = 0 AND make_admin = 0
          AND EXISTS (SELECT 1 FROM families f WHERE f.id = invites.family_id AND f.status = 'approved' AND f.hidden = 0)
          AND NOT EXISTS (SELECT 1 FROM family_members WHERE family_id = ? AND user_id = ?)`,
     ).bind(userId, now, hash, familyId, now, familyId, userId),
