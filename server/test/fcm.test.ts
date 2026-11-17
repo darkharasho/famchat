@@ -3,6 +3,7 @@ import { b64urlDecode } from "../src/lib/encoding";
 import {
   accessToken,
   fcmMessage,
+  fcmPreviewMessage,
   invalidateAccessToken,
   parseServiceAccount,
   sendFcm,
@@ -88,6 +89,26 @@ describe("FCM message", () => {
     });
   });
 
+  it("a preview message is data-only with the envelope and per-platform alert blocks", () => {
+    const m = fcmPreviewMessage(
+      "tok",
+      { title: "Family", body: "New message from Mom", chatId: "01CHAT" },
+      { messageId: "01MSG", senderUserId: "01USER", senderDeviceId: "01DEV", epoch: 3, envelope: '{"v":1}' },
+      "https://famchat.dev",
+    ).message as Record<string, any>;
+    expect(m).not.toHaveProperty("notification");
+    expect(m.data).toEqual({
+      chatId: "01CHAT", messageId: "01MSG", senderUserId: "01USER", senderDeviceId: "01DEV", epoch: "3",
+      env: '{"v":1}', title: "Family", body: "New message from Mom", preview: "1",
+    });
+    for (const v of Object.values(m.data)) expect(typeof v).toBe("string");
+    expect(m.android).toEqual({ priority: "high" });
+    expect(m.apns.payload.aps).toEqual({
+      alert: { title: "Family", body: "New message from Mom" }, "mutable-content": 1, sound: "default", "thread-id": "01CHAT",
+    });
+    expect(m.webpush).not.toHaveProperty("notification");
+  });
+
   it("classifies FCM answers", async () => {
     const sa = parseServiceAccount((await testServiceAccount()).json);
     const note = { title: "t", body: "b", chatId: "c" };
@@ -108,14 +129,14 @@ describe("FCM message", () => {
         if (answer instanceof Error) throw answer;
         return answer;
       }) as typeof fetch;
-      expect(await sendFcm(sa, "at", "tok", note, "https://famchat.dev", fetcher)).toBe(want);
+      expect(await sendFcm(sa, "at", fcmMessage("tok", note, "https://famchat.dev"), fetcher)).toBe(want);
     }
   });
 
   it("posts to the project's send endpoint with the bearer token", async () => {
     const sa = parseServiceAccount((await testServiceAccount()).json);
     const g = fakeGoogle();
-    await sendFcm(sa, "at-9", "tok", { title: "t", body: "b", chatId: "c" }, "https://famchat.dev", g.fetcher);
+    await sendFcm(sa, "at-9", fcmMessage("tok", { title: "t", body: "b", chatId: "c" }, "https://famchat.dev"), g.fetcher);
     expect(g.calls[0].url).toBe("https://fcm.googleapis.com/v1/projects/famchat/messages:send");
     expect(g.calls[0].headers.get("authorization")).toBe("Bearer at-9");
   });

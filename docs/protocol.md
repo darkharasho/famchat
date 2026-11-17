@@ -174,9 +174,20 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   "Test notification" to the caller's own devices that have a token, right away. `result` is `ok`,
   `stale` (token cleared), `retry`, `auth` or `error`. `configured: false` means the Worker has no
   `FCM_SERVICE_ACCOUNT` secret, so push is off.
-- A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
-  name, body "New message". Group: title = group title, body "New message from <sender>" ("<sender>
-  mentioned you" for those @mentioned). Never message content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
+- A push has one of two shapes, chosen per device. Either way the title and body are generic: direct
+  chat title = sender's name, body "New message"; group title = group title, body "New message from
+  <sender>" ("<sender> mentioned you" for those @mentioned). Tapping it opens `/chats/<chatId>`
+  (web: `fcm_options.link`).
+  - Plain (previews off, or no envelope on the job): `notification {title, body}` and `data {chatId}`.
+    Never message content.
+  - Preview (`devices.push_previews = 1` and the envelope was attached): no top-level `notification`.
+    `data` holds string values `chatId`, `messageId`, `senderUserId`, `senderDeviceId`, `epoch`,
+    `env` (the stored envelope JSON, still encrypted), `title`, `body` and `preview: "1"`. Android
+    gets `priority: high` and no notification block; iOS gets `aps.alert {title, body}`,
+    `mutable-content: 1`, sound and `thread-id`. The app decrypts `env` and shows the text itself,
+    falling back to `title`/`body`. The server never sees readable text.
+  - The envelope is attached only when its JSON is at most 3000 bytes (`MAX_PREVIEW_ENVELOPE`);
+    larger ones go as the plain shape. A retry after a transient FCM failure keeps the envelope.
 - Who gets one: every device of the other members (except those who muted the chat and weren't
   @mentioned, and none at all for a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that

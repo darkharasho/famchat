@@ -20,7 +20,12 @@ export interface PushJob {
   attempt?: number;
   /** These users were @mentioned: "<sender> mentioned you". */
   mention?: boolean;
+  /** The still-encrypted envelope, for devices with previews on to decrypt; absent when too big. */
+  preview?: { senderDeviceId: string; epoch: number; envelope: string };
 }
+
+/** An envelope longer than this (JSON characters = bytes, it is ASCII) is not attached to a push. */
+export const MAX_PREVIEW_ENVELOPE = 3000;
 
 export interface PushHook {
   notify(job: PushJob): Promise<void>;
@@ -335,7 +340,15 @@ export class FamilyHub extends DurableObject<Env> {
     }
     if (silent) return;
     // Mentioned members get their own job (other text, and it reaches them through a mute).
-    const job = { chatId, senderUserId: att.userId, messageId: id };
+    const envJson = JSON.stringify(env);
+    const job: Omit<PushJob, "userIds"> = {
+      chatId,
+      senderUserId: att.userId,
+      messageId: id,
+      ...(envJson.length <= MAX_PREVIEW_ENVELOPE
+        ? { preview: { senderDeviceId: att.deviceId, epoch: env.epoch, envelope: envJson } }
+        : {}),
+    };
     // Not awaited: the next send shouldn't wait for the push lookup and the queue.
     this.pushOffline(job, others.filter((u) => !mentioned.includes(u))).catch((e) => console.error("push hook failed", e));
     if (mentioned.length > 0) {
