@@ -1,4 +1,5 @@
 import 'package:famchat/chat/directory.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_chat_backend.dart';
@@ -38,6 +39,28 @@ void main() {
     expect(row.isAdmin, isFalse);
     expect(row.pinnedAdmin, isFalse);
     expect((await alice.db.userById(alice.userId))!.former, isNot(isTrue));
+  });
+
+  test("after first sight, a family-2 admin the server lists with no proof can't make a reset count", () async {
+    await dir.refresh();
+    final x = await backend.addUser('X');
+    addTearDown(x.dispose);
+    // A hostile server: a family 2 for Alice and Bob, with X its only (unproven) admin.
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: false));
+    backend.addFamilyRole(x.userId, const FamilyRoleDto(id: 2, admin: true));
+    final resetId = await backend.adminReset(bob.userId, by: x.userId);
+    final bob2 = await backend.claimReset(bob.userId, resetId);
+    addTearDown(bob2.dispose);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue, reason: 'manual banner, not silently accepted');
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+    expect(await alice.db.allResets(), isEmpty);
+    // Listing X as a family-1 admin too (no proof) doesn't help: family 2 never fed family 1's pins.
+    backend.setAdmin(x.userId);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue);
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
   });
 
   test('changed identity is flagged until acknowledged', () async {

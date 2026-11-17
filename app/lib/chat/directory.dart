@@ -60,7 +60,7 @@ class Directory {
     // first use, like identity keys); after that only signed promotions add admins.
     final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
     final inputs = <TrustInput>[];
-    // Today's single family: this device's pins are family 1's (none yet on first sight).
+    // Today's stored pins are family 1's (none yet on first sight).
     final pinned1 = <String>{};
     for (final u in users) {
       final old = await _db.userById(u.id);
@@ -78,7 +78,15 @@ class Directory {
         resets: u.resets,
       ));
     }
-    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: firstSight ? const {} : {1: pinned1});
+    // Stopgap until per-family pins are stored: after first sight, family 1 keeps its pins and any
+    // other family of mine counts as seen with none (only signed promotions add its admins), so
+    // a family the server adds later can't bring in admins on its word alone.
+    final myFamilies = [for (final i in inputs) if (i.userId == _me.userId) ...i.families];
+    final pinned = <int, Set<String>>{
+      if (!firstSight)
+        for (final f in myFamilies) f.id: f.id == 1 ? pinned1 : <String>{},
+    };
+    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: pinned);
     for (final u in users) {
       final mine = u.id == _me.userId;
       final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
@@ -89,7 +97,8 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
-        pinnedAdmin: t.admins.values.any((a) => a.contains(u.id)),
+        // Family 1's pins only: no other family may feed them.
+        pinnedAdmin: t.admins[1]?.contains(u.id) ?? false,
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,

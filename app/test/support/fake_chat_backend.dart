@@ -28,6 +28,9 @@ class _User {
   bool deleted = false;
   bool former = false;
   AdminProofDto? adminProof;
+
+  /// Roles in families other than family 1 (which everyone non-former is in).
+  final otherFamilies = <FamilyRoleDto>[];
   final resets = <_Reset>[];
   String? avatarKey;
   Uint8List? avatar;
@@ -233,6 +236,9 @@ class FakeChatBackend {
 
   /// The server marks [userId] admin (or not) with no signed promotion (the bootstrap admin, or a lie).
   void setAdmin(String userId, [bool admin = true]) => _users[userId]!.isAdmin = admin;
+
+  /// The server lists [userId] in another family (a real one, or a lie).
+  void addFamilyRole(String userId, FamilyRoleDto role) => _users[userId]!.otherFamilies.add(role);
 
   /// `POST /admin/users/:id/admin` signed by [by]'s identity key.
   Future<void> promote(String userId, {required String by}) async {
@@ -566,7 +572,7 @@ class FakeChatApi implements ChatApi {
             former: u.former,
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.former ? null : u.adminProof,
-            families: u.former ? const [] : [FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof)],
+            families: u.former ? const [] : [FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof), ...u.otherFamilies],
             deleted: u.deleted,
             avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),

@@ -419,6 +419,26 @@ void main() {
       expect(out.acknowledged, {'GRAN'});
       expect(out.witnessed.map((w) => w.userId), ['GRAN']);
     });
+
+    test("a former target's claimed reset by a trusted admin teaches its old key (history) but is not witnessed or acknowledged", () async {
+      final dad1 = await K.make(), dad2 = await K.make();
+      final momR = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final dadR = await makeReset(userId: 'DAD', signerUserId: 'ADM', signer: admin, old: dad1, next: dad2);
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        // First seen under the new key: history teaches the old one.
+        user('MOM', server: mom2, families: const [], resets: [momR]),
+        // Trusted under the old key: forward still needs a shared family.
+        user('DAD', server: dad2, trusted: dad1, families: const [], resets: [dadR]),
+      ]);
+      expect(out.known['MOM'], {mom1.pub, mom2.pub});
+      expect(out.trusted['DAD'], dad1.pub);
+      expect(out.known['DAD'], {dad1.pub});
+      expect(out.acknowledged, isEmpty);
+      expect(out.witnessed, isEmpty);
+      expect(out.retired['MOM'] ?? {}, isEmpty);
+      expect(out.retired['DAD'] ?? {}, isEmpty);
+    });
   });
 
   group('recovery', () {

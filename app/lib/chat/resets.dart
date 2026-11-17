@@ -15,8 +15,11 @@
 // A reset counts only if its statement verifies under its signer key and either
 // - (admin) the signer is me, or a trusted admin of a family the reset user and I both belong to
 //   (some F on the user's `families` with the signer in admins[F]), other than the user, signing
-//   with a key this device trusts for them; a former user (no families) gets no admin reset
-//   counted, or
+//   with a key this device trusts for them, or
+// - (admin, history only) the user is a former one (no families: someone I only share a chat
+//   with, listed so old messages still verify) and the signer is me or a trusted admin of any
+//   family of mine; forward, witnessed and retired still need a shared family, so a former user
+//   never gets an admin reset acknowledged, or
 // - (recovery) the user's old identity key — one this device already trusts — vouched for the
 //   recovery key that signed it.
 // A reset that doesn't count leaves the trusted key alone, so the key mismatch gets the manual
@@ -153,11 +156,17 @@ Future<TrustOutcome> resolveTrust(
   /// [signer]'s current trusted key (as of the start, or after this pass moved it).
   bool current(String signer, String pub) => pub == trusted0[signer] || pub == trusted[signer];
 
+  /// [signer] is a trusted admin of a family [targetFamilies] shares with me; for history only, a
+  /// former target (no families) accepts a trusted admin of any family of mine.
+  bool adminOf(String signer, List<FamilyRoleDto> targetFamilies, {required bool history}) =>
+      targetFamilies.any((f) => admins[f.id]?.contains(signer) ?? false) ||
+      (history && targetFamilies.isEmpty && admins.values.any((a) => a.contains(signer)));
+
   bool counted(_Checked c, {required bool history}) {
     final r = c.r;
     if (r.signerKind == 'recovery') return known[c.userId]!.contains(r.oldIdentityPub);
     final signer = r.signerUserId;
-    if (signer != myUserId && !families[c.userId]!.any((f) => admins[f.id]?.contains(signer) ?? false)) return false;
+    if (signer != myUserId && !adminOf(signer, families[c.userId]!, history: history)) return false;
     return history ? (known[signer]?.contains(r.signerPub) ?? false) : current(signer, r.signerPub);
   }
 
