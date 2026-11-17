@@ -136,4 +136,13 @@ describe("promotion and family membership", () => {
     expect((await promote(admin, outsider.userId)).status).toBe(404);
     expect(await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(outsider.userId).first<number>("is_admin")).toBe(0);
   });
+
+  it("compat promote doesn't touch a user deleted between check and write", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const dad = await insertUserWithDevice({ name: "Dad" });
+    await env.DB.prepare("UPDATE users SET deleted_at = 1 WHERE id = ?").bind(dad.userId).run();
+    expect((await promote(admin, dad.userId)).status).toBe(404);
+    expect(await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(dad.userId).first<number>("is_admin")).toBe(0);
+    expect(await env.DB.prepare("SELECT role FROM family_members WHERE family_id = 1 AND user_id = ?").bind(dad.userId).first<string>("role")).toBe("member");
+  });
 });

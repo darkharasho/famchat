@@ -205,9 +205,10 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   if (!member) throw new ApiError("not_found");
   await db.batch([
     db.prepare(
-      "UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE family_id = ? AND user_id = ?",
-    ).bind(by, signer, sig, FAMILY_ONE, userId),
-    db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+      `UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ?
+         WHERE family_id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at IS NULL)`,
+    ).bind(by, signer, sig, FAMILY_ONE, userId, userId),
+    db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL")
       .bind(by, signer, sig, userId),
   ]);
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by });

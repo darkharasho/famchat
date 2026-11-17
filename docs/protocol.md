@@ -396,6 +396,17 @@ Second admin: `POST /admin/users/:id/admin {sig}` (admin) → 204 (400 bad signa
 user). `sig` is the caller's identity key over `"famchat-admin-v1" ‖ str(userId) ‖ str(callerId)`;
 `/users` shows it as `adminProof: {byUserId, signerPub, sig}` (null for the bootstrapped admin).
 
+Per-family promotion: `POST /families/:id/admins/:userId {sig}` (caller an admin of approved family
+`:id`) → 204 (400 `invalid_request` bad signature, 403 `forbidden` caller not an admin of `:id` or
+`:id` not approved, 404 `not_found` target not a live member of `:id`). It writes the proof on the
+target's `family_members` row (`role`, `admin_by`, `admin_signer_pub`, `admin_sig`); for family 1 it
+also mirrors it into the `users` columns. Logs `admin_promoted` with `payload {familyId}`. `sig` is the
+caller's identity key over the **v2** proof `"famchat-admin-v2" ‖ str(String(familyId)) ‖ str(userId) ‖
+str(callerId)` (`str` = u16 big-endian length + UTF-8; the family id is its decimal string). v2
+binds the family so a proof can't be replayed into another family; a v1 proof is rejected here, and
+the compat route above (family 1 only) keeps accepting v1. Shared test vector:
+`server/test/reset-vector.test.ts` (`v2Vector`).
+
 Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
 as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
 `HKDF-SHA256(UTF-8(code), salt = "", info = "famchat-recovery-seed-v1")`, and registers
@@ -554,4 +565,4 @@ Every signature, MAC and key derivation starts with its own domain string, and n
 prefix of another: `famchat-device-cert-v1`, `famchat-wrap-v1`, `famchat-envelope-v1`,
 `famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info),
 `famchat-media-v1` (media AEAD associated data), `famchat-reset-v1`, `famchat-reset-claim-v1`,
-`famchat-recovery-key-v1`, `famchat-admin-v1` (signatures), `famchat-recovery-seed-v1` (HKDF info).
+`famchat-recovery-key-v1`, `famchat-admin-v1`, `famchat-admin-v2` (signatures), `famchat-recovery-seed-v1` (HKDF info).
