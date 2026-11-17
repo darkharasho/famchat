@@ -3927,8 +3927,19 @@ class $LocalFamilyAdminsTable extends LocalFamilyAdmins
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _proofSigMeta = const VerificationMeta(
+    'proofSig',
+  );
   @override
-  List<GeneratedColumn> get $columns => [familyId, userId];
+  late final GeneratedColumn<String> proofSig = GeneratedColumn<String>(
+    'proof_sig',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [familyId, userId, proofSig];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -3957,6 +3968,12 @@ class $LocalFamilyAdminsTable extends LocalFamilyAdmins
     } else if (isInserting) {
       context.missing(_userIdMeta);
     }
+    if (data.containsKey('proof_sig')) {
+      context.handle(
+        _proofSigMeta,
+        proofSig.isAcceptableOrUnknown(data['proof_sig']!, _proofSigMeta),
+      );
+    }
     return context;
   }
 
@@ -3974,6 +3991,10 @@ class $LocalFamilyAdminsTable extends LocalFamilyAdmins
         DriftSqlType.string,
         data['${effectivePrefix}user_id'],
       )!,
+      proofSig: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}proof_sig'],
+      ),
     );
   }
 
@@ -3986,12 +4007,23 @@ class $LocalFamilyAdminsTable extends LocalFamilyAdmins
 class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
   final int familyId;
   final String userId;
-  const FamilyAdminRow({required this.familyId, required this.userId});
+
+  /// The `sig` of their valid promotion proof for this family as last seen, or null: revoked (see
+  /// [LocalRevokedProofs]) when the pin is dropped or a different proof replaces it.
+  final String? proofSig;
+  const FamilyAdminRow({
+    required this.familyId,
+    required this.userId,
+    this.proofSig,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['family_id'] = Variable<int>(familyId);
     map['user_id'] = Variable<String>(userId);
+    if (!nullToAbsent || proofSig != null) {
+      map['proof_sig'] = Variable<String>(proofSig);
+    }
     return map;
   }
 
@@ -3999,6 +4031,9 @@ class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
     return LocalFamilyAdminsCompanion(
       familyId: Value(familyId),
       userId: Value(userId),
+      proofSig: proofSig == null && nullToAbsent
+          ? const Value.absent()
+          : Value(proofSig),
     );
   }
 
@@ -4010,6 +4045,7 @@ class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
     return FamilyAdminRow(
       familyId: serializer.fromJson<int>(json['familyId']),
       userId: serializer.fromJson<String>(json['userId']),
+      proofSig: serializer.fromJson<String?>(json['proofSig']),
     );
   }
   @override
@@ -4018,17 +4054,24 @@ class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
     return <String, dynamic>{
       'familyId': serializer.toJson<int>(familyId),
       'userId': serializer.toJson<String>(userId),
+      'proofSig': serializer.toJson<String?>(proofSig),
     };
   }
 
-  FamilyAdminRow copyWith({int? familyId, String? userId}) => FamilyAdminRow(
+  FamilyAdminRow copyWith({
+    int? familyId,
+    String? userId,
+    Value<String?> proofSig = const Value.absent(),
+  }) => FamilyAdminRow(
     familyId: familyId ?? this.familyId,
     userId: userId ?? this.userId,
+    proofSig: proofSig.present ? proofSig.value : this.proofSig,
   );
   FamilyAdminRow copyWithCompanion(LocalFamilyAdminsCompanion data) {
     return FamilyAdminRow(
       familyId: data.familyId.present ? data.familyId.value : this.familyId,
       userId: data.userId.present ? data.userId.value : this.userId,
+      proofSig: data.proofSig.present ? data.proofSig.value : this.proofSig,
     );
   }
 
@@ -4036,44 +4079,51 @@ class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
   String toString() {
     return (StringBuffer('FamilyAdminRow(')
           ..write('familyId: $familyId, ')
-          ..write('userId: $userId')
+          ..write('userId: $userId, ')
+          ..write('proofSig: $proofSig')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(familyId, userId);
+  int get hashCode => Object.hash(familyId, userId, proofSig);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is FamilyAdminRow &&
           other.familyId == this.familyId &&
-          other.userId == this.userId);
+          other.userId == this.userId &&
+          other.proofSig == this.proofSig);
 }
 
 class LocalFamilyAdminsCompanion extends UpdateCompanion<FamilyAdminRow> {
   final Value<int> familyId;
   final Value<String> userId;
+  final Value<String?> proofSig;
   final Value<int> rowid;
   const LocalFamilyAdminsCompanion({
     this.familyId = const Value.absent(),
     this.userId = const Value.absent(),
+    this.proofSig = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalFamilyAdminsCompanion.insert({
     required int familyId,
     required String userId,
+    this.proofSig = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : familyId = Value(familyId),
        userId = Value(userId);
   static Insertable<FamilyAdminRow> custom({
     Expression<int>? familyId,
     Expression<String>? userId,
+    Expression<String>? proofSig,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (familyId != null) 'family_id': familyId,
       if (userId != null) 'user_id': userId,
+      if (proofSig != null) 'proof_sig': proofSig,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4081,11 +4131,13 @@ class LocalFamilyAdminsCompanion extends UpdateCompanion<FamilyAdminRow> {
   LocalFamilyAdminsCompanion copyWith({
     Value<int>? familyId,
     Value<String>? userId,
+    Value<String?>? proofSig,
     Value<int>? rowid,
   }) {
     return LocalFamilyAdminsCompanion(
       familyId: familyId ?? this.familyId,
       userId: userId ?? this.userId,
+      proofSig: proofSig ?? this.proofSig,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4099,6 +4151,9 @@ class LocalFamilyAdminsCompanion extends UpdateCompanion<FamilyAdminRow> {
     if (userId.present) {
       map['user_id'] = Variable<String>(userId.value);
     }
+    if (proofSig.present) {
+      map['proof_sig'] = Variable<String>(proofSig.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4110,6 +4165,269 @@ class LocalFamilyAdminsCompanion extends UpdateCompanion<FamilyAdminRow> {
     return (StringBuffer('LocalFamilyAdminsCompanion(')
           ..write('familyId: $familyId, ')
           ..write('userId: $userId, ')
+          ..write('proofSig: $proofSig, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalRevokedProofsTable extends LocalRevokedProofs
+    with TableInfo<$LocalRevokedProofsTable, RevokedProofRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalRevokedProofsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _familyIdMeta = const VerificationMeta(
+    'familyId',
+  );
+  @override
+  late final GeneratedColumn<int> familyId = GeneratedColumn<int>(
+    'family_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sigMeta = const VerificationMeta('sig');
+  @override
+  late final GeneratedColumn<String> sig = GeneratedColumn<String>(
+    'sig',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [familyId, userId, sig];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_revoked_proofs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RevokedProofRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('family_id')) {
+      context.handle(
+        _familyIdMeta,
+        familyId.isAcceptableOrUnknown(data['family_id']!, _familyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_familyIdMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('sig')) {
+      context.handle(
+        _sigMeta,
+        sig.isAcceptableOrUnknown(data['sig']!, _sigMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sigMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {familyId, userId, sig};
+  @override
+  RevokedProofRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RevokedProofRow(
+      familyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}family_id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      )!,
+      sig: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sig'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalRevokedProofsTable createAlias(String alias) {
+    return $LocalRevokedProofsTable(attachedDatabase, alias);
+  }
+}
+
+class RevokedProofRow extends DataClass implements Insertable<RevokedProofRow> {
+  final int familyId;
+  final String userId;
+  final String sig;
+  const RevokedProofRow({
+    required this.familyId,
+    required this.userId,
+    required this.sig,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['family_id'] = Variable<int>(familyId);
+    map['user_id'] = Variable<String>(userId);
+    map['sig'] = Variable<String>(sig);
+    return map;
+  }
+
+  LocalRevokedProofsCompanion toCompanion(bool nullToAbsent) {
+    return LocalRevokedProofsCompanion(
+      familyId: Value(familyId),
+      userId: Value(userId),
+      sig: Value(sig),
+    );
+  }
+
+  factory RevokedProofRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RevokedProofRow(
+      familyId: serializer.fromJson<int>(json['familyId']),
+      userId: serializer.fromJson<String>(json['userId']),
+      sig: serializer.fromJson<String>(json['sig']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'familyId': serializer.toJson<int>(familyId),
+      'userId': serializer.toJson<String>(userId),
+      'sig': serializer.toJson<String>(sig),
+    };
+  }
+
+  RevokedProofRow copyWith({int? familyId, String? userId, String? sig}) =>
+      RevokedProofRow(
+        familyId: familyId ?? this.familyId,
+        userId: userId ?? this.userId,
+        sig: sig ?? this.sig,
+      );
+  RevokedProofRow copyWithCompanion(LocalRevokedProofsCompanion data) {
+    return RevokedProofRow(
+      familyId: data.familyId.present ? data.familyId.value : this.familyId,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      sig: data.sig.present ? data.sig.value : this.sig,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RevokedProofRow(')
+          ..write('familyId: $familyId, ')
+          ..write('userId: $userId, ')
+          ..write('sig: $sig')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(familyId, userId, sig);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RevokedProofRow &&
+          other.familyId == this.familyId &&
+          other.userId == this.userId &&
+          other.sig == this.sig);
+}
+
+class LocalRevokedProofsCompanion extends UpdateCompanion<RevokedProofRow> {
+  final Value<int> familyId;
+  final Value<String> userId;
+  final Value<String> sig;
+  final Value<int> rowid;
+  const LocalRevokedProofsCompanion({
+    this.familyId = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.sig = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalRevokedProofsCompanion.insert({
+    required int familyId,
+    required String userId,
+    required String sig,
+    this.rowid = const Value.absent(),
+  }) : familyId = Value(familyId),
+       userId = Value(userId),
+       sig = Value(sig);
+  static Insertable<RevokedProofRow> custom({
+    Expression<int>? familyId,
+    Expression<String>? userId,
+    Expression<String>? sig,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (familyId != null) 'family_id': familyId,
+      if (userId != null) 'user_id': userId,
+      if (sig != null) 'sig': sig,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalRevokedProofsCompanion copyWith({
+    Value<int>? familyId,
+    Value<String>? userId,
+    Value<String>? sig,
+    Value<int>? rowid,
+  }) {
+    return LocalRevokedProofsCompanion(
+      familyId: familyId ?? this.familyId,
+      userId: userId ?? this.userId,
+      sig: sig ?? this.sig,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (familyId.present) {
+      map['family_id'] = Variable<int>(familyId.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (sig.present) {
+      map['sig'] = Variable<String>(sig.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalRevokedProofsCompanion(')
+          ..write('familyId: $familyId, ')
+          ..write('userId: $userId, ')
+          ..write('sig: $sig, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4334,6 +4652,8 @@ abstract class _$ChatDb extends GeneratedDatabase {
   late final $LocalFamiliesTable localFamilies = $LocalFamiliesTable(this);
   late final $LocalFamilyAdminsTable localFamilyAdmins =
       $LocalFamilyAdminsTable(this);
+  late final $LocalRevokedProofsTable localRevokedProofs =
+      $LocalRevokedProofsTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -4353,6 +4673,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localResets,
     localFamilies,
     localFamilyAdmins,
+    localRevokedProofs,
     meta,
     localMessagesChatSeq,
   ];
@@ -6356,12 +6677,14 @@ typedef $$LocalFamilyAdminsTableCreateCompanionBuilder =
     LocalFamilyAdminsCompanion Function({
       required int familyId,
       required String userId,
+      Value<String?> proofSig,
       Value<int> rowid,
     });
 typedef $$LocalFamilyAdminsTableUpdateCompanionBuilder =
     LocalFamilyAdminsCompanion Function({
       Value<int> familyId,
       Value<String> userId,
+      Value<String?> proofSig,
       Value<int> rowid,
     });
 
@@ -6381,6 +6704,11 @@ class $$LocalFamilyAdminsTableFilterComposer
 
   ColumnFilters<String> get userId => $composableBuilder(
     column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get proofSig => $composableBuilder(
+    column: $table.proofSig,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6403,6 +6731,11 @@ class $$LocalFamilyAdminsTableOrderingComposer
     column: $table.userId,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get proofSig => $composableBuilder(
+    column: $table.proofSig,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalFamilyAdminsTableAnnotationComposer
@@ -6419,6 +6752,9 @@ class $$LocalFamilyAdminsTableAnnotationComposer
 
   GeneratedColumn<String> get userId =>
       $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get proofSig =>
+      $composableBuilder(column: $table.proofSig, builder: (column) => column);
 }
 
 class $$LocalFamilyAdminsTableTableManager
@@ -6459,20 +6795,24 @@ class $$LocalFamilyAdminsTableTableManager
               ({
                 Value<int> familyId = const Value.absent(),
                 Value<String> userId = const Value.absent(),
+                Value<String?> proofSig = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalFamilyAdminsCompanion(
                 familyId: familyId,
                 userId: userId,
+                proofSig: proofSig,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
                 required int familyId,
                 required String userId,
+                Value<String?> proofSig = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalFamilyAdminsCompanion.insert(
                 familyId: familyId,
                 userId: userId,
+                proofSig: proofSig,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -6507,6 +6847,182 @@ typedef $$LocalFamilyAdminsTableProcessedTableManager =
         BaseReferences<_$ChatDb, $LocalFamilyAdminsTable, FamilyAdminRow>,
       ),
       FamilyAdminRow,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalRevokedProofsTableCreateCompanionBuilder =
+    LocalRevokedProofsCompanion Function({
+      required int familyId,
+      required String userId,
+      required String sig,
+      Value<int> rowid,
+    });
+typedef $$LocalRevokedProofsTableUpdateCompanionBuilder =
+    LocalRevokedProofsCompanion Function({
+      Value<int> familyId,
+      Value<String> userId,
+      Value<String> sig,
+      Value<int> rowid,
+    });
+
+class $$LocalRevokedProofsTableFilterComposer
+    extends Composer<_$ChatDb, $LocalRevokedProofsTable> {
+  $$LocalRevokedProofsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sig => $composableBuilder(
+    column: $table.sig,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalRevokedProofsTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalRevokedProofsTable> {
+  $$LocalRevokedProofsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sig => $composableBuilder(
+    column: $table.sig,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalRevokedProofsTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalRevokedProofsTable> {
+  $$LocalRevokedProofsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get familyId =>
+      $composableBuilder(column: $table.familyId, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get sig =>
+      $composableBuilder(column: $table.sig, builder: (column) => column);
+}
+
+class $$LocalRevokedProofsTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalRevokedProofsTable,
+          RevokedProofRow,
+          $$LocalRevokedProofsTableFilterComposer,
+          $$LocalRevokedProofsTableOrderingComposer,
+          $$LocalRevokedProofsTableAnnotationComposer,
+          $$LocalRevokedProofsTableCreateCompanionBuilder,
+          $$LocalRevokedProofsTableUpdateCompanionBuilder,
+          (
+            RevokedProofRow,
+            BaseReferences<_$ChatDb, $LocalRevokedProofsTable, RevokedProofRow>,
+          ),
+          RevokedProofRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalRevokedProofsTableTableManager(
+    _$ChatDb db,
+    $LocalRevokedProofsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalRevokedProofsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalRevokedProofsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalRevokedProofsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> familyId = const Value.absent(),
+                Value<String> userId = const Value.absent(),
+                Value<String> sig = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRevokedProofsCompanion(
+                familyId: familyId,
+                userId: userId,
+                sig: sig,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required int familyId,
+                required String userId,
+                required String sig,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRevokedProofsCompanion.insert(
+                familyId: familyId,
+                userId: userId,
+                sig: sig,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalRevokedProofsTable, RevokedProofRow>(table),
+                  BaseReferences<
+                    _$ChatDb,
+                    $LocalRevokedProofsTable,
+                    RevokedProofRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalRevokedProofsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalRevokedProofsTable,
+      RevokedProofRow,
+      $$LocalRevokedProofsTableFilterComposer,
+      $$LocalRevokedProofsTableOrderingComposer,
+      $$LocalRevokedProofsTableAnnotationComposer,
+      $$LocalRevokedProofsTableCreateCompanionBuilder,
+      $$LocalRevokedProofsTableUpdateCompanionBuilder,
+      (
+        RevokedProofRow,
+        BaseReferences<_$ChatDb, $LocalRevokedProofsTable, RevokedProofRow>,
+      ),
+      RevokedProofRow,
       PrefetchHooks Function()
     >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
@@ -6658,5 +7174,7 @@ class $ChatDbManager {
       $$LocalFamiliesTableTableManager(_db, _db.localFamilies);
   $$LocalFamilyAdminsTableTableManager get localFamilyAdmins =>
       $$LocalFamilyAdminsTableTableManager(_db, _db.localFamilyAdmins);
+  $$LocalRevokedProofsTableTableManager get localRevokedProofs =>
+      $$LocalRevokedProofsTableTableManager(_db, _db.localRevokedProofs);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }

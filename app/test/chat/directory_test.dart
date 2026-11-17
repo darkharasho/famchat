@@ -240,6 +240,68 @@ void main() {
     expect((await alice.db.familyPins())[1], isEmpty);
   });
 
+  test('a demoted admin re-listed with the old proof stays untrusted', () async {
+    final carol = await backend.addUser('Carol');
+    addTearDown(carol.dispose);
+    backend.setAdmin(carol.userId);
+    await dir.refresh();
+    await backend.promote(bob.userId, by: carol.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId, bob.userId});
+    backend.setAdmin(bob.userId, false);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId});
+    expect(await alice.db.revokedProofs(), hasLength(1));
+    // The server lists Bob as an admin again with Carol's old proof (Ed25519 is deterministic, so
+    // Carol promoting him again makes the same signature): he stays untrusted here.
+    backend.setAdmin(bob.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId});
+    await backend.promote(bob.userId, by: carol.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId});
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isFalse);
+  });
+
+  test("a different admin's fresh proof for the same person re-trusts them", () async {
+    final carol = await backend.addUser('Carol'), dave = await backend.addUser('Dave');
+    addTearDown(carol.dispose);
+    addTearDown(dave.dispose);
+    backend.setAdmin(carol.userId);
+    backend.setAdmin(dave.userId);
+    await dir.refresh();
+    await backend.promote(bob.userId, by: carol.userId);
+    await dir.refresh();
+    backend.setAdmin(bob.userId, false);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId, dave.userId});
+    await backend.promote(bob.userId, by: dave.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId, dave.userId, bob.userId});
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+  });
+
+  test("a pinned admin's replaced proof is revoked, so it can't re-trust them after a demotion", () async {
+    final carol = await backend.addUser('Carol'), dave = await backend.addUser('Dave');
+    addTearDown(carol.dispose);
+    addTearDown(dave.dispose);
+    backend.setAdmin(carol.userId);
+    backend.setAdmin(dave.userId);
+    await dir.refresh();
+    await backend.promote(bob.userId, by: carol.userId);
+    await dir.refresh();
+    // Demoted and re-promoted by Dave between two refreshes: Bob stays pinned, Carol's proof is spent.
+    await backend.promote(bob.userId, by: dave.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId, dave.userId, bob.userId});
+    backend.setAdmin(bob.userId, false);
+    await dir.refresh();
+    await backend.promote(bob.userId, by: carol.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId, dave.userId});
+    expect(await alice.db.revokedProofs(), hasLength(2));
+  });
+
   test('changed identity is flagged until acknowledged', () async {
     await dir.refresh();
     final bob2 = await backend.resetUser(bob.userId);

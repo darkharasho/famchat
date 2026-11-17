@@ -449,7 +449,13 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
      that, the device adds an admin to a family only if their `families[].adminProof` is a valid
      promotion for that family: a v2 proof, or a v1 proof in family 1 only. The proof must be signed
      with the current key of a trusted admin of that family. An admin the server stops listing for a
-     family is unpinned there, and needs a fresh proof to be trusted again. A family the device has
+     family is unpinned there, and needs a fresh proof to be trusted again: the device records the
+     `sig` of the valid proof it last saw for them in that family as revoked (and, while they stay
+     pinned, any earlier proof a different one replaces), and a revoked `(familyId, userId, sig)`
+     never adds that admin again. Ed25519 signatures are deterministic, so the same promoter
+     promoting them again makes the same, revoked proof: on a device that saw the demotion they stay
+     untrusted (fails safe: their resets get banners only); a proof from a different trusted admin
+     trusts them again. Revoked proofs aren't part of the pairing handover. A family the device has
      seen keeps its pins frozen when the server stops listing it (the user left, or the server
      omits it or the user's whole entry): they don't count meanwhile, and if the family is listed
      again they are the starting point, so only never-seen families are trusted on first sight.

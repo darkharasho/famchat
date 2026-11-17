@@ -174,6 +174,7 @@ void main() {
       raw
         ..execute('DROP TABLE local_families')
         ..execute('DROP TABLE local_family_admins')
+        ..execute('DROP TABLE local_revoked_proofs')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids');
       seed(raw);
@@ -200,7 +201,7 @@ void main() {
     expect(await db.familyPins(), isEmpty);
   });
 
-  test('schema 8 to 9: chats get a family id and users their family ids, rows kept', () async {
+  test('schema 8 to 9: chats get a family id, users their family ids, pins a proof and revoked proofs a table; rows kept', () async {
     final dir = await Directory.systemTemp.createTemp('famchat_migration');
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/chat.db');
@@ -212,6 +213,10 @@ void main() {
       raw
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_family_admins DROP COLUMN proof_sig')
+        ..execute('DROP TABLE local_revoked_proofs')
+        ..execute("INSERT INTO local_families (id) VALUES (1)")
+        ..execute("INSERT INTO local_family_admins (family_id, user_id) VALUES (1, 'A')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
@@ -226,6 +231,18 @@ void main() {
     expect(chat.familyId, isNull);
     await db.putUser(user.copyWith(familyIds: '[1,2]'));
     expect((await db.userById('A'))!.familyIds, '[1,2]');
+    // Pins kept; the revoked proofs table exists, and a dropped pin's last seen proof lands there.
+    expect(await db.familyPins(), {
+      1: {'A'},
+    });
+    expect(await db.revokedProofs(), isEmpty);
+    await db.updateFamilyPins({
+      1: {'A'},
+    }, proofs: {
+      1: {'A': 's1'},
+    });
+    await db.updateFamilyPins({1: {}});
+    expect(await db.revokedProofs(), {(1, 'A', 's1')});
   });
 
   test('family pins: replaced as a whole, families absent from the map are dropped', () async {

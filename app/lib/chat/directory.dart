@@ -74,7 +74,14 @@ class Directory {
     }
     // The first time this device sees a family, it pins the admins the server lists for it (trust
     // on first use, like identity keys); after that only signed promotions add admins there.
-    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: await _db.familyPins());
+    // An admin it unpins needs a fresh proof to be trusted there again: their last seen one is
+    // revoked (ChatDb.updateFamilyPins).
+    final t = await resolveTrust(
+      inputs,
+      myUserId: _me.userId,
+      pinned: await _db.familyPins(),
+      revoked: await _db.revokedProofs(),
+    );
     for (final u in users) {
       final mine = u.id == _me.userId;
       final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
@@ -116,7 +123,7 @@ class Directory {
     // Only the families on my entry are updated. One the server stops listing (or my whole entry,
     // missing or former) keeps its pins frozen and stays seen: the server can't force a new first
     // sight, which would trust whoever it lists then.
-    await _db.updateFamilyPins(t.admins);
+    await _db.updateFamilyPins(t.admins, proofs: t.proofs);
     for (final w in t.witnessed) {
       await _db.recordReset(
         id: w.reset.id,

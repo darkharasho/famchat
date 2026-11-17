@@ -8,8 +8,13 @@
 //   first use).
 // - Then: a user the server lists as an admin of family F becomes a trusted admin of F if their
 //   signed promotion (v2 for F, or a legacy v1 proof in family 1 only) was made by someone else, by
-//   me or a trusted admin of F, with that promoter's current trusted key. Becoming trusted again
-//   after a demotion needs such a fresh proof.
+//   me or a trusted admin of F, with that promoter's current trusted key, and isn't revoked here.
+//   Becoming trusted again after a demotion needs such a fresh proof: when a pin is dropped (the
+//   server stops listing a pinned admin of a family on my entry), the directory revokes the proof
+//   last seen for them (and a pinned admin's proof is revoked when a different one replaces it).
+//   Ed25519 is deterministic, so the same promoter promoting them again yields the same, revoked
+//   signature: that stays untrusted on this device (fails safe: their resets only get banners); a
+//   different admin's proof trusts them again.
 // My own user needs no pin (nobody else can make this user's signatures).
 //
 // A reset counts only if its statement verifies under its signer key and either
@@ -80,6 +85,7 @@ class TrustOutcome {
     required this.acknowledged,
     required this.witnessed,
     required this.admins,
+    this.proofs = const {},
   });
 
   final Map<String, String> trusted;
@@ -97,6 +103,10 @@ class TrustOutcome {
   /// Per family of mine, the users this device trusts as its admins (pinned and still listed, or
   /// promoted by a trusted admin of it).
   final Map<int, Set<String>> admins;
+
+  /// Per family of mine, the sig of each trusted admin's valid promotion proof listed now (to
+  /// revoke if they're unpinned later).
+  final Map<int, Map<String, String>> proofs;
 }
 
 class _Checked {
@@ -116,10 +126,12 @@ class _Promotion {
 }
 
 /// [pinned]: per family this device has seen, the admins it trusted there (absent: first sight).
+/// [revoked]: promotion proofs, as (familyId, userId, sig), that never add an admin.
 Future<TrustOutcome> resolveTrust(
   List<TrustInput> users, {
   required String myUserId,
   required Map<int, Set<String>> pinned,
+  Set<(int, String, String)> revoked = const {},
 }) async {
   final trusted0 = {for (final u in users) u.userId: u.trustedKey};
   final trusted = {...trusted0};
@@ -140,6 +152,7 @@ Future<TrustOutcome> resolveTrust(
 
   // Signature checks that don't depend on trust, once each.
   final candidates = <_Checked>[];
+  final valid = <_Promotion>[]; // valid promotion proofs, revoked ones included
   final promotions = <_Promotion>[];
   for (final u in users) {
     for (final r in u.resets) {
@@ -149,7 +162,9 @@ Future<TrustOutcome> resolveTrust(
     for (final f in u.families) {
       final p = f.adminProof;
       if (!myFamilies.contains(f.id) || !f.admin || p == null || p.byUserId == u.userId) continue;
-      if (await _promotionValid(f.id, u.userId, p)) promotions.add(_Promotion(f.id, u.userId, p));
+      if (!await _promotionValid(f.id, u.userId, p)) continue;
+      valid.add(_Promotion(f.id, u.userId, p));
+      if (!revoked.contains((f.id, u.userId, p.sig))) promotions.add(_Promotion(f.id, u.userId, p));
     }
   }
 
@@ -212,6 +227,13 @@ Future<TrustOutcome> resolveTrust(
     acknowledged: acknowledged,
     witnessed: witnessed,
     admins: admins,
+    proofs: {
+      for (final fid in myFamilies)
+        fid: {
+          for (final pr in valid)
+            if (pr.familyId == fid && admins[fid]!.contains(pr.userId)) pr.userId: pr.proof.sig,
+        },
+    },
   );
 }
 
