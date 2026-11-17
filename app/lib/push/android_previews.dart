@@ -74,6 +74,21 @@ Future<FlutterLocalNotificationsPlugin> _androidNotifications({void Function(Str
   return plugin;
 }
 
+/// How a push notification for [chatId] shows on Android: one per chat (tag), and expandable to
+/// the whole [body], which a single line would cut off.
+AndroidNotificationDetails previewNotificationDetails(String chatId, String body) => AndroidNotificationDetails(
+      _channel.id,
+      _channel.name,
+      channelDescription: _channel.description,
+      importance: Importance.high,
+      priority: Priority.high,
+      tag: chatId,
+      styleInformation: BigTextStyleInformation(body),
+      // flutter_local_notifications 23 has no publicVersion; the lock screen's own "contents
+      // hidden" redaction stands in for a generic public version.
+      visibility: NotificationVisibility.private,
+    );
+
 /// Shows a preview push in the background or with the app closed. Other pushes carry a
 /// notification block the OS shows itself.
 @pragma('vm:entry-point')
@@ -104,19 +119,7 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
       title: text.title,
       body: text.body,
       payload: chatRoute(chatId),
-      notificationDetails: NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
-          importance: Importance.high,
-          priority: Priority.high,
-          tag: chatId,
-          // flutter_local_notifications 23 has no publicVersion; the lock screen's own "contents
-          // hidden" redaction stands in for a generic public version.
-          visibility: NotificationVisibility.private,
-        ),
-      ),
+      notificationDetails: NotificationDetails(android: previewNotificationDetails(chatId, text.body)),
     );
   } catch (e) {
     // Nothing more to do. Only the error's type: its message could hold message text.

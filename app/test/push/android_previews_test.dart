@@ -9,6 +9,7 @@ import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/push/android_previews.dart';
 import 'package:famchat/push/push_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const chatId = '01ARZ3NDEKTSV4RRFFQ69G5FAV', messageId = 'M1', userId = 'bob', deviceId = 'bob-d';
@@ -84,5 +85,13 @@ void main() {
     final d = await data(preview: false);
     expect(PushMessage.fromData(d).isPreview, isFalse);
     expect(await text(d), (title: 'Bob', body: 'New message'));
+  });
+
+  test('the Android notification expands to the whole preview', () {
+    const body = 'a long preview that does not fit on one line of a notification, so it must expand';
+    final d = previewNotificationDetails(chatId, body);
+    expect(d.styleInformation, isA<BigTextStyleInformation>().having((s) => s.bigText, 'bigText', body));
+    expect((d.channelId, d.tag, d.visibility, d.importance, d.priority),
+        ('messages', chatId, NotificationVisibility.private, Importance.high, Priority.high));
   });
 }
