@@ -280,6 +280,19 @@ void main() {
     expect(jsonDecode((await alice.d.db.userById(bob.userId))!.familyIds), [1, 2]);
   });
 
+  test('a family change missed while offline refreshes the families after the reconnect', () async {
+    var familiesChanged = 0;
+    final alice = await start(await backend.addUser('Alice'), onFamiliesChanged: () => familiesChanged++);
+    final before = familiesChanged;
+    alice.d.hub.drop();
+    backend.addFamilyRole(alice.d.userId, const FamilyRoleDto(id: 2, admin: true));
+    backend.familyEvent([alice.d.userId], 2); // nobody connected: lost
+    await alice.d.hub.connect();
+    await until(() async => familiesChanged > before, reason: 'families callback after the reconnect');
+    await alice.sync.idle;
+    expect(jsonDecode((await alice.d.db.userById(alice.d.userId))!.familyIds), [1, 2]);
+  });
+
   test('deleting a message whose ack was lost still deletes it for everyone', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

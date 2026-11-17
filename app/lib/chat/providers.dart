@@ -56,7 +56,10 @@ final chatSyncProvider = Provider<ChatSync?>((ref) {
     api: ref.watch(chatApiProvider),
     hub: ref.watch(hubLinkProvider),
     me: me,
-    onFamiliesChanged: () => ref.invalidate(familiesProvider),
+    // stop() runs unawaited on dispose, so an event already in flight may land after it.
+    onFamiliesChanged: () {
+      if (ref.mounted) ref.invalidate(familiesProvider);
+    },
   );
   unawaited(sync.start());
   ref.onDispose(() => unawaited(sync.stop()));

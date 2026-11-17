@@ -48,8 +48,8 @@ class ChatSync {
   late final ChatKeys keys;
   final Duration typingTtl, typingThrottle;
 
-  /// Called after a `family` event (and the directory refresh it brings): the families list
-  /// (`GET /families`) is stale.
+  /// Called after a `family` event (and the directory refresh it brings), and after each connect's
+  /// directory refresh (events missed while offline): the families list (`GET /families`) may be stale.
   final void Function()? onFamiliesChanged;
 
   /// After a failed connect-sync, while still connected: wait these (the last repeats) and retry.
@@ -177,6 +177,8 @@ class ChatSync {
   /// What a (re)connect runs: directory, chats, keys, history, repair, outbox.
   Future<void> syncAll() async {
     await directory.refresh();
+    // A `family` event may have been missed while disconnected.
+    onFamiliesChanged?.call();
     final chats = await api.chats();
     final ids = {for (final c in chats) c.id};
     for (final local in await db.allChats()) {
