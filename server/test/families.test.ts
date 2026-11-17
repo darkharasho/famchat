@@ -1,13 +1,15 @@
 import { env } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api } from "./chat-helpers";
 import { errorResponse } from "../src/lib/errors";
 import { familyPeers, groupFamilyFor, sharingUserIds, shares } from "../src/lib/family";
 import { insertFamily, insertUserWithDevice, joinFamily, resetDb } from "./helpers";
 import { promotionMessage, promotionMessageV2 } from "../src/lib/reset";
 import { sign } from "./reset-helpers";
+import { socket, closeSockets } from "./ws-helpers";
 
 beforeEach(resetDb);
+afterEach(closeSockets);
 
 const user = (families: { id: number; role?: "admin" | "member" }[]) => insertUserWithDevice({ families });
 
@@ -184,5 +186,115 @@ describe("POST /families/:id/admins/:userId", () => {
       .bind(dad.userId).first<Record<string, unknown>>();
     expect(fm?.role).toBe("admin");
     expect(u).toEqual({ is_admin: 1, admin_by: fm?.admin_by, admin_signer_pub: fm?.admin_signer_pub, admin_sig: fm?.admin_sig });
+  });
+});
+
+describe("GET/POST/PUT /families", () => {
+  type FamilyOut = { id: number; name: string; status: string; role: string; memberCount: number; owner: boolean; createdAt: number };
+  const list = async (u: { accessToken: string }) =>
+    (await (await api(u.accessToken, "GET", "/families")).json<{ families: FamilyOut[] }>()).families;
+
+  it("lists only my non-hidden families with role, owner and memberCount", async () => {
+    const me = await user([{ id: 1 }]);
+    const f = await insertFamily({ name: "Cousins", status: "pending", createdBy: me.userId });
+    await joinFamily(me.userId, f, "admin");
+    const other = await insertFamily({ name: "Elsewhere" });
+    const hidden = await insertFamily({ name: "Secret", hidden: true });
+    await joinFamily(me.userId, hidden);
+    const peer = await user([{ id: f }]);
+    const gone = await user([{ id: f }]);
+    await env.DB.prepare("UPDATE users SET deleted_at = 1 WHERE id = ?").bind(gone.userId).run();
+    await user([{ id: other }]);
+    const fams = await list(me);
+    expect(fams.map((x) => x.id)).toEqual([1, f]);
+    expect(fams[0]).toMatchObject({ name: "Family", status: "approved", role: "member", owner: false });
+    expect(fams[1]).toMatchObject({ name: "Cousins", status: "pending", role: "admin", memberCount: 2, owner: true });
+    expect(typeof fams[1].createdAt).toBe("number");
+    expect(peer.userId).toBeTruthy();
+  });
+
+  it("creates a pending family with me as its admin", async () => {
+    const me = await user([{ id: 1 }]);
+    const res = await api(me.accessToken, "POST", "/families", { name: "  Cousins  " });
+    expect(res.status).toBe(201);
+    const { family } = await res.json<{ family: FamilyOut }>();
+    expect(family).toMatchObject({ name: "Cousins", status: "pending", role: "admin", memberCount: 1, owner: true });
+    const row = await env.DB.prepare("SELECT created_by, status, hidden FROM families WHERE id = ?")
+      .bind(family.id).first<Record<string, unknown>>();
+    expect(row).toEqual({ created_by: me.userId, status: "pending", hidden: 0 });
+    const m = await env.DB.prepare("SELECT role, admin_by, admin_sig FROM family_members WHERE family_id = ? AND user_id = ?")
+      .bind(family.id, me.userId).first<Record<string, unknown>>();
+    expect(m).toEqual({ role: "admin", admin_by: null, admin_sig: null });
+    expect(await env.DB.prepare("SELECT 1 AS n FROM events WHERE kind = 'family_requested'").first()).not.toBeNull();
+    expect((await api(me.accessToken, "POST", "/families", { name: "" })).status).toBe(400);
+  });
+
+  it("a fourth pending request is rate limited", async () => {
+    const me = await user([{ id: 1 }]);
+    for (const n of ["A", "B", "C"]) expect((await api(me.accessToken, "POST", "/families", { name: n })).status).toBe(201);
+    const res = await api(me.accessToken, "POST", "/families", { name: "D" });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "rate_limited" });
+    const other = await user([{ id: 1 }]);
+    expect((await api(other.accessToken, "POST", "/families", { name: "E" })).status).toBe(201);
+  });
+
+  it("reviewers get 403 on /families", async () => {
+    const rev = await insertUserWithDevice({ reviewer: true });
+    expect((await api(rev.accessToken, "GET", "/families")).status).toBe(403);
+    expect((await api(rev.accessToken, "POST", "/families", { name: "X" })).status).toBe(403);
+    expect((await api(rev.accessToken, "PUT", "/families/2", { name: "X" })).status).toBe(403);
+  });
+
+  it("admin renames an approved family and members get a family event", async () => {
+    const f = await insertFamily({ name: "Old" });
+    const admin = await user([{ id: f, role: "admin" }]);
+    const member = await user([{ id: f }]);
+    const outsider = await user([{ id: 1 }]);
+    const sm = await socket(member);
+    const so = await socket(outsider);
+    expect((await api(admin.accessToken, "PUT", `/families/${f}`, { name: " New " })).status).toBe(204);
+    expect(await env.DB.prepare("SELECT name FROM families WHERE id = ?").bind(f).first("name")).toBe("New");
+    expect(await sm.next("family")).toEqual({ type: "family", familyId: f });
+    await so.none("family");
+  });
+
+  it("a member can't rename (403)", async () => {
+    const f = await insertFamily({ name: "Old" });
+    const member = await user([{ id: f }]);
+    const res = await api(member.accessToken, "PUT", `/families/${f}`, { name: "New" });
+    expect(res.status).toBe(403);
+    expect(await env.DB.prepare("SELECT name FROM families WHERE id = ?").bind(f).first("name")).toBe("Old");
+  });
+
+  it("an unknown or hidden family is 404", async () => {
+    const hidden = await insertFamily({ hidden: true });
+    const me = await user([{ id: 1 }]);
+    expect((await api(me.accessToken, "PUT", "/families/9999", { name: "N" })).status).toBe(404);
+    expect((await api(me.accessToken, "PUT", `/families/${hidden}`, { name: "N" })).status).toBe(404);
+    expect((await api(me.accessToken, "PUT", "/families/abc", { name: "N" })).status).toBe(404);
+  });
+
+  it("the creator can rename their pending family", async () => {
+    const me = await user([{ id: 1 }]);
+    const f = (await (await api(me.accessToken, "POST", "/families", { name: "Old" })).json<{ family: FamilyOut }>()).family.id;
+    expect((await api(me.accessToken, "PUT", `/families/${f}`, { name: "New" })).status).toBe(204);
+    expect((await list(me)).find((x) => x.id === f)?.name).toBe("New");
+  });
+
+  it("a non-creator admin of a pending family can't rename it", async () => {
+    const creator = await user([{ id: 1 }]);
+    const f = await insertFamily({ status: "pending", createdBy: creator.userId });
+    const other = await user([{ id: f, role: "admin" }]);
+    expect((await api(other.accessToken, "PUT", `/families/${f}`, { name: "New" })).status).toBe(403);
+  });
+
+  it("rename validates 1–40 characters", async () => {
+    const f = await insertFamily({ name: "Old" });
+    const admin = await user([{ id: f, role: "admin" }]);
+    for (const n of ["", "   ", "x".repeat(41), 5, undefined]) {
+      expect((await api(admin.accessToken, "PUT", `/families/${f}`, { name: n })).status, String(n)).toBe(400);
+    }
+    expect((await api(admin.accessToken, "PUT", `/families/${f}`, { name: "x".repeat(40) })).status).toBe(204);
   });
 });

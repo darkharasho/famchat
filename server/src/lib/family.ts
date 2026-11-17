@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { hubStub } from "../hub";
+import { notify } from "../notify";
 import { ApiError } from "./errors";
 
 /** The original family, and the hidden family that holds reviewer accounts. */
@@ -92,4 +93,43 @@ export async function sharesChanged(env: Env): Promise<void> {
   } catch (e) {
     console.error("hub sharesChanged failed", e);
   }
+}
+
+export interface FamilyInfo {
+  id: number;
+  name: string;
+  status: string;
+  createdBy: string | null;
+}
+
+/** Live members of a family. */
+export async function familyMemberIds(db: D1Database, familyId: number): Promise<string[]> {
+  const { results } = await db.prepare(
+    `SELECT m.user_id FROM family_members m JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+     WHERE m.family_id = ?`,
+  ).bind(familyId).all<{ user_id: string }>();
+  return results.map((r) => r.user_id);
+}
+
+/** Tells every live member of a family (plus [extra]) that it changed: `GET /families`. */
+export async function notifyFamily(env: Env, familyId: number, extra: string[] = []): Promise<void> {
+  const ids = await familyMemberIds(env.DB, familyId);
+  await notify(env, [...new Set([...ids, ...extra])], { type: "family", familyId });
+}
+
+/** A non-hidden family by id, else not_found. */
+export async function getFamily(db: D1Database, familyId: number): Promise<FamilyInfo> {
+  const row = Number.isSafeInteger(familyId) && familyId >= 1
+    ? await db.prepare("SELECT id, name, status, created_by FROM families WHERE id = ? AND hidden = 0")
+        .bind(familyId).first<{ id: number; name: string; status: string; created_by: string | null }>()
+    : null;
+  if (!row) throw new ApiError("not_found");
+  return { id: row.id, name: row.name, status: row.status, createdBy: row.created_by };
+}
+
+/** The family, if [userId] is an admin of it and it is approved: not_found if unknown or hidden, else forbidden. */
+export async function requireFamilyAdmin(db: D1Database, userId: string, familyId: number): Promise<FamilyInfo> {
+  const fam = await getFamily(db, familyId);
+  if ((await familyRole(db, userId, familyId)) !== "admin" || fam.status !== "approved") throw new ApiError("forbidden");
+  return fam;
 }

@@ -253,6 +253,21 @@ N accepts it only if it opens, `certSig` verifies over N's own keys with the ide
 the history at once; `trust` is E's trust-on-first-use state for other users, so N starts with it instead
 of whatever the server shows. Member devices also add wraps for N on the `device` event.
 
+### Families
+All `/families` routes need auth and return `403 forbidden` to reviewers. The hidden reviewer family
+never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 characters
+(`400 invalid_request` otherwise). The owner of a family is its creator.
+- `GET /families` → `{families: Family[]}`: the caller's own families, ordered by id.
+  `Family` = `{id, name, status: "pending"|"approved"|"declined", role: "admin"|"member",
+  memberCount, owner: boolean, createdAt}`. `memberCount` counts live (not deleted) members.
+- `POST /families {name}` → `201 {family: Family}`: requests a new family. It starts `pending`, with
+  the caller as its admin (no admin proof). At most 3 pending requests per creator, else
+  `429 rate_limited`.
+- `PUT /families/:id {name}` → `204`: renames. Allowed for an admin of an approved family, and for
+  the creator of their own pending or declined family (a pending or declined family has no other
+  admin power). Others get `403 forbidden`. Members get a `family` event.
+- `POST /families/:id/admins/:userId`: promotes a member (see "Account resets", line 431); also reviewer-blocked.
+
 ### Directory
 - `GET /users` → `{users: User[]}`: the caller, everyone who shares a family with them, and "former"
   chat partners (below). Nobody else is ever listed. Every device is included, revoked ones too
@@ -549,6 +564,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone sharing a family with them): `GET /users` and check it |
 | `{type:"account_deleted", userId}` | that account was deleted (to everyone who shared a family with them): `GET /users` ("Deleting an account") |
+| `{type:"family", familyId}` | a family you are in was renamed or otherwise changed: `GET /families` |
 | `{type:"profile", userId}` | that user changed their name or profile photo (to everyone sharing a family with them): `GET /users` ("Profile: name and photo") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
