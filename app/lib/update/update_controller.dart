@@ -20,7 +20,7 @@ class UpdateConfig {
     required this.platform,
     required this.newClient,
     required this.openUrl,
-    this.firstCheckDelay = const Duration(seconds: 10),
+    this.firstCheckDelay = const Duration(seconds: 3),
     this.checkEvery = const Duration(hours: 6),
   });
 
@@ -134,8 +134,13 @@ class UpdateController extends Notifier<UpdateState> {
       }
       state = UpdateDownloading(release, 0);
       try {
+        // Downloads report every network chunk; the UI only needs whole percents.
+        var shown = 0;
         final file = await config.platform.download(asset, client, (p) {
-          if (state is UpdateDownloading) state = UpdateDownloading(release, p);
+          final percent = (p * 100).floor();
+          if (percent == shown || state is! UpdateDownloading) return;
+          shown = percent;
+          state = UpdateDownloading(release, percent / 100);
         });
         state = UpdateReady(release, file);
       } catch (e) {
