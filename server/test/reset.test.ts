@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promotionMessage } from "../src/lib/reset";
 import { resetAccount } from "../src/lib/reset-account";
 import { addDevice, api, createDirect, createGroup, type ChatOut, type TestUser } from "./chat-helpers";
-import { BASE, insertUserWithDevice, jsonReq, makeKeys, resetDb } from "./helpers";
+import { BASE, insertFamily, insertUserWithDevice, jsonReq, makeKeys, resetDb } from "./helpers";
 import { ed25519, postReset, redeemReset, resetUser, sign, signedReset } from "./reset-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
@@ -42,6 +42,14 @@ describe("POST /api/admin/users/:id/reset", () => {
     const r = await signedReset(member, { userId: mom.userId, identityPub: mom.keys.identityPub });
     const res = await postReset(member, mom.userId, r.body);
     expect(res.status).toBe(403);
+  });
+
+  it("an admin reset needs the target in family #1", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const f = await insertFamily({ name: "Cousins" });
+    const other = await insertUserWithDevice({ name: "Other", families: [{ id: f }] });
+    const r = await signedReset(admin, { userId: other.userId, identityPub: other.keys.identityPub });
+    expect((await postReset(admin, other.userId, r.body)).status).toBe(404);
   });
 
   it("an admin can't reset themselves", async () => {

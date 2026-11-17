@@ -143,6 +143,11 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   mirror), so a promotion counts at once. `POST /admin/users/:id/admin` writes the proof into family
   #1's row and mirrors `users` in one batch; the target must be a live member of family #1, else 404.
   Reviewer accounts get 403 from every admin route.
+- The operator (`users.operator = 1`, set by hand or by redeeming a bootstrap invite) holds the
+  account-wide powers: `DELETE /admin/users/:id` and the three reviewer endpoints are operator-only
+  (403 for anyone else, family admins included). `POST /admin/recovery-key` takes an admin of any
+  non-hidden family. `POST /admin/users/:id/reset` still checks admin of family #1 and needs the
+  target to have a `family_members` row in family #1 (else 404).
 - Redeeming an invite joins the invite's family (`invites.family_id`: family #1 for admin and
   bootstrap invites, the hidden reviewer family for reviewer invites), as admin when `make_admin`.
   The recovery redeem accepts an admin of any non-hidden family.
@@ -281,10 +286,11 @@ peers and former chat partners) can see them.
 Required by app stores for apps with accounts. Two ways in, one transaction:
 
 - `DELETE /me {confirm: "delete"}` → 204: the caller deletes their own account. Any other body → 400.
-  The family's only admin gets `409 last_admin` while anyone else is left (make someone else an admin
-  first); the last person in the family may delete their account, after which `POST /admin/bootstrap`
+  The only admin of a family gets `409 {error: "last_admin", familyId, familyName}` (the first such
+  family) while any other live member of it is left (make someone else an admin first; deleted members
+  don't count); the last person in the family may delete their account, after which `POST /admin/bootstrap`
   works again.
-- `DELETE /admin/users/:id` (admin) → 204: removes another member the same way (a deletion request, or
+- `DELETE /admin/users/:id` (operator only) → 204: removes another account the same way (a deletion request, or
   someone who left the family). Yourself → 400 (use `DELETE /me`); unknown or already deleted → 404.
 
 What happens, atomically:
@@ -297,7 +303,8 @@ What happens, atomically:
   `epochReady: false`, exactly as after a leave, and the remaining members create the new epoch
   without them. A direct chat stays with its one remaining member (clients title it "Deleted user").
 - **Anonymized, kept:** the `users` row (name `"Deleted user"`, admin flag, admin proof and recovery
-  key cleared, `deleted_at` set). Its id and identity key stay because devices, chats, resets and the
+  key and `operator` flag cleared, `deleted_at` set). Its `family_members` rows stay, as `member` with
+  the admin proof cleared, so the directory still resolves them. Its id and identity key stay because devices, chats, resets and the
   audit log reference them and other members' devices still verify old certificates and resets with
   them. Invites made out to them are renamed; their unused reset links and the invites they made expire.
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
@@ -312,14 +319,14 @@ reset, promoted, or added to a chat; their account can't be restored.
 App-store review needs sign-in details for an app nobody can sign up to. Reviewers get accounts of
 their own, walled off from the family in both directions (`users.reviewer = 1`).
 
-- `POST /admin/reviewer-invite` (admin) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
+- `POST /admin/reviewer-invite` (operator) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
   `<origin>/join#review.<token>`; the `review.` marker (never sent to the server) tells the app to ask
   the joiner for a display name. Reusable: any number of redemptions, no expiry. At most one is
   active: creating one revokes the previous one. The server keeps its raw token so admins can show
   the link again. It also stops working if the admin who made it is deleted.
-- `DELETE /admin/reviewer-invite` (admin) → 204: revokes it (redeeming → `410 invite_invalid`).
+- `DELETE /admin/reviewer-invite` (operator) → 204: revokes it (redeeming → `410 invite_invalid`).
   Reviewer accounts already made stay until removed with `DELETE /admin/users/:id`.
-- `GET /admin/reviewers` (admin) → `{invite: {inviteUrl, createdAt} | null, users: [{id, name,
+- `GET /admin/reviewers` (operator) → `{invite: {inviteUrl, createdAt} | null, users: [{id, name,
   createdAt, devices}]}`: the active invite and the live reviewer accounts (`devices`: live count).
 - Redeeming it: `POST /auth/invite/redeem` with `name` (1–40) as well → a new reviewer account each
   time (`reviewer: true`, never admin). A retry with the same keys within 10 minutes returns the same
@@ -390,7 +397,7 @@ user). `sig` is the caller's identity key over `"famchat-admin-v1" ‖ str(userI
 Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
 as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
 `HKDF-SHA256(UTF-8(code), salt = "", info = "famchat-recovery-seed-v1")`, and registers
-`POST /admin/recovery-key {recoveryPub, sig}` (admin; `sig` = identity key over the registration) →
+`POST /admin/recovery-key {recoveryPub, sig}` (admin of any non-hidden family; `sig` = identity key over the registration) →
 204, replacing any earlier key. Only the public key is stored, so the server can't use the code.
 A reset of the admin (by another admin) clears the stored key, and a key whose registration doesn't
 verify under the admin's current identity key is refused, so a code registered from a lost device

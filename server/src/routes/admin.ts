@@ -9,7 +9,7 @@ import { deleteAccount } from "../lib/delete-account";
 import { resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
-import { bearer, requireAdmin, requireAuth } from "../middleware/auth";
+import { bearer, requireAdmin, requireAnyAdmin, requireOperator, requireAuth } from "../middleware/auth";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -80,7 +80,7 @@ const ACTIVE_REVIEWER_INVITE = "reviewer = 1 AND revoked_at IS NULL AND expires_
  * Creates the reviewer invite (docs/protocol.md "Reviewer accounts"): reusable, never expiring,
  * revocable. At most one is active, so an earlier one is revoked in the same transaction.
  */
-admin.post("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+admin.post("/reviewer-invite", requireAuth, requireOperator, async (c) => {
   const db = c.env.DB;
   const token = randomToken();
   const now = Date.now();
@@ -95,14 +95,14 @@ admin.post("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
 });
 
 /** Revokes the reviewer invite: redeeming it fails from now on. Reviewer accounts stay. */
-admin.delete("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+admin.delete("/reviewer-invite", requireAuth, requireOperator, async (c) => {
   const now = Date.now();
   await c.env.DB.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now).run();
   return c.body(null, 204);
 });
 
 /** The active reviewer invite's link (or null) and the reviewer accounts, which GET /users never lists for the family. */
-admin.get("/reviewers", requireAuth, requireAdmin, async (c) => {
+admin.get("/reviewers", requireAuth, requireOperator, async (c) => {
   const db = c.env.DB;
   const now = Date.now();
   const [inv, users] = await db.batch([
@@ -155,8 +155,12 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   if (userId === adminId) throw new ApiError("invalid_request");
 
   const [target, signer] = await Promise.all([
-    // Reviewer accounts aren't reset: an admin removes them instead.
-    db.prepare("SELECT name, identity_pub FROM users WHERE id = ? AND deleted_at IS NULL AND reviewer = 0").bind(userId)
+    // Only members of family #1 are reset (reviewers aren't in it: the operator removes them instead).
+    db.prepare(
+      `SELECT u.name, u.identity_pub FROM users u
+       WHERE u.id = ? AND u.deleted_at IS NULL
+         AND EXISTS (SELECT 1 FROM family_members m WHERE m.family_id = ? AND m.user_id = u.id)`,
+    ).bind(userId, FAMILY_ONE)
       .first<{ name: string; identity_pub: string }>(),
     db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
   ]);
@@ -213,7 +217,7 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
  * Registers the public half of the caller's admin recovery key (derived on their device from a
  * printed code the server never sees), signed by their identity key. Replaces an earlier one.
  */
-admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
+admin.post("/recovery-key", requireAuth, requireAnyAdmin, async (c) => {
   const db = c.env.DB;
   const userId = c.get("userId");
   const body = await readJson(c);
@@ -234,11 +238,11 @@ admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
 });
 
 /**
- * Removes another member from the family: deletes their account exactly as DELETE /me does
- * (docs/protocol.md "Deleting an account"), for a member who asked to be removed or who is gone.
- * The caller is an admin, so the family keeps one. Yourself: use DELETE /me.
+ * Removes another account: deletes it exactly as DELETE /me does (docs/protocol.md "Deleting an
+ * account"), for someone who asked to be removed or who is gone. Operator only, as it reaches
+ * across families. Yourself: use DELETE /me.
  */
-admin.delete("/users/:id", requireAuth, requireAdmin, async (c) => {
+admin.delete("/users/:id", requireAuth, requireOperator, async (c) => {
   const userId = c.req.param("id");
   const adminId = c.get("userId");
   if (userId === adminId) throw new ApiError("invalid_request");

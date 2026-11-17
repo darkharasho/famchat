@@ -55,7 +55,7 @@ async function joinAsReviewer(token: string, name = "Reviewer"): Promise<TestUse
 
 /** Admin Alice and member Bob (with a family group), and two reviewers who joined through the invite. */
 async function setup() {
-  const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+  const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
   const bob = await insertUserWithDevice({ name: "Bob" });
   const familyGroup = await createGroup(alice, [bob], "Secret family plans");
   const invite = await newInvite(alice);
@@ -87,8 +87,15 @@ describe("the reviewer invite", () => {
     expect((await SELF.fetch(`${BASE}/api/admin/reviewer-invite`, { method: "POST" })).status).toBe(401);
   });
 
+  it("reviewer endpoints are operator-only", async () => {
+    const dave = await insertUserWithDevice({ admin: true, name: "Dave" });
+    expect((await createInvite(dave)).status).toBe(403);
+    expect((await api(dave.accessToken, "GET", "/admin/reviewers")).status).toBe(403);
+    expect((await revokeInvite(dave)).status).toBe(403);
+  });
+
   it("is a marked link that the admin can see again later", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     expect((await reviewers(alice)).invite).toBeNull();
     const inv = await newInvite(alice);
     expect(inv.inviteUrl).toBe(`${env.APP_ORIGIN}/join#review.${inv.inviteToken}`);
@@ -119,7 +126,7 @@ describe("the reviewer invite", () => {
   });
 
   it("needs a display name from the reviewer", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const inv = await newInvite(alice);
     for (const name of [undefined, "", "   ", "x".repeat(41)]) {
       expect((await redeem(inv.inviteToken, name, await makeKeys())).status).toBe(400);
@@ -128,7 +135,7 @@ describe("the reviewer invite", () => {
   });
 
   it("a lost response can be retried with the same keys without making a second account", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const inv = await newInvite(alice);
     const keys = await makeKeys();
     const a = await (await redeem(inv.inviteToken, "Rev", keys)).json<{ userId: string; deviceId: string }>();
@@ -152,7 +159,7 @@ describe("the reviewer invite", () => {
   });
 
   it("a new one replaces the old one (at most one is active)", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const first = await newInvite(alice);
     const second = await newInvite(alice);
     expect(second.inviteToken).not.toBe(first.inviteToken);
@@ -162,7 +169,7 @@ describe("the reviewer invite", () => {
   });
 
   it("stops working when the admin who made it is deleted", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     await insertUserWithDevice({ admin: true, name: "Carol" });
     const inv = await newInvite(alice);
     expect((await api(alice.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
@@ -251,7 +258,7 @@ describe("chat isolation", () => {
 
 describe("a lone reviewer", () => {
   it("can make a chat with only themselves and use it: text, photo, voice", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const r = await joinAsReviewer((await newInvite(alice)).inviteToken);
     const id = newId();
     const res = await api(r.accessToken, "POST", "/chats", {
@@ -278,7 +285,7 @@ describe("a lone reviewer", () => {
   });
 
   it("a one-member group still moves epochs when its member revokes a device", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const r = await joinAsReviewer((await newInvite(alice)).inviteToken);
     const id = newId();
     await api(r.accessToken, "POST", "/chats", {
@@ -351,7 +358,7 @@ describe("admin routes reject reviewers", () => {
 
 describe("events don't cross over", () => {
   it("account_deleted reaches only the deleted user's side", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     const bob = await insertUserWithDevice({ name: "Bob" });
     const carol = await insertUserWithDevice({ name: "Carol" });
     const r1 = await joinAsReviewer((await newInvite(alice)).inviteToken, "R1");
@@ -390,7 +397,7 @@ describe("events don't cross over", () => {
   });
 
   it("bootstrap counts only the family", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     await joinAsReviewer((await newInvite(alice)).inviteToken);
     const boot = () =>
       SELF.fetch(`${BASE}/api/admin/bootstrap`, jsonReq("POST", { name: "Alice" }, { authorization: "Bearer test-bootstrap-secret" }));

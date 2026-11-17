@@ -23,10 +23,18 @@ export interface DeleteResult {
   media: string[];
 }
 
+/** Binds the user id three times: the families where they are the only live admin and someone else is live. */
+const SOLE_ADMIN_FAMILY_IDS = `SELECT m.family_id FROM family_members m
+  WHERE m.user_id = ? AND m.role = 'admin'
+    AND NOT EXISTS (SELECT 1 FROM family_members o JOIN users ou ON ou.id = o.user_id
+      WHERE o.family_id = m.family_id AND o.user_id != ? AND o.role = 'admin' AND ou.deleted_at IS NULL)
+    AND EXISTS (SELECT 1 FROM family_members o JOIN users ou ON ou.id = o.user_id
+      WHERE o.family_id = m.family_id AND o.user_id != ? AND ou.deleted_at IS NULL)`;
+
 /**
  * Deletes [userId]'s account. [actorId] is who asked (the user, or an admin). Throws `not_found`
- * for an unknown or already deleted user, and `last_admin` if they are the family's only admin
- * while anyone else is left (make someone else an admin first).
+ * for an unknown or already deleted user, and `last_admin` (with familyId and familyName) if they are
+ * a family's only admin while anyone else in it is left (make someone else an admin first).
  */
 export async function deleteAccount(env: Env, userId: string, actorId: string, now = Date.now()): Promise<DeleteResult> {
   const db = env.DB;
@@ -40,16 +48,18 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const guard = "EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ?)";
   const gb = [userId, now];
   const stmts: D1PreparedStatement[] = [
-    // The last admin can't go while someone else in the family is still here: it would have no
-    // admin. Reviewer accounts don't count (they can never be admins).
+    // The last admin of a family can't go while someone else in it is still here: it would have no
+    // admin. Per family; deleted members don't count. Clears the operator flag too.
     db.prepare(
-      `UPDATE users SET deleted_at = ?, name = ?, is_admin = 0, recovery_pub = NULL, recovery_sig = NULL,
+      `UPDATE users SET deleted_at = ?, name = ?, is_admin = 0, operator = 0, recovery_pub = NULL, recovery_sig = NULL,
          admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL, avatar_key = NULL
-       WHERE id = ? AND deleted_at IS NULL AND (
-         is_admin = 0 OR reviewer = 1
-         OR EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.is_admin = 1 AND o.reviewer = 0 AND o.deleted_at IS NULL)
-         OR NOT EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.reviewer = 0 AND o.deleted_at IS NULL))`,
-    ).bind(now, DELETED_USER_NAME, userId, userId, userId),
+       WHERE id = ? AND deleted_at IS NULL AND NOT EXISTS (${SOLE_ADMIN_FAMILY_IDS})`,
+    ).bind(now, DELETED_USER_NAME, userId, userId, userId, userId),
+    // They stay in their families as plain members (so the directory still resolves them).
+    db.prepare(
+      `UPDATE family_members SET role = 'member', admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL
+       WHERE user_id = ? AND ${guard}`,
+    ).bind(userId, ...gb),
     db.prepare(
       `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
        WHERE user_id = ? AND revoked_at IS NULL AND ${guard} RETURNING id`,
@@ -83,7 +93,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
       .bind(DELETED_USER_NAME, userId, userId, ...gb),
     db.prepare(`DELETE FROM ws_tickets WHERE user_id = ? AND ${guard}`).bind(userId, ...gb),
   ];
-  const devIdx = 1, chatIdx = 4, msgIdx = 6, mediaIdx = 7;
+  const devIdx = 2, chatIdx = 5, msgIdx = 7, mediaIdx = 8;
   stmts.push(eventStmt(db, {
     kind: "account_deleted",
     userId,
@@ -97,7 +107,10 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
     const row = await db.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(userId)
       .first<{ deleted_at: number | null }>();
     if (!row || row.deleted_at !== null) throw new ApiError("not_found");
-    throw new ApiError("last_admin");
+    const fam = await db.prepare(
+      `SELECT f.id AS familyId, f.name AS familyName FROM families f WHERE f.id IN (${SOLE_ADMIN_FAMILY_IDS}) ORDER BY f.id LIMIT 1`,
+    ).bind(userId, userId, userId).first<{ familyId: number; familyName: string }>();
+    throw new ApiError("last_admin", fam ? { familyId: fam.familyId, familyName: fam.familyName } : undefined);
   }
   // The hub forgets peer sets that still count the user.
   await sharesChanged(env);
