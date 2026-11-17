@@ -317,7 +317,9 @@ reset, promoted, or added to a chat; their account can't be restored.
 
 ### Reviewer accounts
 App-store review needs sign-in details for an app nobody can sign up to. Reviewers get accounts of
-their own, walled off from the family in both directions (`users.reviewer = 1`).
+their own, walled off from the family in both directions: reviewers are the members of the hidden
+family #2, and nothing reads `users.reviewer` (a mirror write only). Every isolation rule below is
+the ordinary family rule; the 256 MiB media cap is the one reviewer-specific limit.
 
 - `POST /admin/reviewer-invite` (operator) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
   `<origin>/join#review.<token>`; the `review.` marker (never sent to the server) tells the app to ask

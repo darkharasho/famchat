@@ -3,7 +3,7 @@ import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { verifyDeviceCert } from "../lib/devicecert";
 import { ApiError } from "../lib/errors";
-import { FAMILY_ONE, sharesChanged, sharingUserIds } from "../lib/family";
+import { FAMILY_ONE, REVIEWER_FAMILY, sharesChanged, sharingUserIds } from "../lib/family";
 import { newId } from "../lib/ids";
 import { claimMessage, eventStmt, freshTime, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { notifyReset, resetAccount } from "../lib/reset-account";
@@ -121,9 +121,10 @@ async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash
   // A retry whose 201 was lost: the same keys made a reviewer account just now.
   const prior = await db.prepare(
     `SELECT d.id AS device_id, u.id AS user_id FROM users u JOIN devices d ON d.user_id = u.id
-     WHERE u.reviewer = 1 AND u.deleted_at IS NULL AND u.identity_pub = ? AND u.created_at >= ?
+       JOIN family_members m ON m.user_id = u.id AND m.family_id = ?
+     WHERE u.deleted_at IS NULL AND u.identity_pub = ? AND u.created_at >= ?
        AND d.enc_pub = ? AND d.sign_pub = ? AND d.cert_sig = ? AND d.revoked_at IS NULL`,
-  ).bind(k.identityPub, now - REDEEM_RETRY_MS, k.encPub, k.signPub, k.certSig)
+  ).bind(REVIEWER_FAMILY, k.identityPub, now - REDEEM_RETRY_MS, k.encPub, k.signPub, k.certSig)
     .first<{ device_id: string; user_id: string }>();
   if (prior) return { ...(await reissue(env, prior.user_id, prior.device_id, false, now)), reviewer: true };
 
@@ -236,7 +237,7 @@ auth.post("/recover/lookup", async (c) => {
  */
 async function recoveryUser(db: D1Database, recoveryPub: string) {
   const user = await db.prepare(`SELECT id, identity_pub, recovery_sig FROM users
-     WHERE recovery_pub = ? AND is_admin = 1
+     WHERE recovery_pub = ?
        AND EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id
                    WHERE m.user_id = users.id AND m.role = 'admin' AND f.hidden = 0)`)
     .bind(recoveryPub).first<{ id: string; identity_pub: string; recovery_sig: string }>();

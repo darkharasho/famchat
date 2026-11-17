@@ -411,3 +411,20 @@ describe("events don't cross over", () => {
     expect((await again.json<{ isAdmin: boolean }>()).isAdmin).toBe(true);
   });
 });
+
+describe("the family decides, not the flag", () => {
+  it("the reviewer family, not the users.reviewer flag, decides", async () => {
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
+    // Unflagged but in the reviewer family; flagged but in family #1.
+    const inFam2 = await insertUserWithDevice({ name: "InFam2", reviewer: false, families: [{ id: 2 }] });
+    const other2 = await insertUserWithDevice({ name: "Other2", reviewer: false, families: [{ id: 2 }] });
+    const flagged = await insertUserWithDevice({ name: "Flagged", reviewer: true, families: [{ id: 1, role: "member" }] });
+    expect((await reviewers(alice)).users.map((u) => u.id).sort()).toEqual([inFam2.userId, other2.userId].sort());
+    expect((await directory(inFam2)).map((u) => u.id).sort()).toEqual([inFam2.userId, other2.userId].sort());
+    expect((await directory(alice)).map((u) => u.id)).toContain(flagged.userId);
+    const g = await createGroup(inFam2, [other2], "Reviewers");
+    await insertMedia({ chatId: g.id, uploader: other2, bytes: REVIEWER_MEDIA_CAP - 50, createdAt: Date.now() });
+    expect((await upload(inFam2, { chatId: g.id }, new Uint8Array(40))).status).toBe(201);
+    expect((await upload(inFam2, { chatId: g.id }, new Uint8Array(40))).status).toBe(413);
+  });
+});

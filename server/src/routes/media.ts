@@ -4,6 +4,7 @@ import type { AppEnv } from "../env";
 import { hubStub } from "../hub";
 import { isMember, isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
+import { REVIEWER_FAMILY } from "../lib/family";
 import { KIND_LIMITS, MEDIA_CAP, mediaUsage, REVIEWER_MEDIA_CAP } from "../lib/media";
 import { requireAuth } from "../middleware/auth";
 
@@ -41,8 +42,8 @@ media.post("/", async (c) => {
   // past the cap (which evicts the oldest family photos).
   if (c.get("reviewer")) {
     const used = await db.prepare(
-      "SELECT COALESCE(SUM(bytes), 0) AS n FROM media WHERE expired_at IS NULL AND uploader_id IN (SELECT id FROM users WHERE reviewer = 1)",
-    ).first<number>("n");
+      "SELECT COALESCE(SUM(bytes), 0) AS n FROM media WHERE expired_at IS NULL AND uploader_id IN (SELECT user_id FROM family_members WHERE family_id = ?)",
+    ).bind(REVIEWER_FAMILY).first<number>("n");
     if ((used ?? 0) + length > REVIEWER_MEDIA_CAP) throw new ApiError("too_large");
   }
 

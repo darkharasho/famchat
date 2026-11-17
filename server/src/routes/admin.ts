@@ -110,8 +110,9 @@ admin.get("/reviewers", requireAuth, requireOperator, async (c) => {
     db.prepare(
       `SELECT u.id, u.name, u.created_at,
          (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices
-       FROM users u WHERE u.reviewer = 1 AND u.deleted_at IS NULL ORDER BY u.created_at, u.id`,
-    ),
+       FROM users u JOIN family_members m ON m.user_id = u.id AND m.family_id = ?
+       WHERE u.deleted_at IS NULL ORDER BY u.created_at, u.id`,
+    ).bind(REVIEWER_FAMILY),
   ]);
   const i = inv.results[0] as { token: string; created_at: number } | undefined;
   type U = { id: string; name: string; created_at: number; devices: number };
@@ -199,7 +200,7 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   // The target must be a live member of family #1; checked first so nothing is half-written.
   const member = await db.prepare(
     `SELECT 1 AS ok FROM family_members m JOIN users u ON u.id = m.user_id
-     WHERE m.family_id = ? AND m.user_id = ? AND u.deleted_at IS NULL AND u.reviewer = 0`,
+     WHERE m.family_id = ? AND m.user_id = ? AND u.deleted_at IS NULL`,
   ).bind(FAMILY_ONE, userId).first();
   if (!member) throw new ApiError("not_found");
   await db.batch([
