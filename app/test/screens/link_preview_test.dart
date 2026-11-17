@@ -6,6 +6,8 @@ import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -74,5 +76,19 @@ void main() {
     await settle(tester);
     final sent = await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId));
     expect(sent.map((r) => (Plaintext.decode(utf8.encode(r.body!)) as TextBody).preview), [null, null]);
+  });
+
+  chatTestWidgets('hovering a preview card shows the link cursor', (tester) async {
+    await open(tester);
+    await type(tester, 'look https://youtu.be/cat');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(Key('link-preview-${sent.id}'))));
+    await tester.pump();
+    expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
   });
 }

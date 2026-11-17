@@ -3,6 +3,9 @@ import 'package:famchat/chat/directory.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:famchat/widgets/link_text.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -241,5 +244,18 @@ void main() {
     final field = tester.widget<TextField>(find.byKey(const Key('composer')));
     expect(field.controller!.text, isNot(contains('b')));
     expect(field.focusNode!.hasFocus, isFalse);
+  });
+
+  chatTestWidgets('hovering a link in a message shows the link cursor', (tester) async {
+    await open(tester, messages: [row('m1', 1, bob.userId, 'look at https://example.com today')]);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    final text = find.byType(LinkText);
+    // The test font's glyphs are squares of the font size: character 12 is inside the link.
+    final box = tester.getRect(text);
+    await mouse.moveTo(Offset(box.left + 16 * 12.5, box.top + 8));
+    await tester.pump();
+    expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
   });
 }
