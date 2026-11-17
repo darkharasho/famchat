@@ -15,6 +15,7 @@ export type ErrorCode =
   | "media_expired"
   | "conflict"
   | "last_admin"
+  | "no_shared_family"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -34,17 +35,18 @@ const STATUS: Record<ErrorCode, number> = {
   media_expired: 410,
   conflict: 409,
   last_admin: 409,
+  no_shared_family: 403,
   internal: 500,
 };
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(readonly code: ErrorCode) {
+  constructor(readonly code: ErrorCode, readonly extra?: Record<string, unknown>) {
     super(code);
     this.status = STATUS[code];
   }
 }
 
-export function errorResponse(code: ErrorCode): Response {
-  return Response.json({ error: code }, { status: STATUS[code] });
+export function errorResponse(code: ErrorCode, extra?: Record<string, unknown>): Response {
+  return Response.json({ ...extra, error: code }, { status: STATUS[code] });
 }

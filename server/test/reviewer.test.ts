@@ -55,7 +55,7 @@ async function joinAsReviewer(token: string, name = "Reviewer"): Promise<TestUse
 
 /** Admin Alice and member Bob (with a family group), and two reviewers who joined through the invite. */
 async function setup() {
-  const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+  const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
   const bob = await insertUserWithDevice({ name: "Bob" });
   const familyGroup = await createGroup(alice, [bob], "Secret family plans");
   const invite = await newInvite(alice);
@@ -87,12 +87,27 @@ describe("the reviewer invite", () => {
     expect((await SELF.fetch(`${BASE}/api/admin/reviewer-invite`, { method: "POST" })).status).toBe(401);
   });
 
+  it("reviewer endpoints are operator-only", async () => {
+    const dave = await insertUserWithDevice({ admin: true, name: "Dave" });
+    expect((await createInvite(dave)).status).toBe(403);
+    expect((await api(dave.accessToken, "GET", "/admin/reviewers")).status).toBe(403);
+    expect((await revokeInvite(dave)).status).toBe(403);
+  });
+
   it("is a marked link that the admin can see again later", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     expect((await reviewers(alice)).invite).toBeNull();
     const inv = await newInvite(alice);
     expect(inv.inviteUrl).toBe(`${env.APP_ORIGIN}/join#review.${inv.inviteToken}`);
     expect((await reviewers(alice)).invite).toEqual({ inviteUrl: inv.inviteUrl, createdAt: inv.createdAt });
+  });
+
+  it("a reviewer redeem joins the hidden family", async () => {
+    const { r1, invite } = await setup();
+    expect(await env.DB.prepare("SELECT role FROM family_members WHERE family_id = 2 AND user_id = ?").bind(r1.userId).first<string>("role")).toBe("member");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM family_members WHERE family_id = 1 AND user_id = ?").bind(r1.userId).first<number>("n")).toBe(0);
+    expect(await env.DB.prepare("SELECT family_id FROM invites WHERE reviewer = 1").first<number>("family_id")).toBe(2);
+    expect(invite.inviteToken).toBeTruthy();
   });
 
   it("is reusable and never expires", async () => {
@@ -111,7 +126,7 @@ describe("the reviewer invite", () => {
   });
 
   it("needs a display name from the reviewer", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const inv = await newInvite(alice);
     for (const name of [undefined, "", "   ", "x".repeat(41)]) {
       expect((await redeem(inv.inviteToken, name, await makeKeys())).status).toBe(400);
@@ -120,7 +135,7 @@ describe("the reviewer invite", () => {
   });
 
   it("a lost response can be retried with the same keys without making a second account", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const inv = await newInvite(alice);
     const keys = await makeKeys();
     const a = await (await redeem(inv.inviteToken, "Rev", keys)).json<{ userId: string; deviceId: string }>();
@@ -144,7 +159,7 @@ describe("the reviewer invite", () => {
   });
 
   it("a new one replaces the old one (at most one is active)", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const first = await newInvite(alice);
     const second = await newInvite(alice);
     expect(second.inviteToken).not.toBe(first.inviteToken);
@@ -154,7 +169,7 @@ describe("the reviewer invite", () => {
   });
 
   it("stops working when the admin who made it is deleted", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     await insertUserWithDevice({ admin: true, name: "Carol" });
     const inv = await newInvite(alice);
     expect((await api(alice.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
@@ -201,13 +216,17 @@ describe("directory isolation", () => {
 describe("chat isolation", () => {
   it("family members can't start chats with reviewers", async () => {
     const { alice, bob, r1 } = await setup();
-    expect((await api(alice.accessToken, "POST", "/chats", directBody(alice, r1))).status).toBe(400);
+    const d = await api(alice.accessToken, "POST", "/chats", directBody(alice, r1));
+    expect(d.status).toBe(403);
+    expect(await d.json()).toEqual({ error: "no_shared_family" });
     expect((await api(alice.accessToken, "POST", "/chats", groupBody(alice, [bob, r1]))).status).toBe(400);
   });
 
   it("reviewers can't start chats with family members", async () => {
     const { alice, bob, r1, r2 } = await setup();
-    expect((await api(r1.accessToken, "POST", "/chats", directBody(r1, alice))).status).toBe(400);
+    const d = await api(r1.accessToken, "POST", "/chats", directBody(r1, alice));
+    expect(d.status).toBe(403);
+    expect(await d.json()).toEqual({ error: "no_shared_family" });
     expect((await api(r1.accessToken, "POST", "/chats", groupBody(r1, [r2, bob]))).status).toBe(400);
   });
 
@@ -239,7 +258,7 @@ describe("chat isolation", () => {
 
 describe("a lone reviewer", () => {
   it("can make a chat with only themselves and use it: text, photo, voice", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const r = await joinAsReviewer((await newInvite(alice)).inviteToken);
     const id = newId();
     const res = await api(r.accessToken, "POST", "/chats", {
@@ -266,7 +285,7 @@ describe("a lone reviewer", () => {
   });
 
   it("a one-member group still moves epochs when its member revokes a device", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     const r = await joinAsReviewer((await newInvite(alice)).inviteToken);
     const id = newId();
     await api(r.accessToken, "POST", "/chats", {
@@ -339,7 +358,7 @@ describe("admin routes reject reviewers", () => {
 
 describe("events don't cross over", () => {
   it("account_deleted reaches only the deleted user's side", async () => {
-    const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
     const bob = await insertUserWithDevice({ name: "Bob" });
     const carol = await insertUserWithDevice({ name: "Carol" });
     const r1 = await joinAsReviewer((await newInvite(alice)).inviteToken, "R1");
@@ -378,7 +397,7 @@ describe("events don't cross over", () => {
   });
 
   it("bootstrap counts only the family", async () => {
-    const alice = await insertUserWithDevice({ admin: true });
+    const alice = await insertUserWithDevice({ admin: true, operator: true });
     await joinAsReviewer((await newInvite(alice)).inviteToken);
     const boot = () =>
       SELF.fetch(`${BASE}/api/admin/bootstrap`, jsonReq("POST", { name: "Alice" }, { authorization: "Bearer test-bootstrap-secret" }));
@@ -390,5 +409,22 @@ describe("events don't cross over", () => {
     const again = await redeem(inviteToken, undefined, await makeKeys());
     expect(again.status).toBe(201);
     expect((await again.json<{ isAdmin: boolean }>()).isAdmin).toBe(true);
+  });
+});
+
+describe("the family decides, not the flag", () => {
+  it("the reviewer family, not the users.reviewer flag, decides", async () => {
+    const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
+    // Unflagged but in the reviewer family; flagged but in family #1.
+    const inFam2 = await insertUserWithDevice({ name: "InFam2", reviewer: false, families: [{ id: 2 }] });
+    const other2 = await insertUserWithDevice({ name: "Other2", reviewer: false, families: [{ id: 2 }] });
+    const flagged = await insertUserWithDevice({ name: "Flagged", reviewer: true, families: [{ id: 1, role: "member" }] });
+    expect((await reviewers(alice)).users.map((u) => u.id).sort()).toEqual([inFam2.userId, other2.userId].sort());
+    expect((await directory(inFam2)).map((u) => u.id).sort()).toEqual([inFam2.userId, other2.userId].sort());
+    expect((await directory(alice)).map((u) => u.id)).toContain(flagged.userId);
+    const g = await createGroup(inFam2, [other2], "Reviewers");
+    await insertMedia({ chatId: g.id, uploader: other2, bytes: REVIEWER_MEDIA_CAP - 50, createdAt: Date.now() });
+    expect((await upload(inFam2, { chatId: g.id }, new Uint8Array(40))).status).toBe(201);
+    expect((await upload(inFam2, { chatId: g.id }, new Uint8Array(40))).status).toBe(413);
   });
 });

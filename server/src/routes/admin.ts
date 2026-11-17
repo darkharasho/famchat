@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
+import { FAMILY_ONE, REVIEWER_FAMILY } from "../lib/family";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
 import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { deleteAccount } from "../lib/delete-account";
 import { resetAccount } from "../lib/reset-account";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
-import { bearer, requireAdmin, requireAuth } from "../middleware/auth";
+import { bearer, requireAdmin, requireAnyAdmin, requireOperator, requireAuth } from "../middleware/auth";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -36,17 +37,19 @@ export function reviewerInviteUrl(env: Env, token: string): string {
 export const NEVER = 253_402_300_799_999;
 
 /**
- * Bootstrap invites (createdBy = null) are only inserted while no family member exists (or every
- * one has deleted their account), in the same statement. Reviewer accounts don't count.
+ * Bootstrap invites (createdBy = null) are only inserted while family #1 has no live member and no
+ * live operator exists, in the same statement. Reviewer accounts don't count. Invites are for family #1.
  */
 async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
   const res = await env.DB.prepare(
-    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
-     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL
-       OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL AND reviewer = 0)`,
+    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id)
+     SELECT ?, ?, ?, ?, ?, ?, ${FAMILY_ONE} WHERE ? IS NOT NULL
+       OR (NOT EXISTS (SELECT 1 FROM family_members m JOIN users u ON u.id = m.user_id
+                       WHERE m.family_id = ${FAMILY_ONE} AND u.deleted_at IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM users WHERE operator = 1 AND deleted_at IS NULL))`,
   )
     .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
@@ -77,29 +80,29 @@ const ACTIVE_REVIEWER_INVITE = "reviewer = 1 AND revoked_at IS NULL AND expires_
  * Creates the reviewer invite (docs/protocol.md "Reviewer accounts"): reusable, never expiring,
  * revocable. At most one is active, so an earlier one is revoked in the same transaction.
  */
-admin.post("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+admin.post("/reviewer-invite", requireAuth, requireOperator, async (c) => {
   const db = c.env.DB;
   const token = randomToken();
   const now = Date.now();
   await db.batch([
     db.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now),
     db.prepare(
-      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, reviewer, token)
-       VALUES (?, 'Reviewer', 0, ?, ?, ?, 1, ?)`,
+      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, reviewer, token, family_id)
+       VALUES (?, 'Reviewer', 0, ?, ?, ?, 1, ?, ${REVIEWER_FAMILY})`,
     ).bind(await sha256Hex(token), c.get("userId"), now, NEVER, token),
   ]);
   return c.json({ inviteToken: token, inviteUrl: reviewerInviteUrl(c.env, token), createdAt: now }, 201);
 });
 
 /** Revokes the reviewer invite: redeeming it fails from now on. Reviewer accounts stay. */
-admin.delete("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
+admin.delete("/reviewer-invite", requireAuth, requireOperator, async (c) => {
   const now = Date.now();
   await c.env.DB.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now).run();
   return c.body(null, 204);
 });
 
 /** The active reviewer invite's link (or null) and the reviewer accounts, which GET /users never lists for the family. */
-admin.get("/reviewers", requireAuth, requireAdmin, async (c) => {
+admin.get("/reviewers", requireAuth, requireOperator, async (c) => {
   const db = c.env.DB;
   const now = Date.now();
   const [inv, users] = await db.batch([
@@ -107,8 +110,9 @@ admin.get("/reviewers", requireAuth, requireAdmin, async (c) => {
     db.prepare(
       `SELECT u.id, u.name, u.created_at,
          (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices
-       FROM users u WHERE u.reviewer = 1 AND u.deleted_at IS NULL ORDER BY u.created_at, u.id`,
-    ),
+       FROM users u JOIN family_members m ON m.user_id = u.id AND m.family_id = ?
+       WHERE u.deleted_at IS NULL ORDER BY u.created_at, u.id`,
+    ).bind(REVIEWER_FAMILY),
   ]);
   const i = inv.results[0] as { token: string; created_at: number } | undefined;
   type U = { id: string; name: string; created_at: number; devices: number };
@@ -152,8 +156,12 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   if (userId === adminId) throw new ApiError("invalid_request");
 
   const [target, signer] = await Promise.all([
-    // Reviewer accounts aren't reset: an admin removes them instead.
-    db.prepare("SELECT name, identity_pub FROM users WHERE id = ? AND deleted_at IS NULL AND reviewer = 0").bind(userId)
+    // Only members of family #1 are reset (reviewers aren't in it: the operator removes them instead).
+    db.prepare(
+      `SELECT u.name, u.identity_pub FROM users u
+       WHERE u.id = ? AND u.deleted_at IS NULL
+         AND EXISTS (SELECT 1 FROM family_members m WHERE m.family_id = ? AND m.user_id = u.id)`,
+    ).bind(userId, FAMILY_ONE)
       .first<{ name: string; identity_pub: string }>(),
     db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
   ]);
@@ -189,11 +197,19 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   const sig = signature((await readJson(c)).sig);
   const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
   if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
-  const res = await db.prepare(
-    "UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL AND reviewer = 0",
-  )
-    .bind(by, signer, sig, userId).run();
-  if (res.meta.changes !== 1) throw new ApiError("not_found");
+  // The target must be a live member of family #1; checked first so nothing is half-written.
+  const member = await db.prepare(
+    `SELECT 1 AS ok FROM family_members m JOIN users u ON u.id = m.user_id
+     WHERE m.family_id = ? AND m.user_id = ? AND u.deleted_at IS NULL`,
+  ).bind(FAMILY_ONE, userId).first();
+  if (!member) throw new ApiError("not_found");
+  await db.batch([
+    db.prepare(
+      "UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE family_id = ? AND user_id = ?",
+    ).bind(by, signer, sig, FAMILY_ONE, userId),
+    db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+      .bind(by, signer, sig, userId),
+  ]);
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
   return c.body(null, 204);
 });
@@ -202,7 +218,7 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
  * Registers the public half of the caller's admin recovery key (derived on their device from a
  * printed code the server never sees), signed by their identity key. Replaces an earlier one.
  */
-admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
+admin.post("/recovery-key", requireAuth, requireAnyAdmin, async (c) => {
   const db = c.env.DB;
   const userId = c.get("userId");
   const body = await readJson(c);
@@ -223,11 +239,11 @@ admin.post("/recovery-key", requireAuth, requireAdmin, async (c) => {
 });
 
 /**
- * Removes another member from the family: deletes their account exactly as DELETE /me does
- * (docs/protocol.md "Deleting an account"), for a member who asked to be removed or who is gone.
- * The caller is an admin, so the family keeps one. Yourself: use DELETE /me.
+ * Removes another account: deletes it exactly as DELETE /me does (docs/protocol.md "Deleting an
+ * account"), for someone who asked to be removed or who is gone. Operator only, as it reaches
+ * across families. Yourself: use DELETE /me.
  */
-admin.delete("/users/:id", requireAuth, requireAdmin, async (c) => {
+admin.delete("/users/:id", requireAuth, requireOperator, async (c) => {
   const userId = c.req.param("id");
   const adminId = c.get("userId");
   if (userId === adminId) throw new ApiError("invalid_request");

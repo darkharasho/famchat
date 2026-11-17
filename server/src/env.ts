@@ -25,6 +25,8 @@ export interface AppVars {
   isAdmin: boolean;
   /** The caller is a reviewer account (docs/protocol.md "Reviewer accounts"). */
   reviewer: boolean;
+  /** The caller is the operator (users.operator). */
+  operator: boolean;
 }
 
 export type AppEnv = { Bindings: Env; Variables: AppVars };

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { addDevice, api, type ChatOut, createDirect, createGroup, insertMessage, wrapsFor } from "./chat-helpers";
-import { insertUserWithDevice, resetDb } from "./helpers";
+import { insertFamily, insertUserWithDevice, joinFamily, resetDb } from "./helpers";
+import { env } from "cloudflare:test";
 
 beforeEach(resetDb);
 
@@ -141,5 +142,37 @@ describe("POST /api/chats/:id/epochs", () => {
     expect((await api(c.accessToken, "POST", `/chats/${chat.id}/epochs`, {
       epoch: 2, wraps: wrapsFor(chat.id, 2, c.deviceId, [a.deviceId, b.deviceId]),
     })).status).toBe(404);
+  });
+});
+
+describe("family rules for members", () => {
+  it("group adds are limited to the group's family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }] });
+    const inF3 = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const inOne = await insertUserWithDevice();
+    const chat = await createGroup(a, [b]);
+    expect(chat.familyId).toBe(1);
+    const bad = await api(a.accessToken, "POST", `/chats/${chat.id}/members`, {
+      userIds: [inF3.userId], wraps: wrapsFor(chat.id, 1, a.deviceId, [inF3.deviceId]),
+    });
+    expect(bad.status).toBe(400);
+    const ok = await api(a.accessToken, "POST", `/chats/${chat.id}/members`, {
+      userIds: [inOne.userId], wraps: wrapsFor(chat.id, 1, a.deviceId, [inOne.deviceId]),
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("leaving a group records a leaver", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const chat = await createGroup(a, [b, c]);
+    expect((await api(c.accessToken, "DELETE", `/chats/${chat.id}/members/${c.userId}`)).status).toBe(204);
+    expect((await api(a.accessToken, "DELETE", `/chats/${chat.id}/members/${b.userId}`)).status).toBe(204);
+    const { results } = await env.DB.prepare("SELECT user_id FROM chat_leavers WHERE chat_id = ?").bind(chat.id)
+      .all<{ user_id: string }>();
+    expect(results.map((r) => r.user_id).sort()).toEqual([b.userId, c.userId].sort());
   });
 });

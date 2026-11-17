@@ -25,6 +25,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
         ..execute('ALTER TABLE local_chats DROP COLUMN draft')
         ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
         ..execute('PRAGMA user_version = 1');
@@ -51,6 +52,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
         ..execute('ALTER TABLE local_chats DROP COLUMN draft')
         ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 2');
     }));
@@ -73,6 +75,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
         ..execute('ALTER TABLE local_chats DROP COLUMN draft')
         ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('PRAGMA user_version = 3');
@@ -95,6 +98,7 @@ void main() {
       raw
         ..execute('ALTER TABLE local_chats DROP COLUMN draft')
         ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('PRAGMA user_version = 4');
@@ -116,6 +120,7 @@ void main() {
     final db = ChatDb(NativeDatabase(file, setup: (raw) {
       raw
         ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 5');
     }));
@@ -123,5 +128,25 @@ void main() {
     expect((await db.userById('A'))!.avatarKey, isNull);
     await db.putUser((await db.userById('A'))!.copyWith(avatarKey: const Value('K1')));
     expect((await db.userById('A'))!.avatarKey, 'K1');
+  });
+
+  test('schema 6 to 7: users get a former flag, unset for the users already known', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('ALTER TABLE local_users DROP COLUMN former')
+        ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute('PRAGMA user_version = 6');
+    }));
+    addTearDown(db.close);
+    expect((await db.userById('A'))!.former, isNull);
+    await db.putUser((await db.userById('A'))!.copyWith(former: const Value(true)));
+    expect((await db.userById('A'))!.former, isTrue);
   });
 }

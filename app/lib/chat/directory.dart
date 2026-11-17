@@ -68,8 +68,8 @@ class Directory {
       final trusted = mine ? myPub : (old?.trustedIdentityPub ?? u.identityPub);
       inputs.add(TrustInput(
         userId: u.id,
-        isAdmin: u.isAdmin,
-        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin),
+        isAdmin: u.isAdmin && !u.former,
+        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin && !u.former),
         adminProof: u.adminProof,
         serverKey: u.identityPub,
         trustedKey: trusted,
@@ -84,12 +84,13 @@ class Directory {
       await _db.putUser(UserRow(
         id: u.id,
         name: u.name,
-        isAdmin: u.isAdmin,
+        isAdmin: u.isAdmin && !u.former,
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
         pinnedAdmin: t.admins.contains(u.id),
         deleted: u.deleted,
+        former: u.former,
         avatarKey: u.avatarKey,
       ));
       for (final d in u.devices) {

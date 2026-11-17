@@ -32,6 +32,19 @@ void main() {
     await expectLater(api.listDevices(), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'unknown')));
   });
 
+  test('me() reads operator', () async {
+    String body(Object? op) => jsonEncode({
+          'userId': 'U1',
+          'deviceId': 'D1',
+          'name': 'Mom',
+          'isAdmin': true,
+          'operator': ?op,
+        });
+    expect((await clientFor((_) async => http.Response(body(true), 200)).me()).operator, isTrue);
+    expect((await clientFor((_) async => http.Response(body(false), 200)).me()).operator, isFalse);
+    expect((await clientFor((_) async => http.Response(body(null), 200)).me()).operator, isFalse);
+  });
+
   test('transport error becomes NetworkException', () async {
     final api = clientFor((_) async => throw http.ClientException('offline'));
     await expectLater(api.me(), throwsA(isA<NetworkException>()));

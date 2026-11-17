@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FamilyHub, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
 import { addDevice, api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
-import { BASE, insertUserWithDevice, resetDb } from "./helpers";
+import { notifyReset } from "../src/lib/reset-account";
+import { BASE, insertFamily, insertUserWithDevice, joinFamily, redeemNewDevice, resetDb } from "./helpers";
 
 type Msg = Record<string, unknown> & { type: string };
 
@@ -13,6 +14,8 @@ interface Client {
   next(type: string, timeoutMs?: number): Promise<Msg>;
   none(type: string, waitMs?: number): Promise<void>;
   closed: Promise<number>;
+  /** Every message received, in order (never consumed by [next]). */
+  log: Msg[];
 }
 
 const open: WebSocket[] = [];
@@ -36,9 +39,12 @@ async function connect(u: TestUser): Promise<Client> {
   ws.accept();
   open.push(ws);
   const inbox: Msg[] = [];
+  const log: Msg[] = [];
   let wake: (() => void) | null = null;
   ws.addEventListener("message", (e) => {
-    inbox.push(JSON.parse(e.data as string) as Msg);
+    const m = JSON.parse(e.data as string) as Msg;
+    inbox.push(m);
+    log.push(m);
     wake?.();
   });
   const closed = new Promise<number>((r) => ws.addEventListener("close", (e) => r(e.code)));
@@ -49,6 +55,7 @@ async function connect(u: TestUser): Promise<Client> {
   return {
     ws,
     closed,
+    log,
     send: (m) => ws.send(JSON.stringify(m)),
     async next(type, timeoutMs = 2000) {
       const deadline = Date.now() + timeoutMs;
@@ -146,7 +153,83 @@ describe("presence", () => {
     await connect(b);
     await ca.none("presence");
   });
+
+  it("a quick reconnect during a cold peer load does not end with a stale offline", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const ca = await connect(a);
+    const cb = await connect(b);
+    await ca.next("presence");
+    // Cold cache, as after hibernation: the close has to load B's peers from D1.
+    await hubStub().sharesChanged();
+    // Hold that load open (a slow D1 read) so the reconnect lands inside it.
+    const g = await gate("peersOf");
+    cb.ws.close(1000, "bye");
+    await g.entered();
+    const cb2 = await connect(b);
+    await cb2.next("hello");
+    await g.release();
+    await new Promise((r) => setTimeout(r, 100));
+    const seen = ca.log.filter((m) => m.type === "presence" && m.userId === b.userId);
+    expect(seen.at(-1)).toEqual({ type: "presence", userId: b.userId, online: true });
+  });
+
+  it("hello is the first thing a new socket hears", async () => {
+    const a = await insertUserWithDevice();
+    // Hold the hello's online lookup open; an event for A arrives meanwhile.
+    const g = await gate("onlineUserIds");
+    const pending = connect(a);
+    await g.entered();
+    await hubStub().notify([a.userId], { type: "profile", userId: a.userId });
+    await g.release();
+    const ca = await pending;
+    await ca.next("hello");
+    expect(ca.log[0]?.type).toBe("hello");
+  });
 });
+
+const hubStub = () => env.HUB.get(env.HUB.idFromName("family"));
+
+/**
+ * Holds the hub's next call of [method] until released (a slow D1 read, made deterministic). Only
+ * the first call is held; the patch is removed on release.
+ */
+async function gate(method: "peersOf" | "onlineUserIds") {
+  type G = { entered: boolean; release: () => void };
+  type H = Record<string, unknown> & { __gate?: G };
+  await runInDurableObject(hubStub(), (hub: FamilyHub) => {
+    const h = hub as unknown as H;
+    const orig = (h[method] as (...a: unknown[]) => Promise<unknown>).bind(hub);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const g: G = { entered: false, release };
+    h.__gate = g;
+    h[method] = async (...args: unknown[]) => {
+      if (!g.entered) {
+        g.entered = true;
+        await held;
+      }
+      return orig(...args);
+    };
+  });
+  return {
+    async entered() {
+      for (let i = 0; i < 100; i++) {
+        if (await runInDurableObject(hubStub(), (hub: FamilyHub) => (hub as unknown as H).__gate?.entered)) return;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error(`${method} was never called`);
+    },
+    async release() {
+      await runInDurableObject(hubStub(), (hub: FamilyHub) => {
+        const h = hub as unknown as H;
+        delete h[method];
+        h.__gate?.release();
+        delete h.__gate;
+      });
+    },
+  };
+}
 
 describe("send", () => {
   it("acks with gap-free seqs and fans out to members only", async () => {
@@ -187,6 +270,35 @@ describe("send", () => {
     ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
     await ca.next("ack");
     expect(((await ca2.next("msg")).message as { id: string }).id).toBe(id);
+  });
+
+  it("a send to a direct chat with no shared family is refused", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const chat = await createDirect(a, b);
+    await env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(f3, b.userId).run();
+    const ca = await connect(a);
+    const cb = await connect(b);
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    expect(await ca.next("error")).toEqual({ type: "error", id, error: "no_shared_family" });
+    await cb.none("msg");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?").bind(chat.id).first("n")).toBe(0);
+  });
+
+  it("a direct chat whose peer deleted their account still takes sends", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE users SET deleted_at = ? WHERE id = ?").bind(Date.now(), b.userId),
+      env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chat.id, b.userId),
+    ]);
+    const ca = await connect(a);
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    expect(await ca.next("ack")).toMatchObject({ id, seq: 1 });
   });
 
   it("resending an id acks the original seq without a second row or fan-out", async () => {
@@ -557,5 +669,110 @@ describe("events from REST", () => {
     const ca = await connect(a);
     expect((await api(a.accessToken, "DELETE", `/devices/${a.deviceId}`)).status).toBe(204);
     expect(await ca.closed).toBe(4001);
+  });
+});
+
+describe("family scope", () => {
+  const hub = () => env.HUB.get(env.HUB.idFromName("family"));
+  const leaveFamily = (userId: string, familyId: number) =>
+    env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(familyId, userId).run();
+
+  it("hello and presence reach only people sharing a family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const ca = await connect(a);
+    await ca.next("hello");
+    const cc = await connect(c);
+    expect((await cc.next("hello")).online).toEqual([c.userId]);
+    await ca.none("presence");
+    const cb = await connect(b);
+    expect(((await cb.next("hello")).online as string[]).sort()).toEqual([a.userId, b.userId].sort());
+    expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: true });
+    await cc.none("presence");
+    cc.ws.close(1000, "bye");
+    await ca.none("presence");
+    await cb.none("presence");
+  });
+
+  it("a newcomer's presence reaches connected people without reconnecting", async () => {
+    const a = await insertUserWithDevice({ admin: true });
+    const ca = await connect(a);
+    await ca.next("hello");
+    const b = await redeemNewDevice();
+    const cb = await connect(b as unknown as TestUser);
+    expect((await cb.next("hello")).online).toEqual(expect.arrayContaining([a.userId, b.userId]));
+    expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: true });
+    // A's cached peer set predates B: redeeming must have cleared it.
+    const chat = await createDirect(a, b as unknown as TestUser);
+    ca.send({ type: "typing", chatId: chat.id });
+    expect(await cb.next("typing")).toEqual({ type: "typing", chatId: chat.id, userId: a.userId });
+  });
+
+  it("typing in a shared direct chat stops when the two share no family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const chat = await createDirect(a, b);
+    const ca = await connect(a);
+    const cb = await connect(b);
+    ca.send({ type: "typing", chatId: chat.id });
+    expect(await cb.next("typing")).toEqual({ type: "typing", chatId: chat.id, userId: a.userId });
+    await leaveFamily(b.userId, f3);
+    await hub().sharesChanged();
+    ca.send({ type: "typing", chatId: chat.id });
+    await cb.none("typing");
+    cb.send({ type: "typing", chatId: chat.id });
+    await ca.none("typing");
+  });
+
+  it("profile, reset and account_deleted go only to family peers", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice();
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const d = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const ca = await connect(a);
+    const cc = await connect(c);
+    const cd = await connect(d);
+    expect((await api(c.accessToken, "PUT", "/me/name", { name: "Cee" })).status).toBe(204);
+    expect(await cc.next("profile")).toEqual({ type: "profile", userId: c.userId });
+    expect(await cd.next("profile")).toEqual({ type: "profile", userId: c.userId });
+    await ca.none("profile");
+
+    await notifyReset(env, c.userId, "r1");
+    expect(await cd.next("reset")).toEqual({ type: "reset", userId: c.userId, resetId: "r1" });
+    await ca.none("reset");
+
+    expect((await api(c.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
+    expect(await cd.next("account_deleted")).toEqual({ type: "account_deleted", userId: c.userId });
+    await ca.none("account_deleted");
+  });
+
+  it("device events skip former chat partners", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    await createGroup(a, [b, c]);
+    await leaveFamily(b.userId, f3);
+    await hub().sharesChanged();
+    const cb = await connect(b);
+    const cc = await connect(c);
+    const extra = await addDevice(a.userId);
+    expect((await api(a.accessToken, "DELETE", `/devices/${extra}`)).status).toBe(204);
+    expect(await cc.next("device")).toEqual({ type: "device", userId: a.userId, deviceId: extra, revoked: true });
+    await cb.none("device");
+  });
+
+  it("deleting an account clears the peer cache", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const ca = await connect(a);
+    await ca.next("hello");
+    const peers = (h: FamilyHub) => (h as unknown as { peers: Map<string, Set<string>> }).peers;
+    expect(await runInDurableObject(hub(), (h: FamilyHub) => peers(h).get(a.userId)?.has(b.userId))).toBe(true);
+    expect((await api(b.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
+    expect(await runInDurableObject(hub(), (h: FamilyHub) => peers(h).has(a.userId))).toBe(false);
   });
 });

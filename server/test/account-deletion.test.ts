@@ -2,7 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex } from "../src/lib/tokens";
 import { addDevice, api, type ChatOut, createDirect, createGroup, insertMessage, type TestUser, wrapsFor } from "./chat-helpers";
-import { BASE, insertInvite, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
+import { BASE, insertFamily, insertInvite, insertUserWithDevice, jsonReq, joinFamily, resetDb } from "./helpers";
 import { insertMedia, usage } from "./media-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
@@ -16,9 +16,9 @@ type DirUser = { id: string; name: string; isAdmin: boolean; deleted: boolean; d
 const directory = async (u: TestUser) => (await (await api(u.accessToken, "GET", "/users")).json<{ users: DirUser[] }>()).users;
 const getChat = async (u: TestUser, id: string) => (await (await api(u.accessToken, "GET", `/chats/${id}`)).json<{ chat: ChatOut }>()).chat;
 
-/** A family: admin Alice, members Bob and Carol; a group of all three and a direct Bob–Carol chat. */
+/** A family: admin Alice (the operator), members Bob and Carol; a group of all three and a direct Bob–Carol chat. */
 async function family() {
-  const alice = await insertUserWithDevice({ admin: true, name: "Alice" });
+  const alice = await insertUserWithDevice({ admin: true, operator: true, name: "Alice" });
   const bob = await insertUserWithDevice({ name: "Bob" });
   const carol = await insertUserWithDevice({ name: "Carol" });
   const group = await createGroup(alice, [bob, carol], "Family");
@@ -141,6 +141,7 @@ describe("DELETE /api/me", () => {
     const { alice, bob } = await family();
     const token = await insertInvite({ name: "Dan" }); // made by the first user, Alice
     await env.DB.prepare("UPDATE users SET is_admin = 1 WHERE id = ?").bind(bob.userId).run();
+    await env.DB.prepare("UPDATE family_members SET role = 'admin' WHERE user_id = ? AND family_id = 1").bind(bob.userId).run();
     expect((await deleteMe(alice)).status).toBe(204);
     const expires = await env.DB.prepare("SELECT expires_at FROM invites WHERE token_hash = ?").bind(await sha256Hex(token))
       .first<number>("expires_at");
@@ -166,7 +167,7 @@ describe("last admin guard", () => {
     const { alice } = await family();
     const res = await deleteMe(alice);
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "last_admin" });
+    expect(await res.json()).toEqual({ error: "last_admin", familyId: 1, familyName: "Family" });
     expect(await env.DB.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(alice.userId).first("deleted_at")).toBeNull();
     expect((await api(alice.accessToken, "GET", "/me")).status).toBe(200);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM events").first("n")).toBe(0);
@@ -175,8 +176,51 @@ describe("last admin guard", () => {
   it("an admin can go once there is another admin", async () => {
     const { alice, bob } = await family();
     await env.DB.prepare("UPDATE users SET is_admin = 1 WHERE id = ?").bind(bob.userId).run();
+    await env.DB.prepare("UPDATE family_members SET role = 'admin' WHERE user_id = ? AND family_id = 1").bind(bob.userId).run();
     expect((await deleteMe(alice)).status).toBe(204);
     expect((await api(bob.accessToken, "GET", "/me")).status).toBe(200);
+  });
+
+  it("last_admin is per family and names the family", async () => {
+    const a = await insertUserWithDevice({ name: "A", families: [{ id: 1 }] });
+    const b = await insertUserWithDevice({ name: "B", families: [{ id: 1 }] });
+    const cousins = await insertFamily({ name: "Cousins" });
+    expect(cousins).toBe(3);
+    await joinFamily(a.userId, cousins, "admin");
+    await joinFamily(b.userId, cousins, "member");
+    const res = await deleteMe(a);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "last_admin", familyId: 3, familyName: "Cousins" });
+    // A deleted member doesn't count: once B is gone, A may go.
+    expect((await deleteMe(b)).status).toBe(204);
+    expect((await deleteMe(a)).status).toBe(204);
+  });
+
+  it("a second admin frees the first", async () => {
+    const a = await insertUserWithDevice({ name: "A", families: [{ id: 1 }] });
+    const b = await insertUserWithDevice({ name: "B", families: [{ id: 1 }] });
+    const f = await insertFamily({ name: "Cousins" });
+    await joinFamily(a.userId, f, "admin");
+    await joinFamily(b.userId, f, "admin");
+    expect((await deleteMe(a)).status).toBe(204);
+  });
+
+  it("a deleted account stays in its families as a member and is no longer operator", async () => {
+    const op = await insertUserWithDevice({ admin: true, operator: true, name: "Op" });
+    const f = await insertFamily({ name: "Cousins" });
+    await joinFamily(op.userId, f, "admin");
+    await env.DB.prepare(
+      "UPDATE family_members SET admin_by = ?, admin_signer_pub = 'p', admin_sig = 's' WHERE user_id = ?",
+    ).bind(op.userId, op.userId).run();
+    expect((await deleteMe(op)).status).toBe(204);
+    const rows = (await env.DB.prepare(
+      "SELECT family_id, role, admin_by, admin_signer_pub, admin_sig FROM family_members WHERE user_id = ? ORDER BY family_id",
+    ).bind(op.userId).all()).results;
+    expect(rows).toEqual([
+      { family_id: 1, role: "member", admin_by: null, admin_signer_pub: null, admin_sig: null },
+      { family_id: f, role: "member", admin_by: null, admin_signer_pub: null, admin_sig: null },
+    ]);
+    expect(await env.DB.prepare("SELECT operator FROM users WHERE id = ?").bind(op.userId).first("operator")).toBe(0);
   });
 
   it("the last person in the family can delete their account, and the family can start again", async () => {
@@ -196,6 +240,14 @@ describe("DELETE /api/admin/users/:id", () => {
     const res = await removeUser(bob, carol.userId);
     expect(res.status).toBe(403);
     expect(await env.DB.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(carol.userId).first("deleted_at")).toBeNull();
+  });
+
+  it("only the operator deletes someone else's account", async () => {
+    const { alice, carol } = await family();
+    const dave = await insertUserWithDevice({ admin: true, name: "Dave" });
+    expect((await removeUser(dave, carol.userId)).status).toBe(403);
+    expect(await env.DB.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(carol.userId).first("deleted_at")).toBeNull();
+    expect((await removeUser(alice, carol.userId)).status).toBe(204);
   });
 
   it("needs auth", async () => {

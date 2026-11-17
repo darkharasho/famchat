@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { deleteAccount } from "../lib/delete-account";
+import { FAMILY_ONE, familyPeers } from "../lib/family";
 import { newId } from "../lib/ids";
 import { notify } from "../notify";
 import { ApiError } from "../lib/errors";
@@ -12,15 +13,19 @@ me.use(requireAuth);
 
 /** The signed-in user's profile. isAdmin comes from the database, not the access token. */
 me.get("/", async (c) => {
-  const row = await c.env.DB.prepare("SELECT name, is_admin, recovery_pub IS NOT NULL AS has_recovery FROM users WHERE id = ?")
-    .bind(c.get("userId"))
-    .first<{ name: string; is_admin: number; has_recovery: number }>();
+  const row = await c.env.DB.prepare(`SELECT name, operator, recovery_pub IS NOT NULL AS has_recovery,
+       EXISTS (SELECT 1 FROM family_members WHERE family_id = ? AND user_id = users.id AND role = 'admin') AS is_admin
+     FROM users WHERE id = ?`)
+    .bind(FAMILY_ONE, c.get("userId"))
+    .first<{ name: string; is_admin: number; operator: number; has_recovery: number }>();
   if (!row) throw new ApiError("unauthorized");
   return c.json({
     userId: c.get("userId"),
     deviceId: c.get("deviceId"),
     name: row.name,
+    // Admin of family #1 (the original family).
     isAdmin: row.is_admin === 1,
+    operator: row.operator === 1,
     // An admin recovery key is registered (the printed code was saved).
     recoveryCodeSet: row.has_recovery === 1,
     // A reviewer account (docs/protocol.md "Reviewer accounts").
@@ -38,7 +43,7 @@ me.put("/name", async (c) => {
   const newName = name(raw, 40);
   const userId = c.get("userId");
   await c.env.DB.prepare("UPDATE users SET name = ? WHERE id = ? AND deleted_at IS NULL").bind(newName, userId).run();
-  await notify(c.env, await sameSide(c.env.DB, userId), { type: "profile", userId });
+  await notify(c.env, await familyPeers(c.env.DB, userId), { type: "profile", userId });
   return c.body(null, 204);
 });
 
@@ -57,14 +62,6 @@ async function swapAvatar(db: D1Database, userId: string, key: string | null): P
   return (prev.results[0] as { avatar_key: string | null } | undefined)?.avatar_key ?? null;
 }
 
-/** Everyone who sees [userId] in the directory: their side of the reviewer line. */
-async function sameSide(db: D1Database, userId: string): Promise<string[]> {
-  const { results } = await db.prepare(
-    "SELECT id FROM users WHERE reviewer = (SELECT reviewer FROM users WHERE id = ?) AND deleted_at IS NULL",
-  ).bind(userId).all<{ id: string }>();
-  return results.map((r) => r.id);
-}
-
 /** Sets the caller's profile photo: the raw JPEG as the body. Answers the new avatarKey. */
 me.put("/avatar", async (c) => {
   if (c.req.header("content-type") !== "image/jpeg") throw new ApiError("invalid_request");
@@ -80,7 +77,7 @@ me.put("/avatar", async (c) => {
   });
   const old = await swapAvatar(c.env.DB, userId, key);
   if (old) await c.env.MEDIA.delete(avatarObject(userId, old)).catch(() => {});
-  await notify(c.env, await sameSide(c.env.DB, userId), { type: "profile", userId });
+  await notify(c.env, await familyPeers(c.env.DB, userId), { type: "profile", userId });
   return c.json({ avatarKey: key });
 });
 
@@ -90,7 +87,7 @@ me.delete("/avatar", async (c) => {
   const old = await swapAvatar(c.env.DB, userId, null);
   if (old) {
     await c.env.MEDIA.delete(avatarObject(userId, old)).catch(() => {});
-    await notify(c.env, await sameSide(c.env.DB, userId), { type: "profile", userId });
+    await notify(c.env, await familyPeers(c.env.DB, userId), { type: "profile", userId });
   }
   return c.body(null, 204);
 });

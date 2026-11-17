@@ -58,12 +58,16 @@ export async function resetDb(): Promise<void> {
     env.DB.prepare("DELETE FROM messages"),
     env.DB.prepare("DELETE FROM chat_key_wraps"),
     env.DB.prepare("DELETE FROM chat_epochs"),
+    env.DB.prepare("DELETE FROM chat_leavers"),
     env.DB.prepare("DELETE FROM chat_members"),
     env.DB.prepare("DELETE FROM chats"),
     env.DB.prepare("DELETE FROM devices"),
     env.DB.prepare("DELETE FROM invites"),
     env.DB.prepare("DELETE FROM resets"),
     env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("DELETE FROM family_members"),
+    env.DB.prepare("DELETE FROM families WHERE id > 2"),
+    env.DB.prepare("UPDATE families SET created_by = NULL, decided_by = NULL"),
     env.DB.prepare("DELETE FROM users"),
   ]);
   for (;;) {
@@ -73,21 +77,59 @@ export async function resetDb(): Promise<void> {
   }
 }
 
+export interface FamilyMembership {
+  id: number;
+  role?: "admin" | "member";
+}
+
+/** Inserts a family row (default "Other", approved) and returns its id. */
+export async function insertFamily(
+  opts: { name?: string; status?: "pending" | "approved" | "declined"; hidden?: boolean; createdBy?: string } = {},
+): Promise<number> {
+  const res = await env.DB.prepare(
+    "INSERT INTO families (name, created_by, status, hidden, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(opts.name ?? "Other", opts.createdBy ?? null, opts.status ?? "approved", opts.hidden ? 1 : 0, Date.now())
+    .run();
+  return res.meta.last_row_id as number;
+}
+
+export async function joinFamily(
+  userId: string,
+  familyId: number,
+  role: "admin" | "member" = "member",
+): Promise<void> {
+  await env.DB.prepare("INSERT INTO family_members (family_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)")
+    .bind(familyId, userId, role, Date.now())
+    .run();
+}
+
 /** Inserts a user + device row directly and returns an access token for it. */
-export async function insertUserWithDevice(opts: { admin?: boolean; name?: string; reviewer?: boolean } = {}) {
+export async function insertUserWithDevice(
+  opts: {
+    admin?: boolean;
+    name?: string;
+    reviewer?: boolean;
+    operator?: boolean;
+    families?: FamilyMembership[];
+  } = {},
+) {
   const keys = await makeKeys();
   const userId = newId();
   const deviceId = newId();
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer) VALUES (?, ?, ?, ?, ?, ?)",
-    ).bind(userId, opts.name ?? "Test", opts.admin ? 1 : 0, keys.identityPub, now, opts.reviewer ? 1 : 0),
+      "INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer, operator) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(userId, opts.name ?? "Test", opts.admin ? 1 : 0, keys.identityPub, now, opts.reviewer ? 1 : 0, opts.operator ? 1 : 0),
     env.DB.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, created_at, last_seen)
        VALUES (?, ?, 'Phone', 'android', ?, ?, ?, ?, ?)`,
     ).bind(deviceId, userId, keys.encPub, keys.signPub, keys.certSig, now, now),
   ]);
+  const families: FamilyMembership[] =
+    opts.families ?? (opts.reviewer ? [{ id: 2 }] : [{ id: 1, role: opts.admin ? "admin" : "member" }]);
+  for (const f of families) await joinFamily(userId, f.id, f.role ?? "member");
   const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: !!opts.admin });
   return { userId, deviceId, accessToken, keys };
 }
@@ -109,8 +151,8 @@ export async function insertInvite(opts: { admin?: boolean; name?: string; expir
   const now = Date.now();
   await env.DB.prepare(
     // Like real data: only the very first invite has no creator (a bootstrap invite).
-    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
-     VALUES (?, ?, ?, (SELECT id FROM users ORDER BY created_at LIMIT 1), ?, ?)`,
+    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id)
+     VALUES (?, ?, ?, (SELECT id FROM users ORDER BY created_at LIMIT 1), ?, ?, 1)`,
   )
     .bind(await sha256Hex(token), opts.name ?? "Mom", opts.admin ? 1 : 0, now, opts.expiresAt ?? now + 86_400_000)
     .run();

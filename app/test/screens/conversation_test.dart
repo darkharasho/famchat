@@ -63,6 +63,48 @@ void main() {
     return hub;
   }
 
+  chatTestWidgets('a direct chat with a former peer shows the read-only footer instead of the composer', (tester) async {
+    backend.markFormer(bob.userId);
+    await open(tester);
+    expect(find.byKey(const Key('no-shared-family')), findsOneWidget);
+    expect(find.byKey(const Key('composer')), findsNothing);
+    expect(find.text("You're no longer in a family together"), findsOneWidget);
+  });
+
+  chatTestWidgets('a direct chat with a deleted peer keeps the composer', (tester) async {
+    backend.markDeleted(bob.userId);
+    await open(tester);
+    expect(find.byKey(const Key('composer')), findsOneWidget);
+    expect(find.byKey(const Key('no-shared-family')), findsNothing);
+  });
+
+  chatTestWidgets('a group with a former member keeps the composer', (tester) async {
+    final carol = await backend.addUser('Carol');
+    backend.markFormer(bob.userId);
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice);
+    await inApp(tester, () async {
+      await alice.db.upsertChat(ChatDto(
+        id: chatId,
+        kind: 'group',
+        title: 'G',
+        createdBy: alice.userId,
+        currentEpoch: 1,
+        epochReady: true,
+        lastSeq: 0,
+        lastMessageAt: null,
+        createdAt: 1,
+        members: [
+          for (final u in [alice, bob, carol]) MemberDto(userId: u.userId, joinedSeq: 0, lastReadSeq: 0),
+        ],
+      ));
+    });
+    ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
+    await settle(tester);
+    expect(find.byKey(const Key('composer')), findsOneWidget);
+    expect(find.byKey(const Key('no-shared-family')), findsNothing);
+  });
+
   chatTestWidgets('sending shows the message pending, then sent', (tester) async {
     final hub = await open(tester);
     await tester.enterText(find.byKey(const Key('composer')), 'hello there');

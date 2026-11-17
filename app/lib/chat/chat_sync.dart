@@ -485,6 +485,11 @@ class ChatSync {
       case 'not_member':
         await db.setMessageState(id, 'failed');
         await _refreshChat(row.chatId);
+      case 'no_shared_family':
+        // The other person is no longer in a family with us: this can't be sent. Their `former`
+        // flag is in the directory now, so the chat turns read-only.
+        await db.setMessageState(id, 'failed');
+        await directory.refresh();
       case 'internal':
         // Stays pending; resent on the next connect or flush.
         break;

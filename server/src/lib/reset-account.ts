@@ -6,7 +6,7 @@ import { hubStub } from "../hub";
 import { notify } from "../notify";
 import { memberIds } from "./chatdb";
 import { ApiError } from "./errors";
-import { sharingUserIds } from "./family";
+import { familyPeers, sharingUserIds } from "./family";
 import { eventStmt, type ResetStatement } from "./reset";
 
 export interface ResetPlan {
@@ -136,10 +136,7 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
   return true;
 }
 
-/** Every family member refreshes the directory and checks the reset. Reviewer accounts never hear. */
+/** Everyone sharing a family with the user refreshes the directory and checks the reset. */
 export async function notifyReset(env: Env, userId: string, resetId: string): Promise<void> {
-  const { results } = await env.DB.prepare(
-    "SELECT id FROM users WHERE reviewer = (SELECT reviewer FROM users WHERE id = ?)",
-  ).bind(userId).all<{ id: string }>();
-  await notify(env, results.map((u) => u.id), { type: "reset", userId, resetId });
+  await notify(env, await familyPeers(env.DB, userId), { type: "reset", userId, resetId });
 }

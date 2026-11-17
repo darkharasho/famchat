@@ -32,16 +32,14 @@ ws.get("/", async (c) => {
   ).bind(await sha256Hex(ticket)).first<{ user_id: string; device_id: string; expires_at: number }>();
   if (!row || row.expires_at < Date.now()) throw new ApiError("unauthorized");
   const live = await c.env.DB.prepare(
-    "SELECT u.reviewer FROM devices d JOIN users u ON u.id = d.user_id WHERE d.id = ? AND d.user_id = ? AND d.revoked_at IS NULL",
-  ).bind(row.device_id, row.user_id).first<{ reviewer: number }>();
+    "SELECT 1 AS ok FROM devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+  ).bind(row.device_id, row.user_id).first();
   if (!live) throw new ApiError("unauthorized");
   return hubStub(c.env).fetch("https://hub/ws", {
     headers: {
       upgrade: "websocket",
       "x-famchat-user": row.user_id,
       "x-famchat-device": row.device_id,
-      // Presence stays on the caller's side (docs/protocol.md "Reviewer accounts").
-      "x-famchat-side": live.reviewer === 1 ? "reviewer" : "family",
     },
   });
 });

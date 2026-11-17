@@ -56,6 +56,7 @@ class UserDto {
     this.resets = const [],
     this.adminProof,
     this.deleted = false,
+    this.former = false,
     this.avatarKey,
   });
 
@@ -68,6 +69,9 @@ class UserDto {
   /// The account was deleted (docs/protocol.md "Deleting an account"): listed so old certificates
   /// still verify, but gone from the family.
   final bool deleted;
+
+  /// Someone I only share a chat with, not a family: never an admin, no admin proof, no families.
+  final bool former;
   final List<DeviceDto> devices;
 
   /// Who made this user an admin, signed; null for the bootstrapped first admin (and non-admins).
@@ -91,6 +95,7 @@ class UserDto {
         _ => throw const FormatException('bad adminProof'),
       },
       deleted: j['deleted'] == true,
+      former: j['former'] == true,
       avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
     );
   }

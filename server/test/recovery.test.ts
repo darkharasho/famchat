@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newId } from "../src/lib/ids";
 import { claimMessage, recoveryKeyMessage, resetMessage } from "../src/lib/reset";
 import { api, createDirect } from "./chat-helpers";
-import { BASE, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
+import { BASE, insertFamily, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
 import { ed25519, redeemReset, registerRecovery, resetUser, sign } from "./reset-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
@@ -68,6 +68,16 @@ describe("POST /api/admin/recovery-key", () => {
     const member = await insertUserWithDevice();
     const msig = await sign(member.keys.identityPriv, recoveryKeyMessage(member.userId, rk.pub));
     expect((await api(member.accessToken, "POST", "/admin/recovery-key", { recoveryPub: rk.pub, sig: msig })).status).toBe(403);
+  });
+});
+
+describe("recovery key registration by family", () => {
+  it("an admin of any family can register a recovery key", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const admin = await insertUserWithDevice({ name: "Cz", families: [{ id: f, role: "admin" }] });
+    expect((await registerRecovery(admin)).res.status).toBe(204);
+    const member = await insertUserWithDevice({ name: "Mz", families: [{ id: f, role: "member" }] });
+    expect((await registerRecovery(member)).res.status).toBe(403);
   });
 });
 

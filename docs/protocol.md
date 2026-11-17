@@ -139,8 +139,22 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - `GET /me` → `{userId, deviceId, name, isAdmin, recoveryCodeSet, reviewer}`; `recoveryCodeSet` says an
   admin recovery key is registered; `reviewer` marks a reviewer account ("Reviewer accounts").
   Redeeming answers `{userId, deviceId, isAdmin, reviewer, accessToken, refreshToken}`.
-- Admin routes check `users.is_admin` in the database, so a promotion counts at once. Reviewer
-  accounts get 403 from every admin route.
+- Admin routes check admin of family #1 in `family_members` (not `users.is_admin`, which is only a
+  mirror), so a promotion counts at once. `POST /admin/users/:id/admin` writes the proof into family
+  #1's row and mirrors `users` in one batch; the target must be a live member of family #1, else 404.
+  Reviewer accounts get 403 from every admin route.
+- The operator (`users.operator = 1`, set by hand or by redeeming a bootstrap invite) holds the
+  account-wide powers: `DELETE /admin/users/:id` and the three reviewer endpoints are operator-only
+  (403 for anyone else, family admins included). `POST /admin/recovery-key` takes an admin of any
+  non-hidden family. `POST /admin/users/:id/reset` still checks admin of family #1 and needs the
+  target to have a `family_members` row in family #1 (else 404).
+- Redeeming an invite joins the invite's family (`invites.family_id`: family #1 for admin and
+  bootstrap invites, the hidden reviewer family for reviewer invites), as admin when `make_admin`.
+  The recovery redeem accepts an admin of any non-hidden family.
+- Bootstrap and the operator: `POST /admin/bootstrap` gives 409 `already_bootstrapped` while family
+  #1 has a live member or a live operator exists. Redeeming a bootstrap invite (no creator) sets
+  `users.operator = 1` and fills family #1's `created_by`. Deleting the operator's account clears
+  the flag; no successor is chosen automatically (set `operator` by hand in D1).
 - `DELETE /devices/:id` → 204 (your own live device, else 404). Closes that device's WebSocket (code
   4001) and, in the same transaction, moves **every chat of your user** to `currentEpoch + 1` with
   `epochReady: false`; members get `chat {chatId}` per chat and `device {userId, deviceId, revoked: true}`.
@@ -233,34 +247,50 @@ the history at once; `trust` is E's trust-on-first-use state for other users, so
 of whatever the server shows. Member devices also add wraps for N on the `device` event.
 
 ### Directory
-- `GET /users` → `{users: User[]}`: every family member and every device, revoked ones included
+- `GET /users` → `{users: User[]}`: the caller, everyone who shares a family with them, and "former"
+  chat partners (below). Nobody else is ever listed. Every device is included, revoked ones too
   (`revoked: true`) so old signatures still verify. Wrap only for devices with `revoked: false`.
   `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
-  accept only through resets they verify ("Account resets"). A deleted account stays listed with
-  `deleted: true`, name `"Deleted user"` and every device revoked; don't offer it for new chats.
-  `avatarKey` names the user's profile photo, or is null.
+  accept only through resets they verify ("Account resets"). A deleted account stays listed to the
+  people who shared a family with it, with `deleted: true`, name `"Deleted user"` and every device
+  revoked; don't offer it for new chats. `avatarKey` names the user's profile photo, or is null.
+- `families: {id, role: "admin"|"member", adminProof: {byUserId, signerPub, sig} | null}[]` lists
+  only the families that user shares with the caller (a person's other families are never shown).
+  `adminProof` is set for admins who have a signed proof. Reviewers see the hidden reviewer family
+  in their own and other reviewers' lists.
+- `isAdmin` and `adminProof` describe family #1 only, and only when the caller is in family #1 too;
+  otherwise `false`/`null`, so family #1's roles don't leak to outsiders.
+- `former: true` marks people the caller shares a chat with (including a read-only direct chat or a
+  group they left, recorded in `chat_leavers`) but no family. They're listed so history still
+  verifies on a new or reset device, with the normal shape but `isAdmin: false`, `adminProof: null`
+  and `families: []`. They get no presence, typing or `profile` events and are never offered in
+  pickers. Every other entry has `former: false`.
+- `GET /me` also returns `operator: boolean`; its `isAdmin` means admin of family #1.
 
 ### Profile: name and photo
-Not end-to-end encrypted, like names: the server and everyone on the user's side of the reviewer
-line can see them.
+Not end-to-end encrypted, like names: the server and everyone in the user's directory (family
+peers and former chat partners) can see them.
 
 - `PUT /me/avatar` with a JPEG as the raw body (`content-type: image/jpeg`, at most 256 KiB; the app
   sends 512×512) → `{avatarKey}`. Each photo gets a new key; the previous one is deleted.
 - `DELETE /me/avatar` → 204.
 - `GET /users/:id/avatar?v=<avatarKey>` → the JPEG, cacheable for good (`immutable`); 404 once
-  replaced. Without `v`: the current one, not cached.
+  replaced. Without `v`: the current one, not cached. Only people in the caller's own directory
+  (themselves, family peers, former chat partners) can be fetched; anyone else gets 404.
 - `PUT /me/name {name}` → 204: renames the caller (trimmed, 1–40 characters, no control characters).
-- Any of these sends `{type:"profile", userId}` to everyone on that side: `GET /users` again.
+- Any of these sends `{type:"profile", userId}` to everyone who shares a family with the user (not
+  former chat partners): `GET /users` again.
   Deleting an account deletes its photo.
 
 ### Deleting an account
 Required by app stores for apps with accounts. Two ways in, one transaction:
 
 - `DELETE /me {confirm: "delete"}` → 204: the caller deletes their own account. Any other body → 400.
-  The family's only admin gets `409 last_admin` while anyone else is left (make someone else an admin
-  first); the last person in the family may delete their account, after which `POST /admin/bootstrap`
+  The only admin of a family gets `409 {error: "last_admin", familyId, familyName}` (the first such
+  family) while any other live member of it is left (make someone else an admin first; deleted members
+  don't count); the last person in the family may delete their account, after which `POST /admin/bootstrap`
   works again.
-- `DELETE /admin/users/:id` (admin) → 204: removes another member the same way (a deletion request, or
+- `DELETE /admin/users/:id` (operator only) → 204: removes another account the same way (a deletion request, or
   someone who left the family). Yourself → 400 (use `DELETE /me`); unknown or already deleted → 404.
 
 What happens, atomically:
@@ -273,29 +303,32 @@ What happens, atomically:
   `epochReady: false`, exactly as after a leave, and the remaining members create the new epoch
   without them. A direct chat stays with its one remaining member (clients title it "Deleted user").
 - **Anonymized, kept:** the `users` row (name `"Deleted user"`, admin flag, admin proof and recovery
-  key cleared, `deleted_at` set). Its id and identity key stay because devices, chats, resets and the
+  key and `operator` flag cleared, `deleted_at` set). Its `family_members` rows stay, as `member` with
+  the admin proof cleared, so the directory still resolves them. Its id and identity key stay because devices, chats, resets and the
   audit log reference them and other members' devices still verify old certificates and resets with
   them. Invites made out to them are renamed; their unused reset links and the invites they made expire.
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
 
 Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,
-`media_expired {chatId, keys}` for their media, and everyone (on the same side: family or reviewers) gets `account_deleted {userId}`.
+`media_expired {chatId, keys}` for their media, and everyone who shared a family with them gets `account_deleted {userId}`.
 Messages are end-to-end encrypted, so the server can't reach copies other members' devices already
 downloaded and decrypted; those stay on those devices until deleted there. A deleted user can't be
 reset, promoted, or added to a chat; their account can't be restored.
 
 ### Reviewer accounts
 App-store review needs sign-in details for an app nobody can sign up to. Reviewers get accounts of
-their own, walled off from the family in both directions (`users.reviewer = 1`).
+their own, walled off from the family in both directions: reviewers are the members of the hidden
+family #2, and nothing reads `users.reviewer` (a mirror write only). Every isolation rule below is
+the ordinary family rule; the 256 MiB media cap is the one reviewer-specific limit.
 
-- `POST /admin/reviewer-invite` (admin) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
+- `POST /admin/reviewer-invite` (operator) → `201 {inviteToken, inviteUrl, createdAt}`. The link is
   `<origin>/join#review.<token>`; the `review.` marker (never sent to the server) tells the app to ask
   the joiner for a display name. Reusable: any number of redemptions, no expiry. At most one is
   active: creating one revokes the previous one. The server keeps its raw token so admins can show
   the link again. It also stops working if the admin who made it is deleted.
-- `DELETE /admin/reviewer-invite` (admin) → 204: revokes it (redeeming → `410 invite_invalid`).
+- `DELETE /admin/reviewer-invite` (operator) → 204: revokes it (redeeming → `410 invite_invalid`).
   Reviewer accounts already made stay until removed with `DELETE /admin/users/:id`.
-- `GET /admin/reviewers` (admin) → `{invite: {inviteUrl, createdAt} | null, users: [{id, name,
+- `GET /admin/reviewers` (operator) → `{invite: {inviteUrl, createdAt} | null, users: [{id, name,
   createdAt, devices}]}`: the active invite and the live reviewer accounts (`devices`: live count).
 - Redeeming it: `POST /auth/invite/redeem` with `name` (1–40) as well → a new reviewer account each
   time (`reviewer: true`, never admin). A retry with the same keys within 10 minutes returns the same
@@ -305,8 +338,9 @@ Isolation, enforced by the server:
 - `GET /users` lists only users on the caller's side: the family sees no reviewers; a reviewer sees
   only reviewer accounts (themselves included), with their devices and resets.
 - `POST /chats` and `POST /chats/:id/members` accept only users on the caller's side (else 400).
-- Presence (`hello`, `presence`), `account_deleted` and `reset` go only to the same side; chat events
-  follow chat membership, which never mixes the two.
+- Reviewers are in the hidden reviewer family only, so presence (`hello`, `presence`), `typing`,
+  `profile`, `account_deleted` and `reset`, which go only to people sharing a family ("Hub → client"),
+  never cross; chat events follow chat membership, which never mixes the two.
 - Reviewers can't be promoted or reset (404); they don't count as family for the last-admin rule or
   for `POST /admin/bootstrap`.
 - All reviewer accounts together may hold at most 256 MiB of live media (`413 too_large`), so their
@@ -365,7 +399,7 @@ user). `sig` is the caller's identity key over `"famchat-admin-v1" ‖ str(userI
 Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
 as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
 `HKDF-SHA256(UTF-8(code), salt = "", info = "famchat-recovery-seed-v1")`, and registers
-`POST /admin/recovery-key {recoveryPub, sig}` (admin; `sig` = identity key over the registration) →
+`POST /admin/recovery-key {recoveryPub, sig}` (admin of any non-hidden family; `sig` = identity key over the registration) →
 204, replacing any earlier key. Only the public key is stored, so the server can't use the code.
 A reset of the admin (by another admin) clears the stored key, and a key whose registration doesn't
 verify under the admin's current identity key is refused, so a code registered from a lost device
@@ -386,17 +420,26 @@ writes an `events` row (audit log; not exposed by the API yet).
 - `GET /chats` → `{chats: Chat[]}` (yours, newest activity first). `GET /chats/:id` → `{chat}`.
 - `POST /chats` → `201 {chat, created: true}` or `200 {chat, created: false}`.
   - Direct: `{id, kind: "direct", userId, wraps}`. At most one per pair: if it exists, you get it back
-    (your wraps are ignored).
-  - Group: `{id, kind: "group", title (1–60), userIds (others, 0–100; none = a chat with only yourself), wraps}`.
+    (your wraps are ignored), even if the two no longer share a family. Otherwise the other user must be
+    live (`invalid_request`) and share a family with you (`403 no_shared_family`).
+  - Group: `{id, kind: "group", title (1–60), userIds (others, 0–100; none = a chat with only yourself), familyId?, wraps}`.
+    `familyId` is an integer naming an approved family you are in; you and everyone in `userIds` must be
+    live members of it, else `400 invalid_request`. Without it the server uses your only family; if you
+    have several, family #1 when you're in it, otherwise `400`. A reviewer's group lands in the hidden
+    reviewer family.
+  - `Chat.familyId`: the group's family id, `null` for direct chats.
   - `wraps`: epoch 1, exactly one per live device of every member (you included), all with
     `wrapperDeviceId` = your device. Re-posting an id you created returns it.
 - `POST /chats/:id/members {userIds, wraps}` → `{chat}`. Groups only. Wraps for the **current** epoch
   must cover every live device of the new users; wraps for older epochs (so they can read history) may
   be included. New members' `joinedSeq` is the chat's `lastSeq`. Fails with `stale_epoch` while the
   current epoch isn't created yet.
-  Adding someone to a **direct** chat isn't allowed: clients create a new group instead.
+  Adding someone to a **direct** chat isn't allowed: clients create a new group instead. New members must
+  be live members of the group's `familyId` (`400 invalid_request` otherwise).
 - `DELETE /chats/:id/members/:userId` → 204. Groups only. Yourself = leave; someone else = remove
-  (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`.
+  (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`. The server
+  records the person in `chat_leavers`, which keeps the leaver visible as `former` to the group's
+  remaining members.
 - `PUT /chats/:id/mute {until: number|null}` → 204. Your own mute: no pushes from this chat until
   `until` (Unix ms, 0 to 253402300799000; "until I turn it back on" is a far-off time), or `null` to
   unmute. Shown only to you as the chat's `mutedUntil`; your own sockets get a `chat` event.
@@ -452,34 +495,41 @@ Frames are JSON text. One socket per device carries every chat.
 | frame | effect |
 |---|---|
 | `{type:"send", id, chatId, envelope, silent?, mentions?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute |
-| `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
+| `{type:"typing", chatId}` | relayed to the sockets of the other members who share a family with you; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
 
 ### Hub → client
+Presence (`hello`, `presence`), `typing`, `profile`, `reset` and `account_deleted` reach only people
+who share a family with the user they're about; `device` reaches only chat partners who also share
+one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat`, `removed`,
+`keys`, `media_expired`) follow chat membership.
+
 | frame | when |
 |---|---|
-| `{type:"hello", online:[userId]}` | right after connecting |
-| `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
+| `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
+| `{type:"presence", userId, online}` | a user sharing a family with you: their first socket opened / last socket closed |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
-| `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
+| `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
 | `{type:"removed", chatId}` | you left or were removed |
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
-| `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
+| `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat and a family with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
-| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone on that side, see "Reviewer accounts"): `GET /users` and check it |
-| `{type:"account_deleted", userId}` | that account was deleted (to everyone on that side): `GET /users` ("Deleting an account") |
-| `{type:"profile", userId}` | that user changed their name or profile photo (to everyone on that side): `GET /users` ("Profile: name and photo") |
+| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone sharing a family with them): `GET /users` and check it |
+| `{type:"account_deleted", userId}` | that account was deleted (to everyone who shared a family with them): `GET /users` ("Deleting an account") |
+| `{type:"profile", userId}` | that user changed their name or profile photo (to everyone sharing a family with them): `GET /users` ("Profile: name and photo") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 
 ### `send` rules
 - `envelope.v == 1`, `nonce`/`ct`/`sig` base64url, JSON ≤ 64 KiB, `envelope.epoch == currentEpoch` and
   that epoch created; otherwise `invalid_request` / `stale_epoch`. Not a member → `not_member`.
+- In a **direct** chat, the sender and the other member must be live and share a family, else
+  `no_shared_family`. A chat whose other member deleted their account is still allowed.
 - **Idempotent on `id`:** resending an id from the same device and chat returns the original `ack`
   (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`.
 - Sends are processed one at a time; `seq` per chat is assigned without gaps and `msg` frames go out in

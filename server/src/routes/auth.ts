@@ -3,7 +3,7 @@ import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { verifyDeviceCert } from "../lib/devicecert";
 import { ApiError } from "../lib/errors";
-import { sharingUserIds } from "../lib/family";
+import { FAMILY_ONE, REVIEWER_FAMILY, sharesChanged, sharingUserIds } from "../lib/family";
 import { newId } from "../lib/ids";
 import { claimMessage, eventStmt, freshTime, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { notifyReset, resetAccount } from "../lib/reset-account";
@@ -65,12 +65,32 @@ auth.post("/invite/redeem", async (c) => {
     db.prepare(
       `UPDATE invites SET used_by = ?, used_at = ?
        WHERE token_hash = ? AND used_by IS NULL AND expires_at > ? AND user_id IS NULL AND reviewer = 0
-         AND (created_by IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL AND reviewer = 0))`,
+         AND (created_by IS NOT NULL OR (
+           NOT EXISTS (SELECT 1 FROM family_members m JOIN users u ON u.id = m.user_id
+                       WHERE m.family_id = ${FAMILY_ONE} AND u.deleted_at IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM users WHERE operator = 1 AND deleted_at IS NULL)))`,
     ).bind(userId, now, tokenHash, now),
     db.prepare(
       `INSERT INTO users (id, name, is_admin, identity_pub, created_at)
        SELECT ?, name, make_admin, ?, ? FROM invites WHERE token_hash = ? AND used_by = ?`,
     ).bind(userId, identityPub, now, tokenHash, userId),
+    // The invite's family; joining as admin carries no proof, like users.is_admin from an invite.
+    db.prepare(
+      `INSERT INTO family_members (family_id, user_id, role, joined_at)
+       SELECT family_id, ?, CASE make_admin WHEN 1 THEN 'admin' ELSE 'member' END, ?
+       FROM invites WHERE token_hash = ? AND used_by = ?`,
+    ).bind(userId, now, tokenHash, userId),
+    // A bootstrap invite (no creator) makes the operator and owns family #1.
+    db.prepare(
+      `UPDATE users SET operator = 1
+       WHERE id = ? AND EXISTS (SELECT 1 FROM invites WHERE token_hash = ? AND used_by = ? AND created_by IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM users WHERE operator = 1 AND deleted_at IS NULL)`,
+    ).bind(userId, tokenHash, userId),
+    db.prepare(
+      `UPDATE families SET created_by = ?
+       WHERE id = ${FAMILY_ONE} AND created_by IS NULL
+         AND EXISTS (SELECT 1 FROM invites WHERE token_hash = ? AND used_by = ? AND created_by IS NULL)`,
+    ).bind(userId, tokenHash, userId),
     db.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, refresh_hash, created_at, last_seen)
        SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ?`,
@@ -81,6 +101,7 @@ auth.post("/invite/redeem", async (c) => {
     }),
   ]);
   if (claim.meta.changes !== 1) return c.json(await retryRedeem(c.env, tokenHash, k, now), 201);
+  await sharesChanged(c.env);
 
   const isAdmin =
     (await db.prepare("SELECT is_admin FROM users WHERE id = ?").bind(userId).first<number>("is_admin")) === 1;
@@ -100,9 +121,10 @@ async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash
   // A retry whose 201 was lost: the same keys made a reviewer account just now.
   const prior = await db.prepare(
     `SELECT d.id AS device_id, u.id AS user_id FROM users u JOIN devices d ON d.user_id = u.id
-     WHERE u.reviewer = 1 AND u.deleted_at IS NULL AND u.identity_pub = ? AND u.created_at >= ?
+       JOIN family_members m ON m.user_id = u.id AND m.family_id = ?
+     WHERE u.deleted_at IS NULL AND u.identity_pub = ? AND u.created_at >= ?
        AND d.enc_pub = ? AND d.sign_pub = ? AND d.cert_sig = ? AND d.revoked_at IS NULL`,
-  ).bind(k.identityPub, now - REDEEM_RETRY_MS, k.encPub, k.signPub, k.certSig)
+  ).bind(REVIEWER_FAMILY, k.identityPub, now - REDEEM_RETRY_MS, k.encPub, k.signPub, k.certSig)
     .first<{ device_id: string; user_id: string }>();
   if (prior) return { ...(await reissue(env, prior.user_id, prior.device_id, false, now)), reviewer: true };
 
@@ -114,6 +136,10 @@ async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash
     db.prepare(`INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer) SELECT ?, ?, 0, ?, ?, 1 WHERE ${live}`)
       .bind(userId, displayName, k.identityPub, now, tokenHash, now),
     db.prepare(
+      `INSERT INTO family_members (family_id, user_id, role, joined_at)
+       SELECT family_id, ?, 'member', ? FROM invites WHERE token_hash = ? AND reviewer = 1 AND EXISTS (SELECT 1 FROM users WHERE id = ?)`,
+    ).bind(userId, now, tokenHash, userId),
+    db.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, refresh_hash, created_at, last_seen)
        SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ?`,
     ).bind(deviceId, k.deviceName, k.platform, k.encPub, k.signPub, k.certSig, await sha256Hex(refreshToken), now, now, userId),
@@ -123,6 +149,7 @@ async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash
     }),
   ]);
   if (user.meta.changes !== 1) throw new ApiError("invite_invalid");
+  await sharesChanged(env);
   const accessToken = await signAccessToken(env, { sub: userId, dev: deviceId, adm: false });
   return { userId, deviceId, isAdmin: false, reviewer: true, accessToken, refreshToken };
 }
@@ -209,7 +236,10 @@ auth.post("/recover/lookup", async (c) => {
  * that registration (a key registered under an identity key since retired doesn't count).
  */
 async function recoveryUser(db: D1Database, recoveryPub: string) {
-  const user = await db.prepare("SELECT id, identity_pub, recovery_sig FROM users WHERE recovery_pub = ? AND is_admin = 1")
+  const user = await db.prepare(`SELECT id, identity_pub, recovery_sig FROM users
+     WHERE recovery_pub = ?
+       AND EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id
+                   WHERE m.user_id = users.id AND m.role = 'admin' AND f.hidden = 0)`)
     .bind(recoveryPub).first<{ id: string; identity_pub: string; recovery_sig: string }>();
   if (!user || !(await verifyEd25519(user.identity_pub, user.recovery_sig, recoveryKeyMessage(user.id, recoveryPub)))) {
     throw new ApiError("unauthorized");

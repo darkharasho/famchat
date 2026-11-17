@@ -13,6 +13,7 @@ export type ChatOut = {
   lastSeq: number;
   lastMessageAt: number | null;
   createdAt: number;
+  familyId: number | null;
   mutedUntil: number | null;
   members: { userId: string; joinedSeq: number; lastReadSeq: number }[];
 };

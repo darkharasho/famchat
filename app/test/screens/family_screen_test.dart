@@ -18,9 +18,9 @@ void main() {
   });
 
   /// Admin Michael signed in, Mom with one device; opens /family.
-  Future<void> openFamily(WidgetTester tester) async {
+  Future<void> openFamily(WidgetTester tester, {bool operator = true}) async {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
-    await signInDirectly(tester, server, name: 'Michael', admin: true);
+    await signInDirectly(tester, server, name: 'Michael', admin: true, operator: operator);
     final momKey = await tester.runAsync(() async => b64url(await publicKeyOf(await newIdentityKey())));
     momId = server.addUser('Mom', identityPub: momKey!);
     server.addDevice(momId, name: 'Phone');
@@ -45,6 +45,17 @@ void main() {
     expect(find.text('1 device'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Media storage'), 200);
     expect(find.text('Media storage'), findsOneWidget, reason: 'usage screen linked');
+  });
+
+  testWidgets('former people are not listed as family', (tester) async {
+    await openFamily(tester);
+    final key = await tester.runAsync(() async => b64url(await publicKeyOf(await newIdentityKey())));
+    final exId = server.addUser('Ex Cousin', identityPub: key!);
+    server.users[exId]!.former = true;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mom'), findsOneWidget);
+    expect(find.text('Ex Cousin'), findsNothing);
   });
 
   testWidgets('reset needs confirmation, then shows the new link', (tester) async {
@@ -190,6 +201,35 @@ void main() {
     expect(server.users[revId]!.deleted, isTrue);
     expect(find.byKey(Key('reviewer-user-$revId')), findsNothing);
     expect(find.text('Play Reviewer was removed'), findsOneWidget);
+  });
+
+  testWidgets('an admin who is not the operator sees no Remove action and no reviewer section', (tester) async {
+    await openFamily(tester, operator: false);
+    await tester.ensureVisible(find.byKey(Key('family-menu-$momId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('family-menu-$momId')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset account'), findsOneWidget);
+    expect(find.text('Make admin'), findsOneWidget);
+    expect(find.text('Remove from family'), findsNothing);
+    await tester.tapAt(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Media storage'), 200);
+    expect(find.byKey(const Key('create-reviewer-invite')), findsNothing);
+    expect(find.text('Reviewer accounts'), findsNothing);
+  });
+
+  testWidgets('the operator sees Remove and the reviewer section', (tester) async {
+    await openFamily(tester, operator: true);
+    await tester.ensureVisible(find.byKey(Key('family-menu-$momId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('family-menu-$momId')));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove from family'), findsOneWidget);
+    await tester.tapAt(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.byKey(const Key('create-reviewer-invite')));
+    expect(find.byKey(const Key('create-reviewer-invite')), findsOneWidget);
   });
 
   testWidgets('members have no family screen', (tester) async {
