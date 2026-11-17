@@ -389,6 +389,19 @@ class FakeServer {
     }
     // server/src/routes/families.ts: family 1 plus [extraFamilies] (the caller's rows) and each
     // user's [FakeUser.familyRoles].
+    if (r.method == 'POST' && path == '/api/families/invite-lookup') {
+      final me = users[userId]!;
+      if (me.reviewer) return _err('forbidden');
+      final inv = invites[_body(r)['inviteToken']];
+      if (inv == null || inv.reviewer || inv.usedBy != null || inv.revoked || !inv.expiresAt.isAfter(now())) return _err('invite_invalid');
+      final fid = inv.familyId;
+      return _json({
+        'familyId': fid,
+        'familyName': fid == 1 ? family1Name : extraFamilies.firstWhere((f) => f['id'] == fid)['name'],
+        'invitedName': inv.name,
+        'alreadyMember': fid == 1 ? me.inFamily1 : me.familyRoles.containsKey(fid),
+      });
+    }
     final familyRoute = RegExp(r'^/api/families/(\d+)(/.*)?$').firstMatch(path);
     if (familyRoute != null && familyRoute[1] != null) {
       final res = await _family(r, users[userId]!, int.parse(familyRoute[1]!), familyRoute[2] ?? '');
@@ -569,6 +582,7 @@ class FakeServer {
     final iAmAdmin = id == 1 ? me.isAdmin : row!['role'] == 'admin';
     final iAmOwner = id == 1 ? me.isAdmin : row!['owner'] == true;
     bool inIt(FakeUser u) => !u.deleted && !u.reviewer && (id == 1 ? u.inFamily1 : u.familyRoles.containsKey(id));
+    bool inMine(FakeUser u) => id == 1 ? u.inFamily1 : u.familyRoles.containsKey(id);
     bool adminOf(FakeUser u) => id == 1 ? u.isAdmin : u.familyRoles[id] == 'admin';
     if (r.method == 'PUT' && rest.isEmpty) {
       final next = _body(r)['name'];
@@ -580,6 +594,24 @@ class FakeServer {
         row!['name'] = next.trim();
       }
       return http.Response('', 204);
+    }
+    if (r.method == 'POST' && rest == '/join') {
+      final inv = invites[_body(r)['inviteToken']];
+      if (inv == null || inv.reviewer || inv.familyId != id || inv.usedBy != null || inv.revoked || !inv.expiresAt.isAfter(now())) {
+        return _err('invite_invalid');
+      }
+      if (inMine(me)) return _err('conflict');
+      if (id == 1) {
+        me.inFamily1 = true;
+      } else {
+        me.familyRoles[id] = 'member';
+      }
+      inv
+        ..usedBy = me.id
+        ..usedAt = now();
+      return _json({
+        'family': {'id': id, 'name': name, 'status': 'approved', 'role': 'member', 'owner': false, 'ownerId': null, 'memberCount': 2, 'createdAt': 1},
+      });
     }
     if (r.method == 'POST' && rest == '/invites') {
       if (!approved || !iAmAdmin) return _err('forbidden');

@@ -9,7 +9,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../push/providers.dart' show rootMessengerKeyProvider;
+import '../api/models.dart';
+import '../chat/providers.dart' show familiesProvider;
 import '../router.dart';
+import '../screens/account_providers.dart' show meProvider;
+import '../screens/join_family_sheet.dart';
 import 'invite_link.dart';
 import 'session_controller.dart';
 
@@ -59,7 +63,7 @@ String? inviteFromLink(Uri uri) {
   return inviteTokenFromUri(uri);
 }
 
-/// Opens Join for invite links (or says you're already signed in).
+/// Opens Join for invite links; signed in, offers to join the family instead.
 class InviteLinkListener extends ConsumerStatefulWidget {
   const InviteLinkListener({super.key});
 
@@ -85,11 +89,31 @@ class _InviteLinkListenerState extends ConsumerState<InviteLinkListener> {
     final invite = inviteFromLink(uri);
     if (invite == null) return;
     if (ref.read(sessionProvider) is SignedIn) {
-      ref.read(rootMessengerKeyProvider).currentState?.showSnackBar(const SnackBar(content: Text("You're already signed in.")));
+      unawaited(_offer(invite));
       return;
     }
     ref.read(pendingInviteProvider.notifier).set(invite);
     ref.read(routerProvider).go('/join');
+  }
+
+  /// Signed in: a family invite offers to join; a reviewer (link or account) just hears they're in.
+  Future<void> _offer(String invite) async {
+    final messenger = ref.read(rootMessengerKeyProvider);
+    void alreadySignedIn() =>
+        messenger.currentState?.showSnackBar(const SnackBar(content: Text("You're already signed in.")));
+    if (isReviewerInvite(invite)) return alreadySignedIn();
+    final me = await ref.read(meProvider.future).then<Me?>((m) => m, onError: (_) => null);
+    if (!mounted) return;
+    if (me == null || me.reviewer) return alreadySignedIn();
+    await offerToJoinFamily(
+      api: ref.read(apiClientProvider),
+      onJoined: () {
+        if (mounted) ref.invalidate(familiesProvider);
+      },
+      sheetContext: () => ref.read(routerProvider).routerDelegate.navigatorKey.currentContext!,
+      messenger: messenger.currentState,
+      token: splitInvite(invite).token,
+    );
   }
 
   @override
