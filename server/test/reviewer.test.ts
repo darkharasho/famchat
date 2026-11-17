@@ -209,13 +209,17 @@ describe("directory isolation", () => {
 describe("chat isolation", () => {
   it("family members can't start chats with reviewers", async () => {
     const { alice, bob, r1 } = await setup();
-    expect((await api(alice.accessToken, "POST", "/chats", directBody(alice, r1))).status).toBe(400);
+    const d = await api(alice.accessToken, "POST", "/chats", directBody(alice, r1));
+    expect(d.status).toBe(403);
+    expect(await d.json()).toEqual({ error: "no_shared_family" });
     expect((await api(alice.accessToken, "POST", "/chats", groupBody(alice, [bob, r1]))).status).toBe(400);
   });
 
   it("reviewers can't start chats with family members", async () => {
     const { alice, bob, r1, r2 } = await setup();
-    expect((await api(r1.accessToken, "POST", "/chats", directBody(r1, alice))).status).toBe(400);
+    const d = await api(r1.accessToken, "POST", "/chats", directBody(r1, alice));
+    expect(d.status).toBe(403);
+    expect(await d.json()).toEqual({ error: "no_shared_family" });
     expect((await api(r1.accessToken, "POST", "/chats", groupBody(r1, [r2, bob]))).status).toBe(400);
   });
 

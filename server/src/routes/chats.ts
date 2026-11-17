@@ -4,6 +4,7 @@ import {
   chatOut, chatsOf, checkCoverage, isUlid, liveDeviceIds, parseWraps, requireMemberChat, wrapInserts,
 } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
+import { groupFamilyFor, shares } from "../lib/family";
 import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
 import { messageOut } from "../lib/messages";
@@ -12,15 +13,13 @@ import { notify } from "../notify";
 export const chats = new Hono<AppEnv>();
 chats.use(requireAuth);
 
-/**
- * How many of [userIds] are live users on the caller's side: the family, or (for a reviewer) the
- * reviewer accounts. The two never share a chat (docs/protocol.md "Reviewer accounts").
- */
-async function sameSide(db: D1Database, userIds: string[], reviewer: boolean): Promise<number> {
+/** How many of [userIds] are live members of [familyId]. */
+async function liveInFamily(db: D1Database, userIds: string[], familyId: number): Promise<number> {
   if (userIds.length === 0) return 0;
   return (await db.prepare(
-    `SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND reviewer = ? AND id IN (${userIds.map(() => "?").join(",")})`,
-  ).bind(reviewer ? 1 : 0, ...userIds).first<number>("n")) ?? 0;
+    `SELECT COUNT(*) AS n FROM family_members m JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+     WHERE m.family_id = ? AND m.user_id IN (${userIds.map(() => "?").join(",")})`,
+  ).bind(familyId, ...userIds).first<number>("n")) ?? 0;
 }
 
 chats.get("/", async (c) => c.json({ chats: await chatsOf(c.env.DB, c.get("userId")) }));
@@ -41,6 +40,7 @@ chats.post("/", async (c) => {
   let others: string[];
   let title: string | null = null;
   let directKey: string | null = null;
+  let familyId: number | null = null;
   if (body.kind === "direct") {
     if (typeof body.userId !== "string" || body.userId === me) throw new ApiError("invalid_request");
     others = [body.userId];
@@ -51,6 +51,7 @@ chats.post("/", async (c) => {
     if (!Array.isArray(body.userIds) || body.userIds.length > 100) throw new ApiError("invalid_request");
     if (!body.userIds.every((u) => typeof u === "string" && u !== me)) throw new ApiError("invalid_request");
     others = [...new Set(body.userIds as string[])];
+    familyId = await groupFamilyFor(db, me, body.familyId);
   } else {
     throw new ApiError("invalid_request");
   }
@@ -65,7 +66,14 @@ chats.post("/", async (c) => {
     const dup = await db.prepare("SELECT id FROM chats WHERE direct_key = ?").bind(directKey).first<{ id: string }>();
     if (dup) return c.json({ chat: await chatOut(db, dup.id, me), created: false }, 200);
   }
-  if ((await sameSide(db, others, c.get("reviewer"))) !== others.length) throw new ApiError("invalid_request");
+  if (familyId === null) {
+    // Direct: the other person must be live, and share a family with the caller.
+    const live = await db.prepare("SELECT 1 AS ok FROM users WHERE id = ? AND deleted_at IS NULL").bind(others[0]).first();
+    if (!live) throw new ApiError("invalid_request");
+    if (!(await shares(db, me, others[0]))) throw new ApiError("no_shared_family");
+  } else if ((await liveInFamily(db, others, familyId)) !== others.length) {
+    throw new ApiError("invalid_request");
+  }
 
   const members = [me, ...others];
   checkCoverage(wraps, { chatId: id, epoch: 1, wrapper: device, deviceIds: await liveDeviceIds(db, members) });
@@ -75,8 +83,8 @@ chats.post("/", async (c) => {
   try {
     await db.batch([
       db.prepare(
-        "INSERT INTO chats (id, kind, title, created_by, direct_key, current_epoch, last_seq, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, ?)",
-      ).bind(id, body.kind, title, me, directKey, now),
+        "INSERT INTO chats (id, kind, title, created_by, direct_key, family_id, current_epoch, last_seq, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)",
+      ).bind(id, body.kind, title, me, directKey, familyId, now),
       ...members.map((u) =>
         db.prepare("INSERT INTO chat_members (chat_id, user_id, joined_seq, last_read_seq, joined_at) VALUES (?, ?, 0, 0, ?)")
           .bind(id, u, now),
@@ -110,7 +118,9 @@ chats.post("/:id/members", async (c) => {
   if (!body.userIds.every((u) => typeof u === "string")) throw new ApiError("invalid_request");
   const added = [...new Set(body.userIds as string[])];
   if (added.some((u) => chat.members.some((m) => m.userId === u))) throw new ApiError("invalid_request");
-  if ((await sameSide(db, added, c.get("reviewer"))) !== added.length) throw new ApiError("invalid_request");
+  if (chat.familyId === null || (await liveInFamily(db, added, chat.familyId)) !== added.length) {
+    throw new ApiError("invalid_request");
+  }
   if (!chat.epochReady) throw new ApiError("stale_epoch");
 
   const wraps = parseWraps(body.wraps);
@@ -149,6 +159,8 @@ chats.delete("/:id/members/:userId", async (c) => {
   await db.batch([
     db.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chat.id, target),
     db.prepare("UPDATE chats SET current_epoch = current_epoch + 1 WHERE id = ?").bind(chat.id),
+    db.prepare("INSERT OR REPLACE INTO chat_leavers (chat_id, user_id, left_at) VALUES (?, ?, ?)")
+      .bind(chat.id, target, Date.now()),
   ]);
   await notify(c.env, [target], { type: "removed", chatId: chat.id });
   await notify(c.env, chat.members.map((m) => m.userId).filter((u) => u !== target), { type: "chat", chatId: chat.id });

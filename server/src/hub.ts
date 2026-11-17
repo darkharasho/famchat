@@ -276,10 +276,19 @@ export class FamilyHub extends DurableObject<Env> {
     }
     const chat = await db.prepare(
       `SELECT c.current_epoch,
-         EXISTS (SELECT 1 FROM chat_epochs e WHERE e.chat_id = c.id AND e.epoch = c.current_epoch) AS ready
+         EXISTS (SELECT 1 FROM chat_epochs e WHERE e.chat_id = c.id AND e.epoch = c.current_epoch) AS ready,
+         (c.kind = 'group'
+          OR NOT EXISTS (SELECT 1 FROM chat_members o WHERE o.chat_id = c.id AND o.user_id <> m.user_id)
+          OR EXISTS (
+            SELECT 1 FROM chat_members o
+            JOIN users ou ON ou.id = o.user_id AND ou.deleted_at IS NULL
+            JOIN family_members fo ON fo.user_id = o.user_id
+            JOIN family_members fm ON fm.family_id = fo.family_id AND fm.user_id = m.user_id
+            WHERE o.chat_id = c.id AND o.user_id <> m.user_id)) AS may_send
        FROM chats c JOIN chat_members m ON m.chat_id = c.id AND m.user_id = ? WHERE c.id = ?`,
-    ).bind(att.userId, chatId).first<{ current_epoch: number; ready: number }>();
+    ).bind(att.userId, chatId).first<{ current_epoch: number; ready: number; may_send: number }>();
     if (!chat) return send(ws, { type: "error", id, error: "not_member" });
+    if (chat.may_send !== 1) return send(ws, { type: "error", id, error: "no_shared_family" });
     if (env.epoch !== chat.current_epoch || chat.ready !== 1) return send(ws, { type: "error", id, error: "stale_epoch" });
 
     const now = Date.now();

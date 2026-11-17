@@ -190,6 +190,35 @@ describe("send", () => {
     expect(((await ca2.next("msg")).message as { id: string }).id).toBe(id);
   });
 
+  it("a send to a direct chat with no shared family is refused", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const chat = await createDirect(a, b);
+    await env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(f3, b.userId).run();
+    const ca = await connect(a);
+    const cb = await connect(b);
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    expect(await ca.next("error")).toEqual({ type: "error", id, error: "no_shared_family" });
+    await cb.none("msg");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?").bind(chat.id).first("n")).toBe(0);
+  });
+
+  it("a direct chat whose peer deleted their account still takes sends", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE users SET deleted_at = ? WHERE id = ?").bind(Date.now(), b.userId),
+      env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chat.id, b.userId),
+    ]);
+    const ca = await connect(a);
+    const id = newId();
+    ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    expect(await ca.next("ack")).toMatchObject({ id, seq: 1 });
+  });
+
   it("resending an id acks the original seq without a second row or fan-out", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();

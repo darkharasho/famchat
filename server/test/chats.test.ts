@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { newId } from "../src/lib/ids";
 import { addDevice, api, type ChatOut, createDirect, createGroup, fakeWrap, wrapsFor } from "./chat-helpers";
-import { insertUserWithDevice, resetDb } from "./helpers";
+import { env } from "cloudflare:test";
+import { insertFamily, insertUserWithDevice, resetDb } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -185,5 +186,82 @@ describe("PUT /api/chats/:id/mute", () => {
       expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/mute`, body)).status).toBe(400);
     }
     expect((await api(c.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: null })).status).toBe(404);
+  });
+});
+
+describe("chats and families", () => {
+  const post = (u: { accessToken: string; deviceId: string }, devs: string[], extra: Record<string, unknown>) => {
+    const id = newId();
+    return api(u.accessToken, "POST", "/chats", { id, wraps: wrapsFor(id, 1, u.deviceId, devs), ...extra }).then((res) => ({ id, res }));
+  };
+
+  it("a group without familyId goes to the caller's only family", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    expect((await createGroup(a, [b])).familyId).toBe(1);
+    const r1 = await insertUserWithDevice({ reviewer: true });
+    const r2 = await insertUserWithDevice({ reviewer: true });
+    expect((await createGroup(r1, [r2])).familyId).toBe(2);
+    expect((await createGroup(r1, [], "Note to self")).familyId).toBe(2);
+    const d = await createDirect(a, b);
+    expect(d.familyId).toBeNull();
+  });
+
+  it("an old client in several families gets family #1, or 400 without it", async () => {
+    const f3 = await insertFamily();
+    const f4 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }] });
+    expect((await createGroup(a, [b])).familyId).toBe(1);
+    const c = await insertUserWithDevice({ families: [{ id: f3 }, { id: f4 }] });
+    const d = await insertUserWithDevice({ families: [{ id: f3 }, { id: f4 }] });
+    const { res } = await post(c, [c.deviceId, d.deviceId], { kind: "group", title: "T", userIds: [d.userId] });
+    expect(res.status).toBe(400);
+    const ok = await post(c, [c.deviceId, d.deviceId], { kind: "group", title: "T", userIds: [d.userId], familyId: f4 });
+    expect(ok.res.status).toBe(201);
+    expect((await ok.res.json<{ chat: ChatOut }>()).chat.familyId).toBe(f4);
+  });
+
+  it("every group member must be a live member of the group's family", async () => {
+    const f3 = await insertFamily();
+    const pending = await insertFamily({ status: "pending" });
+    const a = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }, { id: pending }] });
+    const onlyOne = await insertUserWithDevice();
+    const both = await insertUserWithDevice({ families: [{ id: 1 }, { id: f3 }, { id: pending }] });
+    const bad = await post(a, [a.deviceId, onlyOne.deviceId], { kind: "group", title: "T", userIds: [onlyOne.userId], familyId: f3 });
+    expect(bad.res.status).toBe(400);
+    const pend = await post(a, [a.deviceId, both.deviceId], { kind: "group", title: "T", userIds: [both.userId], familyId: pending });
+    expect(pend.res.status).toBe(400);
+    const outsider = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const non = await post(outsider, [outsider.deviceId, both.deviceId], { kind: "group", title: "T", userIds: [both.userId], familyId: 1 });
+    expect(non.res.status).toBe(400);
+    const ok = await post(a, [a.deviceId, both.deviceId], { kind: "group", title: "T", userIds: [both.userId], familyId: f3 });
+    expect(ok.res.status).toBe(201);
+    // A deleted member doesn't count as live.
+    await env.DB.prepare("UPDATE users SET deleted_at = 1 WHERE id = ?").bind(both.userId).run();
+    const gone = await post(a, [a.deviceId], { kind: "group", title: "T", userIds: [both.userId], familyId: f3 });
+    expect(gone.res.status).toBe(400);
+  });
+
+  it("a direct chat needs a shared family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const res = await post(a, [a.deviceId, b.deviceId], { kind: "direct", userId: b.userId });
+    expect(res.res.status).toBe(403);
+    expect(await res.res.json()).toEqual({ error: "no_shared_family" });
+    const gone = await insertUserWithDevice();
+    await env.DB.prepare("UPDATE users SET deleted_at = 1 WHERE id = ?").bind(gone.userId).run();
+    expect((await post(a, [a.deviceId, gone.deviceId], { kind: "direct", userId: gone.userId })).res.status).toBe(400);
+    expect((await post(a, [a.deviceId], { kind: "direct", userId: newId() })).res.status).toBe(400);
+    // An existing pair is still returned after they stop sharing.
+    const c = await insertUserWithDevice();
+    const d = await createDirect(a, c);
+    await env.DB.prepare("DELETE FROM family_members WHERE user_id = ?").bind(c.userId).run();
+    const again = await api(a.accessToken, "POST", "/chats", {
+      id: newId(), kind: "direct", userId: c.userId, wraps: [],
+    });
+    expect(again.status).toBe(200);
+    expect((await again.json<{ chat: ChatOut }>()).chat.id).toBe(d.id);
   });
 });

@@ -24,6 +24,8 @@ export interface ChatOut {
   lastSeq: number;
   lastMessageAt: number | null;
   createdAt: number;
+  /** The family a group belongs to; null for direct chats. */
+  familyId: number | null;
   /** The caller's own mute: no pushes from this chat until then (Unix ms), or null. */
   mutedUntil: number | null;
   members: MemberOut[];
@@ -39,9 +41,10 @@ type ChatRow = {
   last_seq: number;
   last_message_at: number | null;
   created_at: number;
+  family_id: number | null;
 };
 
-const CHAT_SELECT = `SELECT c.id, c.kind, c.title, c.created_by, c.current_epoch, c.last_seq, c.last_message_at, c.created_at,
+const CHAT_SELECT = `SELECT c.id, c.kind, c.title, c.created_by, c.current_epoch, c.last_seq, c.last_message_at, c.created_at, c.family_id,
   EXISTS (SELECT 1 FROM chat_epochs e WHERE e.chat_id = c.id AND e.epoch = c.current_epoch) AS epoch_ready
   FROM chats c`;
 
@@ -56,6 +59,7 @@ function toOut(r: ChatRow, members: MemberOut[], mutedUntil: number | null): Cha
     lastSeq: r.last_seq,
     lastMessageAt: r.last_message_at,
     createdAt: r.created_at,
+    familyId: r.family_id,
     mutedUntil,
     members,
   };

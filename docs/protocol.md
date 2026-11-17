@@ -411,17 +411,25 @@ writes an `events` row (audit log; not exposed by the API yet).
 - `GET /chats` → `{chats: Chat[]}` (yours, newest activity first). `GET /chats/:id` → `{chat}`.
 - `POST /chats` → `201 {chat, created: true}` or `200 {chat, created: false}`.
   - Direct: `{id, kind: "direct", userId, wraps}`. At most one per pair: if it exists, you get it back
-    (your wraps are ignored).
-  - Group: `{id, kind: "group", title (1–60), userIds (others, 0–100; none = a chat with only yourself), wraps}`.
+    (your wraps are ignored), even if the two no longer share a family. Otherwise the other user must be
+    live (`invalid_request`) and share a family with you (`403 no_shared_family`).
+  - Group: `{id, kind: "group", title (1–60), userIds (others, 0–100; none = a chat with only yourself), familyId?, wraps}`.
+    `familyId` is an integer naming an approved family you are in; you and everyone in `userIds` must be
+    live members of it, else `400 invalid_request`. Without it the server uses your only family; if you
+    have several, family #1 when you're in it, otherwise `400`. A reviewer's group lands in the hidden
+    reviewer family.
+  - `Chat.familyId`: the group's family id, `null` for direct chats.
   - `wraps`: epoch 1, exactly one per live device of every member (you included), all with
     `wrapperDeviceId` = your device. Re-posting an id you created returns it.
 - `POST /chats/:id/members {userIds, wraps}` → `{chat}`. Groups only. Wraps for the **current** epoch
   must cover every live device of the new users; wraps for older epochs (so they can read history) may
   be included. New members' `joinedSeq` is the chat's `lastSeq`. Fails with `stale_epoch` while the
   current epoch isn't created yet.
-  Adding someone to a **direct** chat isn't allowed: clients create a new group instead.
+  Adding someone to a **direct** chat isn't allowed: clients create a new group instead. New members must
+  be live members of the group's `familyId` (`400 invalid_request` otherwise).
 - `DELETE /chats/:id/members/:userId` → 204. Groups only. Yourself = leave; someone else = remove
-  (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`.
+  (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`. The server
+  records the person in `chat_leavers`, which keeps them in the leaver's "former" directory entries.
 - `PUT /chats/:id/mute {until: number|null}` → 204. Your own mute: no pushes from this chat until
   `until` (Unix ms, 0 to 253402300799000; "until I turn it back on" is a far-off time), or `null` to
   unmute. Shown only to you as the chat's `mutedUntil`; your own sockets get a `chat` event.
@@ -510,6 +518,8 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 ### `send` rules
 - `envelope.v == 1`, `nonce`/`ct`/`sig` base64url, JSON ≤ 64 KiB, `envelope.epoch == currentEpoch` and
   that epoch created; otherwise `invalid_request` / `stale_epoch`. Not a member → `not_member`.
+- In a **direct** chat, the sender and the other member must be live and share a family, else
+  `no_shared_family`. A chat whose other member deleted their account is still allowed.
 - **Idempotent on `id`:** resending an id from the same device and chat returns the original `ack`
   (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`.
 - Sends are processed one at a time; `seq` per chat is assigned without gaps and `msg` frames go out in
