@@ -103,6 +103,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   FetchedPreview? _preview;
   Timer? _previewTimer;
 
+  /// The fetch for [_previewUrl] while it runs, so a send can wait for it.
+  Future<void>? _previewLoad;
+
+  /// A send is waiting for its link's preview (a second tap must not send twice).
+  bool _waitingForPreview = false;
+
   /// The first web link in [text], if any.
   static String? _firstLink(String text) {
     for (final p in splitLinks(text)) {
@@ -127,13 +133,28 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _previewUrl = url;
       _preview = null;
     });
+    final fetch = ref.read(chatApiProvider).preview(url);
+    final load = _previewLoad = fetch.then((_) {}, onError: (Object _) {});
     FetchedPreview? found;
     try {
-      found = await ref.read(chatApiProvider).preview(url);
+      found = await fetch;
     } catch (_) {
       found = null; // offline or the site said no: the link just sends plain
+    } finally {
+      if (identical(_previewLoad, load)) _previewLoad = null;
     }
     if (mounted && _previewUrl == url) setState(() => _preview = found);
+  }
+
+  /// Sending right after pasting a link (usual on phones, where the composer card has no time to
+  /// show): wait briefly for its preview, so the message still carries one.
+  Future<void> _awaitPreviewFor(String text) async {
+    final url = _firstLink(text);
+    if (url == null || url == _dismissedPreviewUrl || (url == _previewUrl && _previewLoad == null)) return;
+    _previewTimer?.cancel();
+    final load = url == _previewUrl ? _previewLoad : _checkPreview();
+    if (load == null) return;
+    await load.timeout(const Duration(seconds: 3), onTimeout: () {});
   }
 
   void _removePreview() => setState(() {
@@ -418,6 +439,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
       } else {
+        if (_waitingForPreview) return;
+        _waitingForPreview = true;
+        try {
+          await _awaitPreviewFor(text);
+        } finally {
+          _waitingForPreview = false;
+        }
+        if (!mounted) return;
         final preview = _preview;
         final media = ref.read(mediaServiceProvider);
         if (preview != null && media != null && _firstLink(text) == _previewUrl) {

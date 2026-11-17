@@ -91,4 +91,14 @@ void main() {
     await tester.pump();
     expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
   });
+
+  chatTestWidgets('sending right after pasting a link waits for its preview', (tester) async {
+    await open(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'look https://youtu.be/cat');
+    await tester.pump(); // no pause: the preview hasn't been asked for yet
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    expect((Plaintext.decode(utf8.encode(sent.body!)) as TextBody).preview?.title, 'Cat jumps');
+  });
 }
