@@ -268,6 +268,8 @@ void main() {
     Future<void> Function(WidgetTester tester, bool dark) body, {
     List<bool> modes = const [false, true],
     TargetPlatform? platform,
+    double dpr = 2,
+    String dir = 'docs/screenshots',
   }) {
     for (final dark in modes) {
       final file = '$name-${dark ? 'dark' : 'light'}';
@@ -276,14 +278,14 @@ void main() {
         // The emoji picker's recently used list (this folder is a test, but outside test/).
         // ignore: invalid_use_of_visible_for_testing_member
         SharedPreferences.setMockInitialValues({});
-        tester.view.physicalSize = size * 2;
-        tester.view.devicePixelRatio = 2;
+        tester.view.physicalSize = size * dpr;
+        tester.view.devicePixelRatio = dpr;
         tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
         addTearDown(tester.view.reset);
         addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
         await body(tester, dark);
         await _images(tester);
-        await expectLater(find.byType(_App), matchesGoldenFile('../../docs/screenshots/$file.png'));
+        await expectLater(find.byType(_App), matchesGoldenFile('../../$dir/$file.png'));
         await tester.pump(const Duration(seconds: 6)); // typing indicators expire
         await tester.pumpWidget(const SizedBox());
         for (var i = 0; i < 3; i++) {
@@ -377,4 +379,41 @@ void main() {
     c.read(routerProvider).go('/settings');
     await settle(tester);
   });
+
+  // App Store sizes: iPhone 6.9" (1320×2868) and iPad 13" (2064×2752).
+  const iphone = Size(440, 956), ipad = Size(1032, 1376);
+  const store = 'docs/store/ios';
+  for (final (prefix, size, dpr) in [('iphone', iphone, 3.0), ('ipad', ipad, 2.0)]) {
+    shot('$prefix-1-chats', size, (tester, dark) async {
+      final f = _Family();
+      await f.create();
+      await _pump(tester, f, dark: dark);
+    }, dpr: dpr, dir: store, modes: const [false]);
+    shot('$prefix-2-conversation', size, (tester, dark) async {
+      final f = _Family();
+      await f.create();
+      final (c, hub) = await _pump(tester, f, dark: dark);
+      c.read(routerProvider).go('/chats/sunday');
+      await settle(tester);
+      hub.emit({'type': 'typing', 'chatId': 'sunday', 'userId': f.dad.userId});
+      await settle(tester);
+    }, dpr: dpr, dir: store, modes: const [false]);
+    shot('$prefix-3-dark', size, (tester, dark) async {
+      final f = _Family();
+      await f.create();
+      final (c, _) = await _pump(tester, f, dark: dark);
+      c.read(routerProvider).go('/chats/sunday');
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('composer')), 'See you all Sunday ');
+      await tester.tap(find.byTooltip('Emoji'));
+      await settle(tester);
+    }, dpr: dpr, dir: store, modes: const [true]);
+    shot('$prefix-4-settings', size, (tester, dark) async {
+      final f = _Family();
+      await f.create();
+      final (c, _) = await _pump(tester, f, dark: dark);
+      c.read(routerProvider).go('/settings');
+      await settle(tester);
+    }, dpr: dpr, dir: store, modes: const [false]);
+  }
 }
