@@ -241,7 +241,13 @@ a `keysMac` that E accepts, and can't open or forge the bundle, as in the forwar
 Bundle: `sealed = ephPubE(32) ‖ nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 with key
 `HKDF-SHA256(ikm = X25519(ephE, ephPubN) ‖ UTF-8(S), salt = ephPubE ‖ ephPubN, info = "famchat-pair-bundle-v1")`.
 Plaintext is UTF-8 JSON:
-`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub], admin?}]}` (`admin`: E trusts the user as an admin, plan 10).
+`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub], admin?}], familyAdmins?: {"<familyId>": [userId]}}`.
+`familyAdmins` holds E's admin pins: for each family E has seen, the users E trusts as its admins
+("Account resets"). `admin` is for receivers that predate `familyAdmins`: true if E has pinned the
+user in family 1, false if not, and absent (null) if E has never seen family 1. N takes its pins
+from `familyAdmins` if it is present. Otherwise, if any `admin` is set, family 1's pins are the users
+with `admin: true`. With neither, N pins nothing and sees each family for the first time at its
+first directory refresh.
 N accepts it only if it opens, `certSig` verifies over N's own keys with the identity key derived from
 `identitySeed`, and `userId`/`deviceId` equal the claim's. `keys` are every chat key E holds, so N reads
 the history at once; `trust` is E's trust-on-first-use state for other users, so N starts with it instead
@@ -377,12 +383,20 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
    users get `device {userId, deviceId}`; everyone gets `reset` again. A lost response is retried
    with the same keys like any redeem.
 4. Other members' devices verify (client rule, `app/lib/chat/resets.dart`):
-   - **Trusted admins:** the server's `isAdmin` alone carries no authority. A device pins the admins
-     the server lists when it first sees the family (trust on first use; a paired device takes the
-     approving device's list from the handover bundle), then adds only users whose `adminProof` is a
-     valid promotion signed by a trusted admin's current key. Its own user always counts.
-   - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin other
-     than the user. Kind `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`,
+   - **Trusted admins** are kept per family, only for the families the device's own user is in. The
+     server's `isAdmin` and `families[].role` alone carry no authority. When a device first sees a
+     family (one it has no pins for), it pins the admins the server lists for that family (trust on
+     first use). A paired device takes the approving device's pins from the handover bundle. After
+     that, the device adds an admin to a family only if their `families[].adminProof` is a valid
+     promotion for that family: a v2 proof, or a v1 proof in family 1 only. The proof must be signed
+     with the current key of a trusted admin of that family. An admin the server stops listing for a
+     family is unpinned there, and needs a fresh proof to be trusted again. When the user leaves a
+     family, its pins are dropped and it is no longer marked as seen, so rejoining is first sight
+     again. The device's own user always counts. A device upgraded from one-family pinning keeps its
+     pinned admins as family 1's.
+   - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin, other
+     than the user, of a family that the user and this device's user are both in. For history only,
+     a former user (no shared family) also accepts a trusted admin of any of this device's families. Kind `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`,
      a key this device trusts.
    - If `oldIdentityPub` is the trusted key and `signerPub` is the admin's **current** trusted key:
      show "Mom's account was reset by Michael" in every chat shared with the user (a newer reset of
