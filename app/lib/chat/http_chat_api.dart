@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../api/api_client.dart';
+import '../api/models.dart' show ApiException;
 import '../crypto/wrap.dart';
 import 'wire.dart';
 
@@ -30,6 +31,17 @@ class HttpChatApi implements ChatApi {
     final key = j?['avatarKey'];
     if (key is! String) throw const FormatException('bad avatarKey');
     return key;
+  }
+
+  @override
+  Future<FetchedPreview?> preview(String url) async {
+    try {
+      final j = await _api.authedJson('GET', '/preview', query: {'url': url});
+      return j == null ? null : FetchedPreview.fromJson(j);
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
   }
 
   @override

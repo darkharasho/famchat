@@ -9,6 +9,7 @@ import '../chat/chat_sync.dart';
 import '../chat/db/chat_db.dart';
 import '../chat/plaintext.dart';
 import '../chat/ulid.dart';
+import '../chat/wire.dart';
 import '../crypto/encoding.dart';
 import '../crypto/media.dart';
 import 'media_api.dart';
@@ -52,6 +53,10 @@ extension VideoRefs on VideoBody {
   /// The poster frame, if the sender could make one.
   MediaRef? get thumbRef =>
       thumbKey == null ? null : MediaRef(id: thumbKey!, key: key, sha256: thumbSha256!, purpose: MediaPurpose.thumb);
+}
+
+extension PreviewImageRef on PreviewImage {
+  MediaRef get ref => MediaRef(id: mediaKey, key: key, sha256: sha256, purpose: MediaPurpose.thumb);
 }
 
 extension VoiceRef on VoiceBody {
@@ -214,6 +219,52 @@ class MediaService {
       ),
       id: messageId,
       forwarded: forwarded,
+    );
+  }
+
+  /// Queues a text with a preview of its link: the preview's image (when it decodes) becomes an
+  /// encrypted thumbnail, uploaded before the message is sent. Throws [ArgumentError] for empty or
+  /// too-long text.
+  Future<String> sendTextWithPreview(
+    String chatId,
+    String text,
+    FetchedPreview fetched, {
+    String? replyTo,
+    List<String> mentions = const [],
+  }) async {
+    final t = validMessageText(text);
+    if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
+    final messageId = newUlid();
+    PreviewImage? image;
+    if (fetched.image case final bytes?) {
+      try {
+        final p = await processor.process(bytes);
+        final (w, h) = fitWithin(p.width, p.height, maxThumbSide);
+        final key = newMediaKey();
+        final blob = await stage(
+            chatId: chatId, messageId: messageId, kind: 'thumb', purpose: MediaPurpose.thumb, key: key, plaintext: p.thumb, position: 0);
+        image = PreviewImage(mediaKey: blob.id, key: key, sha256: blob.sha256, width: w, height: h);
+      } on UnsupportedImageException {
+        image = null;
+      } on ArgumentError {
+        image = null; // too large for a thumbnail
+      }
+    }
+    return sync.enqueueMessage(
+      chatId,
+      TextBody(
+        t,
+        replyTo: replyTo,
+        mentions: mentions.take(maxMentions).toList(),
+        preview: LinkPreview(
+          url: fetched.url,
+          title: fetched.title,
+          description: fetched.description,
+          siteName: fetched.siteName,
+          image: image,
+        ),
+      ),
+      id: messageId,
     );
   }
 

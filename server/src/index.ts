@@ -11,6 +11,7 @@ import { keys } from "./routes/keys";
 import { media } from "./routes/media";
 import { me } from "./routes/me";
 import { pairing } from "./routes/pairing";
+import { preview } from "./routes/preview";
 import { users } from "./routes/users";
 import { ws } from "./routes/ws";
 
@@ -27,6 +28,7 @@ app.route("/users", users);
 app.route("/chats", chats);
 app.route("/keys", keys);
 app.route("/media", media);
+app.route("/preview", preview);
 app.route("/ws", ws);
 
 app.notFound(() => errorResponse("not_found"));

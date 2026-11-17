@@ -1,4 +1,5 @@
 // The chat API's JSON shapes (docs/protocol.md) and the interface the sync engine talks to.
+import 'dart:convert';
 import 'dart:typed_data';
 
 import '../crypto/wrap.dart';
@@ -228,6 +229,34 @@ class MissingWrap {
 
 /// The REST side of the chat protocol. Errors are `ApiException` / `NetworkException` /
 /// `SignedOutException` from `lib/api/models.dart`; malformed bodies throw [FormatException].
+/// What the server found for a link: the image as raw bytes, to send as an encrypted thumbnail.
+class FetchedPreview {
+  const FetchedPreview({required this.url, required this.title, this.description, this.siteName, this.image});
+  final String url, title;
+  final String? description, siteName;
+  final Uint8List? image;
+
+  factory FetchedPreview.fromJson(Map<String, Object?> j) {
+    final url = j['url'], title = j['title'], image = j['image'];
+    if (url is! String || title is! String) throw const FormatException('bad preview');
+    Uint8List? bytes;
+    if (image is String) {
+      try {
+        bytes = base64Decode(image);
+      } on FormatException {
+        bytes = null;
+      }
+    }
+    return FetchedPreview(
+      url: url,
+      title: title,
+      description: j['description'] is String ? j['description'] as String : null,
+      siteName: j['siteName'] is String ? j['siteName'] as String : null,
+      image: bytes,
+    );
+  }
+}
+
 abstract interface class ChatApi {
   Future<List<UserDto>> users();
 
@@ -235,6 +264,9 @@ abstract interface class ChatApi {
   Future<String> setAvatar(Uint8List jpeg);
 
   Future<void> removeAvatar();
+
+  /// A preview of [url] (docs/protocol.md "Link previews"), or null when there's nothing to show.
+  Future<FetchedPreview?> preview(String url);
 
   /// [userId]'s profile photo [key] (a JPEG).
   Future<Uint8List> avatar(String userId, String key);

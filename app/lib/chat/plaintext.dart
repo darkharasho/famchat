@@ -49,7 +49,13 @@ sealed class Plaintext {
         if (mentions != null && (mentions is! List || mentions.length > maxMentions || mentions.any((m) => m is! String))) {
           throw const FormatException('bad mentions');
         }
-        return TextBody(text, replyTo: replyTo as String?, mentions: [...?(mentions as List?)?.cast<String>()]);
+        return TextBody(
+          text,
+          replyTo: replyTo as String?,
+          mentions: [...?(mentions as List?)?.cast<String>()],
+          // A preview that doesn't check out is dropped; the text still shows.
+          preview: LinkPreview.tryParse(j['preview']),
+        );
       case 'edit':
         final target = j['target'], text = j['text'];
         if (target is! String || target.isEmpty || text is! String || text.isEmpty) {
@@ -81,7 +87,10 @@ sealed class Plaintext {
 }
 
 class TextBody extends Plaintext {
-  const TextBody(this.text, {this.replyTo, this.mentions = const []});
+  const TextBody(this.text, {this.replyTo, this.mentions = const [], this.preview});
+
+  /// A card for the first link in [text], made by the sender (docs/protocol.md "Link previews").
+  final LinkPreview? preview;
   final String text;
 
   /// The message this one replies to, if any.
@@ -97,7 +106,61 @@ class TextBody extends Plaintext {
         'text': text,
         if (replyTo != null) 'replyTo': replyTo,
         if (mentions.isNotEmpty) 'mentions': mentions,
+        if (preview != null) 'preview': preview!.toJson(),
       };
+}
+
+/// A link's title, description, site and (as an encrypted thumbnail) image.
+class LinkPreview {
+  const LinkPreview({required this.url, required this.title, this.description, this.siteName, this.image});
+  final String url, title;
+  final String? description, siteName;
+  final PreviewImage? image;
+
+  Map<String, Object?> toJson() => {
+        'url': url,
+        'title': title,
+        if (description != null) 'description': description,
+        if (siteName != null) 'siteName': siteName,
+        if (image != null) 'image': image!.toJson(),
+      };
+
+  /// Null unless [j] is a preview of an http(s) link with a title (an image that doesn't check
+  /// out is dropped).
+  static LinkPreview? tryParse(Object? j) {
+    if (j is! Map<String, Object?>) return null;
+    final url = j['url'], title = j['title'], description = j['description'], site = j['siteName'];
+    if (url is! String || title is! String || title.isEmpty || title.length > 300) return null;
+    final u = Uri.tryParse(url);
+    if (u == null || !(u.scheme == 'https' || u.scheme == 'http') || u.host.isEmpty) return null;
+    String? short(Object? v, int max) => v is String && v.isNotEmpty ? (v.length > max ? v.substring(0, max) : v) : null;
+    PreviewImage? image;
+    if (j['image'] case final Map<String, Object?> i) {
+      try {
+        image = PreviewImage(
+          mediaKey: _mediaId(i, 'mediaKey'),
+          key: _bytes32(i, 'key'),
+          sha256: _bytes32(i, 'sha256'),
+          width: _positive(i, 'width', 100000),
+          height: _positive(i, 'height', 100000),
+        );
+      } on FormatException {
+        image = null;
+      }
+    }
+    return LinkPreview(url: url, title: title, description: short(description, 400), siteName: short(site, 100), image: image);
+  }
+}
+
+/// A preview's image: one encrypted thumbnail blob (purpose thumb) under its own media key.
+class PreviewImage {
+  const PreviewImage({required this.mediaKey, required this.key, required this.sha256, required this.width, required this.height});
+  final String mediaKey;
+  final Uint8List key, sha256;
+  final int width, height;
+
+  Map<String, Object?> toJson() =>
+      {'mediaKey': mediaKey, 'key': b64url(key), 'sha256': b64url(sha256), 'width': width, 'height': height};
 }
 
 /// New text for the sender's own text message [target]; the latest edit wins.
