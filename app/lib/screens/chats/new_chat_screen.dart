@@ -63,6 +63,10 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
   void _toggle(String id, Map<String, String> names) {
     setState(() {
       _picked.contains(id) ? _picked.remove(id) : _picked.add(id);
+      // A second person makes it a group, and with two or more families a group needs one chosen.
+      if (_picked.length > 1 && widget.addTo == null && (ref.read(myFamiliesProvider).value?.length ?? 0) > 1) {
+        _groupMode = true;
+      }
       if (!_titleEdited) _title.text = [for (final p in _picked) names[p] ?? '?'].join(', ');
     });
   }
@@ -153,7 +157,7 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
         top: false,
         child: ContentWidth(
           child: Column(children: [
-            if (group)
+            if (group && !needFamily)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
                 child: TextField(

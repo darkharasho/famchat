@@ -198,4 +198,23 @@ void main() {
     expect(find.text('Dan'), findsOneWidget);
     expect(find.text('Carol'), findsNothing);
   });
+
+  chatTestWidgets('two families: picking a second person in the default list goes through the family step', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice, server: twoFamilies());
+    go(tester, '/new');
+    await settle(tester);
+    await tester.tap(find.text('Bob'));
+    await tester.tap(find.text('Carol'));
+    await settle(tester);
+    expect(find.widgetWithText(FilledButton, 'Create group'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Create group')).onPressed, isNull,
+        reason: 'no group without a family');
+    expect(backend.requestedFamily, isEmpty);
+    await tester.tap(find.text('Hearth'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Create group'));
+    await settle(tester);
+    expect(backend.requestedFamily.values.single, 1);
+  });
 }
