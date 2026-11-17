@@ -268,6 +268,9 @@ abstract interface class ChatApi {
   /// A preview of [url] (docs/protocol.md "Link previews"), or null when there's nothing to show.
   Future<FetchedPreview?> preview(String url);
 
+  /// Renames this user (1–40 characters).
+  Future<void> setName(String name);
+
   /// [userId]'s profile photo [key] (a JPEG).
   Future<Uint8List> avatar(String userId, String key);
   Future<List<ChatDto>> chats();

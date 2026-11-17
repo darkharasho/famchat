@@ -21,7 +21,7 @@ void main() {
 
   testWidgets("a member's settings: their name, devices and sign out, no admin pages", (tester) async {
     await openSettings(tester);
-    expect(find.text('Gran'), findsOneWidget);
+    expect(find.text('Gran'), findsWidgets); // the header and the Your name row
     expect(find.textContaining('Family member'), findsOneWidget);
     expect(find.text('Devices'), findsOneWidget);
     expect(find.text('Sign out'), findsOneWidget);

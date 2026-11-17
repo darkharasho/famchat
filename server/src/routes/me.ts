@@ -4,7 +4,7 @@ import { deleteAccount } from "../lib/delete-account";
 import { newId } from "../lib/ids";
 import { notify } from "../notify";
 import { ApiError } from "../lib/errors";
-import { readJson } from "../lib/validate";
+import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
 
 export const me = new Hono<AppEnv>();
@@ -28,6 +28,18 @@ me.get("/", async (c) => {
     // KLIPY's terms have apps call it directly, so the app needs the key (null: GIFs are off).
     gifKey: c.env.KLIPY_APP_KEY || null,
   });
+});
+
+/** Renames the caller (`{name}`, 1–40 characters, the same limit as an invite's). */
+me.put("/name", async (c) => {
+  const raw = (await readJson(c)).name;
+  // No line breaks or other control characters: names show on one line everywhere.
+  if (typeof raw === "string" && /[\u0000-\u001f\u007f]/.test(raw)) throw new ApiError("invalid_request");
+  const newName = name(raw, 40);
+  const userId = c.get("userId");
+  await c.env.DB.prepare("UPDATE users SET name = ? WHERE id = ? AND deleted_at IS NULL").bind(newName, userId).run();
+  await notify(c.env, await sameSide(c.env.DB, userId), { type: "profile", userId });
+  return c.body(null, 204);
 });
 
 /** Largest profile photo (the app sends a 512 px JPEG, usually 30–80 KB). */

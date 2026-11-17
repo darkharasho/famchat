@@ -48,6 +48,9 @@ class HttpChatApi implements ChatApi {
   Future<void> removeAvatar() => _call('DELETE', '/me/avatar');
 
   @override
+  Future<void> setName(String name) => _call('PUT', '/me/name', {'name': name});
+
+  @override
   Future<Uint8List> avatar(String userId, String key) =>
       _api.authedBytes('/users/${_seg(userId)}/avatar', query: {'v': key}, maxBytes: 512 * 1024);
 
