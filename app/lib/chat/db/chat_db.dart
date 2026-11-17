@@ -111,6 +111,9 @@ class LocalUsers extends Table {
   /// certificates still resolve, but not offered for new chats. Null means not deleted.
   BoolColumn get deleted => boolean().nullable()();
 
+  /// Their profile photo's key (see [UserDto.avatarKey]), or null.
+  TextColumn get avatarKey => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -190,7 +193,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -205,6 +208,7 @@ class ChatDb extends _$ChatDb {
           if (from < 3) await m.addColumn(localUsers, localUsers.deleted);
           if (from < 4) await m.addColumn(localChats, localChats.mutedUntil);
           if (from < 5) await m.addColumn(localChats, localChats.draft);
+          if (from < 6) await m.addColumn(localUsers, localUsers.avatarKey);
         },
       );
 
@@ -486,7 +490,8 @@ class ChatDb extends _$ChatDb {
 
   Stream<List<UserRow>> watchUsers() => (select(localUsers)..orderBy([(u) => OrderingTerm(expression: u.name)])).watch();
 
-  Future<void> putUser(UserRow u) => into(localUsers).insertOnConflictUpdate(u);
+  /// Writes every column of [u], nulls included (a removed profile photo clears its key).
+  Future<void> putUser(UserRow u) => into(localUsers).insertOnConflictUpdate(u.toCompanion(false));
 
   Future<DeviceRow?> deviceById(String id) => (select(localDevices)..where((d) => d.id.equals(id))).getSingleOrNull();
 

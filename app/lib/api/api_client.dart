@@ -296,24 +296,27 @@ class ApiClient {
   /// Download deadline when the size isn't known up front (blobs are at most 16 MiB).
   static const downloadTimeout = Duration(minutes: 5);
 
-  /// Authed POST of raw bytes (`application/octet-stream`, `Content-Length` set), streamed in
+  /// Authed POST (or [method]) of raw bytes ([contentType], `Content-Length` set), streamed in
   /// 64 KiB chunks; [onProgress] gets the bytes the network has taken so far. Returns the JSON body.
   Future<Map<String, Object?>?> authedUpload(
     String path, {
     Map<String, String>? query,
     required Uint8List bytes,
     void Function(int sent, int total)? onProgress,
+    String method = 'POST',
+    String contentType = 'application/octet-stream',
   }) =>
       _authed((t) async {
-        final res = await _raw('POST', path, bearer: t, query: query, upload: bytes, onProgress: onProgress,
-            timeout: mediaTimeout(bytes.length));
+        final res = await _raw(method, path, bearer: t, query: query, upload: bytes, onProgress: onProgress,
+            timeout: mediaTimeout(bytes.length), contentType: contentType);
         return _json(res);
       });
 
   /// Authed GET of a raw body (media downloads). A body over [maxBytes] is abandoned with
   /// `ApiException(status, 'too_large')`.
-  Future<Uint8List> authedBytes(String path, {int? maxBytes}) => _authed((t) async {
-        final res = await _raw('GET', path, bearer: t, timeout: downloadTimeout, maxResponseBytes: maxBytes);
+  Future<Uint8List> authedBytes(String path, {int? maxBytes, Map<String, String>? query}) => _authed((t) async {
+        final res =
+            await _raw('GET', path, bearer: t, query: query, timeout: downloadTimeout, maxResponseBytes: maxBytes);
         return res.bodyBytes;
       });
 
@@ -327,12 +330,13 @@ class ApiClient {
     void Function(int sent, int total)? onProgress,
     required Duration timeout,
     int? maxResponseBytes,
+    String contentType = 'application/octet-stream',
   }) async {
     final abort = Completer<void>();
     final url = base.replace(path: '/api$path', queryParameters: query == null || query.isEmpty ? null : query);
     final http.BaseRequest req = upload == null
         ? http.AbortableRequest(method, url, abortTrigger: abort.future)
-        : _UploadRequest(method, url, upload, onProgress, abort.future);
+        : _UploadRequest(method, url, upload, onProgress, abort.future, contentType);
     req.headers['authorization'] = 'Bearer $bearer';
     Future<http.Response> fetch() async {
       final s = await client.send(req);
@@ -461,8 +465,8 @@ class ApiClient {
 /// A raw-bytes body produced chunk by chunk, so progress follows what the client consumed
 /// (on the web the browser client buffers the whole body first, so progress jumps).
 class _UploadRequest extends http.BaseRequest with http.Abortable {
-  _UploadRequest(super.method, super.url, this.bytes, this.onProgress, this.abortTrigger) {
-    headers['content-type'] = 'application/octet-stream';
+  _UploadRequest(super.method, super.url, this.bytes, this.onProgress, this.abortTrigger, String contentType) {
+    headers['content-type'] = contentType;
     contentLength = bytes.length;
   }
 

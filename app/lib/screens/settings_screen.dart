@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../chat/providers.dart';
 import '../dev_tools.dart';
+import '../profile/profile_photo_tile.dart';
 import '../push/notification_settings.dart';
 import '../session/session_controller.dart';
 import '../theme/tokens.dart';
@@ -48,7 +50,12 @@ class SettingsScreen extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.xl, Space.xl),
               child: Row(children: [
-                PersonAvatar(label: name, colorKey: session?.userId ?? '', radius: 32),
+                PersonAvatar(
+                  label: name,
+                  colorKey: session?.userId ?? '',
+                  userId: ref.watch(myUserIdProvider) ?? session?.userId,
+                  radius: 32,
+                ),
                 const SizedBox(width: Space.lg),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -64,6 +71,7 @@ class SettingsScreen extends ConsumerWidget {
               ]),
             ),
             SettingsGroup(title: 'You', children: [
+              const ProfilePhotoTile(),
               row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/devices',
                   key: const Key('settings-devices')),
             ]),

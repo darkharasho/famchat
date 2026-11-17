@@ -97,6 +97,7 @@ class _ChatTile extends StatelessWidget {
                 PersonAvatar(
                   label: title,
                   colorKey: group ? item.chat.id : (other ?? item.chat.id),
+                  userId: group ? null : other,
                   group: group,
                   online: other != null && online.contains(other),
                   radius: 26,

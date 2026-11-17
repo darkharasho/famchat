@@ -110,7 +110,7 @@ class _ListPane extends ConsumerWidget {
             child: IconButton(
               tooltip: 'Settings',
               padding: EdgeInsets.zero,
-              icon: PersonAvatar(label: signedIn?.name ?? '?', colorKey: signedIn?.userId ?? '', radius: 17),
+              icon: PersonAvatar(label: signedIn?.name ?? '?', colorKey: signedIn?.userId ?? '', userId: signedIn?.userId, radius: 17),
               onPressed: () => context.go('/settings'),
             ),
           ),

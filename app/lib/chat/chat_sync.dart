@@ -3,6 +3,7 @@
 // live events, sending through an outbox with idempotent ids, reactions, read receipts,
 // typing and presence. The UI only reads the database and the two ephemeral streams.
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
@@ -410,6 +411,9 @@ class ChatSync {
         await directory.refresh();
         await _retryUndecryptable();
         await _repair();
+      case 'profile':
+        // Someone changed their profile photo: the directory has the new key.
+        await directory.refresh();
       case 'account_deleted':
         // Someone's account was deleted: they're renamed and their devices revoked. The `chat`
         // events that come with it move each shared chat to a new epoch.
@@ -649,6 +653,20 @@ class ChatSync {
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.
+  /// Sets this user's profile photo ([jpeg], see `lib/profile/avatar.dart`), or removes it when
+  /// null; returns the new photo's key. The directory is refreshed, so it shows at once.
+  Future<String?> setAvatar(Uint8List? jpeg) async {
+    final String? key;
+    if (jpeg == null) {
+      await api.removeAvatar();
+      key = null;
+    } else {
+      key = await api.setAvatar(jpeg);
+    }
+    await _enqueue(() => directory.refresh());
+    return key;
+  }
+
   Future<void> acknowledgeIdentity(String userId) async {
     await directory.acknowledgeIdentity(userId);
     await _enqueue(() async {

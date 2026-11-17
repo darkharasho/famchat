@@ -39,7 +39,7 @@ class MentionSuggestions extends StatelessWidget {
                   color: i == selected ? s.secondaryContainer : null,
                   padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 6),
                   child: Row(children: [
-                    PersonAvatar(label: p.name, colorKey: p.id, radius: 14),
+                    PersonAvatar(label: p.name, colorKey: p.id, userId: p.id, radius: 14),
                     const SizedBox(width: Space.sm),
                     Expanded(
                       child: Text(

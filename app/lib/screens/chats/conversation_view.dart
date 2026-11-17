@@ -770,7 +770,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 lastInGroup: lastInGroup,
                 avatarSpace: group ? avatarSpace : 0,
                 avatar: group && m.senderUserId != me && lastInGroup
-                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, radius: 15)
+                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, userId: m.senderUserId, radius: 15)
                     : null,
               ),
             ),
@@ -790,7 +790,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           titleSpacing: widget.showBack ? 0 : Space.lg,
           shape: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
           title: Row(children: [
-            PersonAvatar(label: title, colorKey: group ? chat.id : (other ?? chat.id), group: group, online: otherOnline, radius: 20),
+            PersonAvatar(
+              label: title,
+              colorKey: group ? chat.id : (other ?? chat.id),
+              userId: group ? null : other,
+              group: group,
+              online: otherOnline,
+              radius: 20,
+            ),
             const SizedBox(width: Space.md),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -866,6 +873,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       art: PersonAvatar(
                         label: title,
                         colorKey: group ? chat.id : (other ?? chat.id),
+                        userId: group ? null : other,
                         group: group,
                         radius: 36,
                       ),

@@ -48,6 +48,7 @@ class _ForwardSheet extends ConsumerWidget {
                       leading: PersonAvatar(
                         label: title,
                         colorKey: group ? i.chat.id : (otherMember(i.chat, i.members, me) ?? i.chat.id),
+                        userId: group ? null : otherMember(i.chat, i.members, me),
                         group: group,
                         radius: 20,
                       ),

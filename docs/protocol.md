@@ -225,6 +225,19 @@ of whatever the server shows. Member devices also add wraps for N on the `device
   `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
   accept only through resets they verify ("Account resets"). A deleted account stays listed with
   `deleted: true`, name `"Deleted user"` and every device revoked; don't offer it for new chats.
+  `avatarKey` names the user's profile photo, or is null.
+
+### Profile photos
+Not end-to-end encrypted, like names: the server and everyone on the user's side of the reviewer
+line can see them.
+
+- `PUT /me/avatar` with a JPEG as the raw body (`content-type: image/jpeg`, at most 256 KiB; the app
+  sends 512×512) → `{avatarKey}`. Each photo gets a new key; the previous one is deleted.
+- `DELETE /me/avatar` → 204.
+- `GET /users/:id/avatar?v=<avatarKey>` → the JPEG, cacheable for good (`immutable`); 404 once
+  replaced. Without `v`: the current one, not cached.
+- Either change sends `{type:"profile", userId}` to everyone on that side: `GET /users` again.
+  Deleting an account deletes its photo.
 
 ### Deleting an account
 Required by app stores for apps with accounts. Two ways in, one transaction:
@@ -446,6 +459,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone on that side, see "Reviewer accounts"): `GET /users` and check it |
 | `{type:"account_deleted", userId}` | that account was deleted (to everyone on that side): `GET /users` ("Deleting an account") |
+| `{type:"profile", userId}` | that user changed their profile photo (to everyone on that side): `GET /users` ("Profile photos") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 

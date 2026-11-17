@@ -153,7 +153,7 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
                           value: _picked.contains(u.id),
                           onChanged: _busy ? null : (_) => _toggle(u.id, names),
                           title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          secondary: PersonAvatar(label: u.name, colorKey: u.id),
+                          secondary: PersonAvatar(label: u.name, colorKey: u.id, userId: u.id),
                         ),
                     ]),
             ),

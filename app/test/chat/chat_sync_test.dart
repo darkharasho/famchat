@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
@@ -237,6 +238,17 @@ void main() {
     final plain = await alice.sync.sendText(chatId, 'no one');
     await until(() async => (await carol.rows(chatId)).length == 2);
     expect(backend.sentMentions.containsKey(plain), isFalse);
+  });
+
+  test("a profile event brings in someone's new photo key, and its removal", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    await alice.sync.openDirect(bob.d.userId);
+    await alice.sync.idle;
+    final key = backend.setAvatar(bob.d.userId, Uint8List.fromList([1, 2, 3]));
+    await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == key, reason: 'new key');
+    backend.setAvatar(bob.d.userId, null);
+    await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == null, reason: 'removed');
   });
 
   test('deleting a message whose ack was lost still deletes it for everyone', () async {

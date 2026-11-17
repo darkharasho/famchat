@@ -2123,6 +2123,17 @@ class $LocalUsersTable extends LocalUsers
       'CHECK ("deleted" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _avatarKeyMeta = const VerificationMeta(
+    'avatarKey',
+  );
+  @override
+  late final GeneratedColumn<String> avatarKey = GeneratedColumn<String>(
+    'avatar_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2133,6 +2144,7 @@ class $LocalUsersTable extends LocalUsers
     knownIdentityPubs,
     pinnedAdmin,
     deleted,
+    avatarKey,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2213,6 +2225,12 @@ class $LocalUsersTable extends LocalUsers
         deleted.isAcceptableOrUnknown(data['deleted']!, _deletedMeta),
       );
     }
+    if (data.containsKey('avatar_key')) {
+      context.handle(
+        _avatarKeyMeta,
+        avatarKey.isAcceptableOrUnknown(data['avatar_key']!, _avatarKeyMeta),
+      );
+    }
     return context;
   }
 
@@ -2254,6 +2272,10 @@ class $LocalUsersTable extends LocalUsers
         DriftSqlType.bool,
         data['${effectivePrefix}deleted'],
       ),
+      avatarKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}avatar_key'],
+      ),
     );
   }
 
@@ -2286,6 +2308,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
   /// The account was deleted (docs/protocol.md "Deleting an account"): kept so old messages and
   /// certificates still resolve, but not offered for new chats. Null means not deleted.
   final bool? deleted;
+
+  /// Their profile photo's key (see [UserDto.avatarKey]), or null.
+  final String? avatarKey;
   const UserRow({
     required this.id,
     required this.name,
@@ -2295,6 +2320,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     required this.knownIdentityPubs,
     required this.pinnedAdmin,
     this.deleted,
+    this.avatarKey,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2308,6 +2334,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     map['pinned_admin'] = Variable<bool>(pinnedAdmin);
     if (!nullToAbsent || deleted != null) {
       map['deleted'] = Variable<bool>(deleted);
+    }
+    if (!nullToAbsent || avatarKey != null) {
+      map['avatar_key'] = Variable<String>(avatarKey);
     }
     return map;
   }
@@ -2324,6 +2353,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       deleted: deleted == null && nullToAbsent
           ? const Value.absent()
           : Value(deleted),
+      avatarKey: avatarKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(avatarKey),
     );
   }
 
@@ -2343,6 +2375,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       knownIdentityPubs: serializer.fromJson<String>(json['knownIdentityPubs']),
       pinnedAdmin: serializer.fromJson<bool>(json['pinnedAdmin']),
       deleted: serializer.fromJson<bool?>(json['deleted']),
+      avatarKey: serializer.fromJson<String?>(json['avatarKey']),
     );
   }
   @override
@@ -2357,6 +2390,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       'knownIdentityPubs': serializer.toJson<String>(knownIdentityPubs),
       'pinnedAdmin': serializer.toJson<bool>(pinnedAdmin),
       'deleted': serializer.toJson<bool?>(deleted),
+      'avatarKey': serializer.toJson<String?>(avatarKey),
     };
   }
 
@@ -2369,6 +2403,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     String? knownIdentityPubs,
     bool? pinnedAdmin,
     Value<bool?> deleted = const Value.absent(),
+    Value<String?> avatarKey = const Value.absent(),
   }) => UserRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -2378,6 +2413,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
     pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
     deleted: deleted.present ? deleted.value : this.deleted,
+    avatarKey: avatarKey.present ? avatarKey.value : this.avatarKey,
   );
   UserRow copyWithCompanion(LocalUsersCompanion data) {
     return UserRow(
@@ -2397,6 +2433,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ? data.pinnedAdmin.value
           : this.pinnedAdmin,
       deleted: data.deleted.present ? data.deleted.value : this.deleted,
+      avatarKey: data.avatarKey.present ? data.avatarKey.value : this.avatarKey,
     );
   }
 
@@ -2410,7 +2447,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ..write('trustedIdentityPub: $trustedIdentityPub, ')
           ..write('knownIdentityPubs: $knownIdentityPubs, ')
           ..write('pinnedAdmin: $pinnedAdmin, ')
-          ..write('deleted: $deleted')
+          ..write('deleted: $deleted, ')
+          ..write('avatarKey: $avatarKey')
           ..write(')'))
         .toString();
   }
@@ -2425,6 +2463,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     knownIdentityPubs,
     pinnedAdmin,
     deleted,
+    avatarKey,
   );
   @override
   bool operator ==(Object other) =>
@@ -2437,7 +2476,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           other.trustedIdentityPub == this.trustedIdentityPub &&
           other.knownIdentityPubs == this.knownIdentityPubs &&
           other.pinnedAdmin == this.pinnedAdmin &&
-          other.deleted == this.deleted);
+          other.deleted == this.deleted &&
+          other.avatarKey == this.avatarKey);
 }
 
 class LocalUsersCompanion extends UpdateCompanion<UserRow> {
@@ -2449,6 +2489,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
   final Value<String> knownIdentityPubs;
   final Value<bool> pinnedAdmin;
   final Value<bool?> deleted;
+  final Value<String?> avatarKey;
   final Value<int> rowid;
   const LocalUsersCompanion({
     this.id = const Value.absent(),
@@ -2459,6 +2500,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.knownIdentityPubs = const Value.absent(),
     this.pinnedAdmin = const Value.absent(),
     this.deleted = const Value.absent(),
+    this.avatarKey = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalUsersCompanion.insert({
@@ -2470,6 +2512,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.knownIdentityPubs = const Value.absent(),
     this.pinnedAdmin = const Value.absent(),
     this.deleted = const Value.absent(),
+    this.avatarKey = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2485,6 +2528,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Expression<String>? knownIdentityPubs,
     Expression<bool>? pinnedAdmin,
     Expression<bool>? deleted,
+    Expression<String>? avatarKey,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2497,6 +2541,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       if (knownIdentityPubs != null) 'known_identity_pubs': knownIdentityPubs,
       if (pinnedAdmin != null) 'pinned_admin': pinnedAdmin,
       if (deleted != null) 'deleted': deleted,
+      if (avatarKey != null) 'avatar_key': avatarKey,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2510,6 +2555,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Value<String>? knownIdentityPubs,
     Value<bool>? pinnedAdmin,
     Value<bool?>? deleted,
+    Value<String?>? avatarKey,
     Value<int>? rowid,
   }) {
     return LocalUsersCompanion(
@@ -2521,6 +2567,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       knownIdentityPubs: knownIdentityPubs ?? this.knownIdentityPubs,
       pinnedAdmin: pinnedAdmin ?? this.pinnedAdmin,
       deleted: deleted ?? this.deleted,
+      avatarKey: avatarKey ?? this.avatarKey,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2552,6 +2599,9 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     if (deleted.present) {
       map['deleted'] = Variable<bool>(deleted.value);
     }
+    if (avatarKey.present) {
+      map['avatar_key'] = Variable<String>(avatarKey.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2569,6 +2619,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
           ..write('knownIdentityPubs: $knownIdentityPubs, ')
           ..write('pinnedAdmin: $pinnedAdmin, ')
           ..write('deleted: $deleted, ')
+          ..write('avatarKey: $avatarKey, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4851,6 +4902,7 @@ typedef $$LocalUsersTableCreateCompanionBuilder = LocalUsersCompanion Function({
   Value<String> knownIdentityPubs,
   Value<bool> pinnedAdmin,
   Value<bool?> deleted,
+  Value<String?> avatarKey,
   Value<int> rowid,
 });
 typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
@@ -4862,6 +4914,7 @@ typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
   Value<String> knownIdentityPubs,
   Value<bool> pinnedAdmin,
   Value<bool?> deleted,
+  Value<String?> avatarKey,
   Value<int> rowid,
 });
 
@@ -4911,6 +4964,11 @@ class $$LocalUsersTableFilterComposer
 
   ColumnFilters<bool> get deleted => $composableBuilder(
     column: $table.deleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get avatarKey => $composableBuilder(
+    column: $table.avatarKey,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4963,6 +5021,11 @@ class $$LocalUsersTableOrderingComposer
     column: $table.deleted,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get avatarKey => $composableBuilder(
+    column: $table.avatarKey,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalUsersTableAnnotationComposer
@@ -5005,6 +5068,9 @@ class $$LocalUsersTableAnnotationComposer
 
   GeneratedColumn<bool> get deleted =>
       $composableBuilder(column: $table.deleted, builder: (column) => column);
+
+  GeneratedColumn<String> get avatarKey =>
+      $composableBuilder(column: $table.avatarKey, builder: (column) => column);
 }
 
 class $$LocalUsersTableTableManager
@@ -5043,6 +5109,7 @@ class $$LocalUsersTableTableManager
                 Value<String> knownIdentityPubs = const Value.absent(),
                 Value<bool> pinnedAdmin = const Value.absent(),
                 Value<bool?> deleted = const Value.absent(),
+                Value<String?> avatarKey = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion(
                 id: id,
@@ -5053,6 +5120,7 @@ class $$LocalUsersTableTableManager
                 knownIdentityPubs: knownIdentityPubs,
                 pinnedAdmin: pinnedAdmin,
                 deleted: deleted,
+                avatarKey: avatarKey,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5065,6 +5133,7 @@ class $$LocalUsersTableTableManager
                 Value<String> knownIdentityPubs = const Value.absent(),
                 Value<bool> pinnedAdmin = const Value.absent(),
                 Value<bool?> deleted = const Value.absent(),
+                Value<String?> avatarKey = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion.insert(
                 id: id,
@@ -5075,6 +5144,7 @@ class $$LocalUsersTableTableManager
                 knownIdentityPubs: knownIdentityPubs,
                 pinnedAdmin: pinnedAdmin,
                 deleted: deleted,
+                avatarKey: avatarKey,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
