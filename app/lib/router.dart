@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart' show MaterialPage, MediaQuery;
 
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
@@ -51,7 +52,10 @@ String? sessionRedirect(SessionState s, String location, {PendingLocation? pendi
         if (back == null) return '/';
         return sessionRedirect(s, back) ?? back;
       }
-      if ((location == '/invite' || location == '/storage' || location.startsWith('/family')) && !session.isAdmin) return '/';
+      if ((location == '/settings/invite' || location == '/settings/storage' || location.startsWith('/settings/family')) &&
+          !session.isAdmin) {
+        return '/';
+      }
       return null;
   }
 }
@@ -67,35 +71,60 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/loading', builder: (context, state) => const LoadingScreen()),
       GoRoute(path: '/join', builder: (context, state) => const JoinScreen()),
       GoRoute(path: '/pair', builder: (context, state) => const PairScreen()),
-      GoRoute(path: '/', builder: (context, state) => const ChatsShell()),
+      // Screens nest under where they're opened from, so the router keeps a real stack: back (the
+      // button, a swipe on iOS, the gesture on Android) pops with the reverse animation.
       GoRoute(
-        path: '/chats/:id',
-        builder: (context, state) => ChatsShell(chatId: state.pathParameters['id'], jumpTo: state.uri.queryParameters['m']),
+        path: '/',
+        builder: (context, state) => const ChatsShell(),
+        routes: [
+          GoRoute(
+            path: 'chats/:id',
+            pageBuilder: (context, state) {
+              final child = ChatsShell(chatId: state.pathParameters['id'], jumpTo: state.uri.queryParameters['m']);
+              // Side by side (wide windows), picking a chat swaps the pane in place, no slide.
+              return MediaQuery.sizeOf(context).width >= ChatsShell.twoPaneWidth
+                  ? NoTransitionPage(key: state.pageKey, child: child)
+                  : MaterialPage(key: state.pageKey, child: child);
+            },
+            routes: [
+              GoRoute(
+                path: 'info',
+                builder: (context, state) => GroupInfoScreen(chatId: state.pathParameters['id']!),
+                routes: [
+                  GoRoute(path: 'add', builder: (context, state) => NewChatScreen(addTo: state.pathParameters['id'])),
+                ],
+              ),
+            ],
+          ),
+          GoRoute(
+            path: 'new',
+            builder: (context, state) => NewChatScreen(
+              preselected: [...?state.uri.queryParameters['with']?.split(',').where((s) => s.isNotEmpty)],
+            ),
+          ),
+          GoRoute(path: 'search', builder: (context, state) => SearchScreen(chatId: state.uri.queryParameters['chat'])),
+          GoRoute(path: 'share', builder: (context, state) => const ShareScreen()),
+          GoRoute(
+            path: 'settings',
+            builder: (context, state) => const SettingsScreen(),
+            routes: [
+              GoRoute(
+                path: 'devices',
+                builder: (context, state) => const DevicesScreen(),
+                routes: [GoRoute(path: 'add', builder: (context, state) => const AddDeviceScreen())],
+              ),
+              GoRoute(path: 'invite', builder: (context, state) => const InviteScreen()),
+              GoRoute(path: 'storage', builder: (context, state) => const StorageScreen()),
+              GoRoute(
+                path: 'family',
+                builder: (context, state) => const FamilyScreen(),
+                routes: [GoRoute(path: 'recovery-code', builder: (context, state) => const RecoveryCodeScreen())],
+              ),
+            ],
+          ),
+        ],
       ),
-      GoRoute(
-        path: '/chats/:id/info',
-        builder: (context, state) => GroupInfoScreen(chatId: state.pathParameters['id']!),
-      ),
-      GoRoute(
-        path: '/chats/:id/add',
-        builder: (context, state) => NewChatScreen(addTo: state.pathParameters['id']),
-      ),
-      GoRoute(
-        path: '/new',
-        builder: (context, state) => NewChatScreen(
-          preselected: [...?state.uri.queryParameters['with']?.split(',').where((s) => s.isNotEmpty)],
-        ),
-      ),
-      GoRoute(path: '/search', builder: (context, state) => SearchScreen(chatId: state.uri.queryParameters['chat'])),
-      GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
-      GoRoute(path: '/share', builder: (context, state) => const ShareScreen()),
-      GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
-      GoRoute(path: '/devices/add', builder: (context, state) => const AddDeviceScreen()),
-      GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),
       GoRoute(path: '/spikes', builder: (context, state) => const SpikesScreen()),
-      GoRoute(path: '/storage', builder: (context, state) => const StorageScreen()),
-      GoRoute(path: '/family', builder: (context, state) => const FamilyScreen()),
-      GoRoute(path: '/family/recovery-code', builder: (context, state) => const RecoveryCodeScreen()),
       GoRoute(path: '/recover', builder: (context, state) => const RecoverScreen()),
     ],
   );

@@ -42,7 +42,7 @@ void main() {
     appRouter(tester).go('/settings');
     await tester.pumpAndSettle();
     expect(find.text('Invite someone'), findsNothing);
-    appRouter(tester).go('/invite');
+    appRouter(tester).go('/settings/invite');
     await tester.pumpAndSettle();
     expect(find.text('No chats yet'), findsOneWidget);
   });
@@ -51,8 +51,6 @@ void main() {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);
     server.users.values.single.isAdmin = true;
-    appRouter(tester).go('/devices');
-    await tester.pumpAndSettle();
     appRouter(tester).go('/settings');
     await tester.pumpAndSettle();
     expect(find.text('Invite someone'), findsOneWidget);

@@ -56,13 +56,13 @@ class FamilyScreen extends ConsumerWidget {
                       leading: const TileIcon(Icons.person_add_alt_rounded),
                       title: const Text('Invite someone'),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.go('/invite'),
+                      onTap: () => context.go('/settings/invite'),
                     ),
                     ListTile(
                       leading: const TileIcon(Icons.photo_library_outlined),
                       title: const Text('Media storage'),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.go('/storage'),
+                      onTap: () => context.go('/settings/storage'),
                     ),
                     if (me != null && me.recoveryCodeSet)
                       ListTile(
@@ -71,7 +71,7 @@ class FamilyScreen extends ConsumerWidget {
                         title: const Text('Make a new admin recovery code'),
                         subtitle: const Text('The old code stops working.'),
                         trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => context.go('/family/recovery-code'),
+                        onTap: () => context.go('/settings/family/recovery-code'),
                       ),
                   ]),
                   const _ReviewerSection(),
@@ -127,7 +127,7 @@ class _RecoveryCodeCard extends StatelessWidget {
           FilledButton(
             key: const Key('open-recovery-code'),
             style: FilledButton.styleFrom(backgroundColor: s.onSecondaryContainer, foregroundColor: s.secondaryContainer),
-            onPressed: () => context.go('/family/recovery-code'),
+            onPressed: () => context.go('/settings/family/recovery-code'),
             child: const Text('Save recovery code'),
           ),
           ]),

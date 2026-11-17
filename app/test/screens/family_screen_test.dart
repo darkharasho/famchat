@@ -24,7 +24,7 @@ void main() {
     final momKey = await tester.runAsync(() async => b64url(await publicKeyOf(await newIdentityKey())));
     momId = server.addUser('Mom', identityPub: momKey!);
     server.addDevice(momId, name: 'Phone');
-    appRouter(tester).go('/family');
+    appRouter(tester).go('/settings/family');
     await tester.pumpAndSettle();
   }
 
@@ -157,7 +157,7 @@ void main() {
     // Still there after leaving and coming back.
     appRouter(tester).go('/settings');
     await tester.pumpAndSettle();
-    appRouter(tester).go('/family');
+    appRouter(tester).go('/settings/family');
     await tester.pumpAndSettle();
     await scrollTo(tester, find.byKey(const Key('reviewer-link')));
     expect(tester.widget<SelectableText>(find.byKey(const Key('reviewer-link'))).data, url);
@@ -196,7 +196,7 @@ void main() {
     await pumpApp(tester, server: server, kv: MemorySecureKv());
     await signInDirectly(tester, server);
     expect(find.byKey(const Key('admin-setup-banner')), findsNothing);
-    appRouter(tester).go('/family');
+    appRouter(tester).go('/settings/family');
     await tester.pumpAndSettle();
     expect(find.text('No chats yet'), findsOneWidget);
   });

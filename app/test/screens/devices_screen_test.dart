@@ -87,7 +87,9 @@ void main() {
     await signInDirectly(tester, server);
     server.revoke(server.devices.keys.single);
     server.expireAccessTokens();
-    await openDevices(tester);
+    // Opening Settings reads /me, which finds the device revoked.
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
     expect(find.text('Join FamChat'), findsOneWidget);
     expect(find.text(revokedMessage), findsOneWidget);
     expect(kv.values, isEmpty);

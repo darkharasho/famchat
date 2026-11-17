@@ -42,7 +42,7 @@ class _RecoveryCodeScreenState extends ConsumerState<RecoveryCodeScreen> {
 
   void _done() {
     ref.invalidate(meProvider);
-    context.go('/family');
+    context.go('/settings/family');
   }
 
   @override
@@ -52,7 +52,7 @@ class _RecoveryCodeScreenState extends ConsumerState<RecoveryCodeScreen> {
     final had = ref.watch(meProvider).value?.recoveryCodeSet ?? false;
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: code == null ? () => context.go('/family') : _done),
+        leading: BackButton(onPressed: code == null ? () => context.go('/settings/family') : _done),
         title: const Text('Admin recovery code'),
       ),
       body: Center(

@@ -25,14 +25,14 @@ void main() {
       (SessionLoading(), '/', '/loading'),
       (SessionLoading(), '/join', '/loading'),
       (SessionLoading(), '/loading', null),
-      (SessionUnavailable('x'), '/devices', '/loading'),
+      (SessionUnavailable('x'), '/settings/devices', '/loading'),
       (out, '/', '/join'),
-      (out, '/devices', '/join'),
+      (out, '/settings/devices', '/join'),
       (out, '/loading', '/join'),
       (out, '/join', null),
       (out, '/spikes', null),
       (out, '/pair', null),
-      (out, '/devices/add', '/join'),
+      (out, '/settings/devices/add', '/join'),
     ];
     for (final (s, loc, want) in cases) {
       expect(sessionRedirect(s, loc), want, reason: '$s $loc');
@@ -40,18 +40,18 @@ void main() {
     expect(sessionRedirect(user, '/join'), '/');
     expect(sessionRedirect(user, '/loading'), '/');
     expect(sessionRedirect(user, '/pair'), '/');
-    expect(sessionRedirect(user, '/devices/add'), isNull);
+    expect(sessionRedirect(user, '/settings/devices/add'), isNull);
     expect(sessionRedirect(user, '/'), isNull);
-    expect(sessionRedirect(user, '/devices'), isNull);
+    expect(sessionRedirect(user, '/settings/devices'), isNull);
     expect(sessionRedirect(user, '/spikes'), isNull);
-    expect(sessionRedirect(user, '/invite'), '/');
-    expect(sessionRedirect(admin, '/invite'), isNull);
+    expect(sessionRedirect(user, '/settings/invite'), '/');
+    expect(sessionRedirect(admin, '/settings/invite'), isNull);
     expect(sessionRedirect(out, '/recover'), isNull);
     expect(sessionRedirect(user, '/recover'), '/');
-    expect(sessionRedirect(user, '/family'), '/');
-    expect(sessionRedirect(user, '/family/recovery-code'), '/');
-    expect(sessionRedirect(admin, '/family'), isNull);
-    expect(sessionRedirect(admin, '/family/recovery-code'), isNull);
+    expect(sessionRedirect(user, '/settings/family'), '/');
+    expect(sessionRedirect(user, '/settings/family/recovery-code'), '/');
+    expect(sessionRedirect(admin, '/settings/family'), isNull);
+    expect(sessionRedirect(admin, '/settings/family/recovery-code'), isNull);
   });
 
   test('a signed-in location swallowed by loading is restored after sign-in', () {
@@ -70,10 +70,10 @@ void main() {
     sessionRedirect(const SessionLoading(), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV', pending: pending);
     expect(sessionRedirect(const SignedOut(), '/loading', pending: pending), '/join');
     expect(pending.value, isNull);
-    sessionRedirect(const SessionLoading(), '/invite', pending: pending);
+    sessionRedirect(const SessionLoading(), '/settings/invite', pending: pending);
     expect(sessionRedirect(SignedIn(session()), '/loading', pending: pending), '/');
-    sessionRedirect(const SessionLoading(), '/invite', pending: pending);
-    expect(sessionRedirect(SignedIn(session(admin: true)), '/loading', pending: pending), '/invite');
+    sessionRedirect(const SessionLoading(), '/settings/invite', pending: pending);
+    expect(sessionRedirect(SignedIn(session(admin: true)), '/loading', pending: pending), '/settings/invite');
     // Sign-in pages are never remembered.
     sessionRedirect(const SessionLoading(), '/join', pending: pending);
     expect(pending.value, isNull);
@@ -88,7 +88,7 @@ void main() {
     expect(chatRoute('../devices'), isNull);
     expect(chatRoute('01arz3ndektsv4rrffq69g5fav'), isNull);
     expect(isChatRoute('/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV'), isTrue);
-    for (final r in [null, '/devices', '/chats/x', '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV/info']) {
+    for (final r in [null, '/settings/devices', '/chats/x', '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV/info']) {
       expect(isChatRoute(r), isFalse, reason: '$r');
     }
   });
