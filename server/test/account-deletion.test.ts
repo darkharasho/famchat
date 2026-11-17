@@ -196,6 +196,24 @@ describe("last admin guard", () => {
     expect((await deleteMe(a)).status).toBe(204);
   });
 
+  it("deleting the owner's account transfers ownership", async () => {
+    const o = await insertUserWithDevice({ name: "O", families: [{ id: 1 }] });
+    const f = await insertFamily({ name: "Cousins", createdBy: o.userId });
+    const g = await insertFamily({ name: "Solo", createdBy: o.userId });
+    await joinFamily(o.userId, f, "admin");
+    await joinFamily(o.userId, g, "admin");
+    const b = await insertUserWithDevice({ name: "B", families: [{ id: f, role: "admin" }] });
+    const c = await insertUserWithDevice({ name: "C", families: [{ id: f, role: "admin" }] });
+    await env.DB.prepare("UPDATE family_members SET joined_at = 100 WHERE user_id = ?").bind(c.userId).run();
+    await env.DB.prepare("UPDATE family_members SET joined_at = 200 WHERE user_id = ?").bind(b.userId).run();
+    const sb = await socket(b);
+    expect((await deleteMe(o)).status).toBe(204);
+    const owner = (id: number) => env.DB.prepare("SELECT created_by FROM families WHERE id = ?").bind(id).first("created_by");
+    expect(await owner(f)).toBe(c.userId);
+    expect(await owner(g)).toBeNull();
+    expect(await sb.next("family")).toEqual({ type: "family", familyId: f });
+  });
+
   it("a second admin frees the first", async () => {
     const a = await insertUserWithDevice({ name: "A", families: [{ id: 1 }] });
     const b = await insertUserWithDevice({ name: "B", families: [{ id: 1 }] });

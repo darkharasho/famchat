@@ -163,12 +163,12 @@ admin.post("/users/:id/reset", requireAuth, requireAnyAdmin, async (c) => {
 
   const [target, signer] = await Promise.all([
     // The authorizing family: the lowest-numbered approved one where the caller is admin and the
-    // target a member (reviewers sit only in the hidden reviewer family, which has no admins).
+    // target a member (never the hidden reviewer family).
     db.prepare(
       `SELECT u.name, u.identity_pub, MIN(am.family_id) AS family_id FROM users u
        JOIN family_members tm ON tm.user_id = u.id
        JOIN family_members am ON am.family_id = tm.family_id AND am.user_id = ? AND am.role = 'admin'
-       JOIN families f ON f.id = tm.family_id AND f.status = 'approved'
+       JOIN families f ON f.id = tm.family_id AND f.status = 'approved' AND f.hidden = 0
        WHERE u.id = ? AND u.deleted_at IS NULL
        GROUP BY u.id`,
     ).bind(adminId, userId)

@@ -279,6 +279,25 @@ never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 charact
 - Signed-out `POST /auth/invite/redeem` of a family invite joins that family, and is `410` if the
   family is not approved.
 - `POST /families/:id/admins/:userId`: promotes a member (see "Account resets", line 431); also reviewer-blocked.
+- `DELETE /families/:id/admins/:userId` → `204`: demotes an admin of `:id` to member and clears their
+  admin proof (family #1 also clears `isAdmin` and the proof on `users`). Only the owner, while the family
+  is approved; anyone else `403 forbidden`. The owner can't be demoted (`403`); a target who isn't an
+  admin of `:id` is `404 not_found`. Members get a `family` event.
+- `DELETE /families/:id/members/:userId` → `204`: takes someone out of family `:id`.
+  - Yourself (leaving): allowed in any family you're in, pending and declined ones too (that's how a
+    creator dismisses a declined request). The family's last admin gets
+    `409 {error: "last_admin", familyId, familyName}` while any other live member is left (make
+    someone else an admin first). Not a member: `404`.
+  - Someone else: the caller must be an admin of the approved family, else `403 forbidden`. Admins and
+    the owner can't be removed (`403`); a target outside the family is `404 not_found`.
+  - In one transaction the person leaves every group chat of that family they're in, exactly like
+    `DELETE /chats/:id/members/:userId` (new epoch, kept as a leaver); chats of their other families
+    and direct chats stay (a direct chat with someone they no longer share a family with becomes
+    read-only: sends get `no_shared_family`). Family #1 also clears their `isAdmin` and proof on `users`.
+  - Afterwards: `removed {chatId}` to them and `chat {chatId}` to the rest, per chat; a `family` event to
+    the family's members and to them.
+- Ownership: when the owner leaves (or deletes their account), the family passes to its
+  longest-serving other live admin (earliest `joined_at`, then user id); with none left it has no owner.
 
 ### Operator: family requests
 Operator-only (`403 forbidden` for everyone else, reviewers included). The hidden reviewer family never
@@ -350,6 +369,8 @@ What happens, atomically:
   the admin proof cleared, so the directory still resolves them. Its id and identity key stay because devices, chats, resets and the
   audit log reference them and other members' devices still verify old certificates and resets with
   them. Invites made out to them are renamed; their unused reset links and the invites they made expire.
+- **Passed on:** each family they own goes to its longest-serving other live admin, or to no owner
+  ("Families"); its members get a `family` event.
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
 
 Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,

@@ -1,7 +1,9 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../env";
 import { ApiError } from "../lib/errors";
-import { FAMILY_ONE, familyRole, getFamily, notifyFamily, requireFamilyAdmin, sharesChanged } from "../lib/family";
+import {
+  clearUserAdminStmt, FAMILY_ONE, familyRole, getFamily, notifyFamily, removeFromFamily, requireFamilyAdmin, sharesChanged,
+} from "../lib/family";
 import { eventStmt, logEvent, promotionMessageV2, signature, verifyEd25519 } from "../lib/reset";
 import { sha256Hex } from "../lib/tokens";
 import { name, readJson } from "../lib/validate";
@@ -124,6 +126,64 @@ families.post("/:id/admins/:userId", async (c) => {
   }
   await db.batch(stmts);
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by, payload: { familyId } });
+  return c.body(null, 204);
+});
+
+/**
+ * The owner makes an admin of family `:id` a member again, clearing their proof (family #1 mirrors it
+ * into `users`). The owner can't be demoted; a target who isn't an admin of it is not_found.
+ */
+families.delete("/:id/admins/:userId", async (c) => {
+  const db = c.env.DB;
+  const familyId = Number(c.req.param("id"));
+  const userId = c.req.param("userId");
+  const by = c.get("userId");
+  const fam = await requireFamilyAdmin(db, by, familyId);
+  if (fam.createdBy !== by || userId === by) throw new ApiError("forbidden");
+  if ((await familyRole(db, userId, familyId)) !== "admin") throw new ApiError("not_found");
+  const stmts = [
+    db.prepare(
+      `UPDATE family_members SET role = 'member', admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL
+       WHERE family_id = ? AND user_id = ?`,
+    ).bind(familyId, userId),
+  ];
+  if (familyId === FAMILY_ONE) stmts.push(clearUserAdminStmt(db, userId));
+  await db.batch(stmts);
+  await notifyFamily(c.env, familyId);
+  return c.body(null, 204);
+});
+
+/**
+ * Takes `:userId` out of family `:id`. Yourself: any family you are in (a pending or declined one
+ * too), unless you are its last admin while others remain. Someone else: an admin of the approved
+ * family removes a member (not an admin, not the owner).
+ */
+families.delete("/:id/members/:userId", async (c) => {
+  const db = c.env.DB;
+  const familyId = Number(c.req.param("id"));
+  const userId = c.req.param("userId");
+  const me = c.get("userId");
+  const fam = await getFamily(db, familyId);
+  if (userId === me) {
+    const role = await familyRole(db, me, familyId);
+    if (role === null) throw new ApiError("not_found");
+    if (role === "admin") {
+      const counts = await db.prepare(
+        `SELECT COALESCE(SUM(m.role = 'admin'), 0) AS admins, COUNT(*) AS others
+         FROM family_members m JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+         WHERE m.family_id = ? AND m.user_id <> ?`,
+      ).bind(familyId, me).first<{ admins: number; others: number }>();
+      if (counts && counts.others > 0 && counts.admins === 0) {
+        throw new ApiError("last_admin", { familyId, familyName: fam.name });
+      }
+    }
+  } else {
+    await requireFamilyAdmin(db, me, familyId);
+    const role = await familyRole(db, userId, familyId);
+    if (role === null) throw new ApiError("not_found");
+    if (role === "admin" || userId === fam.createdBy) throw new ApiError("forbidden");
+  }
+  await removeFromFamily(c.env, familyId, userId);
   return c.body(null, 204);
 });
 

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import {
-  chatOut, chatsOf, checkCoverage, isUlid, liveDeviceIds, parseWraps, requireMemberChat, wrapInserts,
+  chatOut, chatsOf, checkCoverage, isUlid, leaveGroupStmts, liveDeviceIds, parseWraps, requireMemberChat, wrapInserts,
 } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
 import { groupFamilyFor, shares } from "../lib/family";
@@ -156,12 +156,7 @@ chats.delete("/:id/members/:userId", async (c) => {
   if (chat.kind !== "group") throw new ApiError("invalid_request");
   if (target !== me && chat.createdBy !== me) throw new ApiError("forbidden");
   if (!chat.members.some((m) => m.userId === target)) throw new ApiError("not_found");
-  await db.batch([
-    db.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chat.id, target),
-    db.prepare("UPDATE chats SET current_epoch = current_epoch + 1 WHERE id = ?").bind(chat.id),
-    db.prepare("INSERT OR REPLACE INTO chat_leavers (chat_id, user_id, left_at) VALUES (?, ?, ?)")
-      .bind(chat.id, target, Date.now()),
-  ]);
+  await db.batch(leaveGroupStmts(db, chat.id, target, Date.now()));
   await notify(c.env, [target], { type: "removed", chatId: chat.id });
   await notify(c.env, chat.members.map((m) => m.userId).filter((u) => u !== target), { type: "chat", chatId: chat.id });
   return c.body(null, 204);

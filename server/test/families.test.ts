@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { api } from "./chat-helpers";
+import { api, createDirect, createGroup, type TestUser } from "./chat-helpers";
+import { newId } from "../src/lib/ids";
 import { errorResponse } from "../src/lib/errors";
 import { familyPeers, groupFamilyFor, sharingUserIds, shares } from "../src/lib/family";
 import { insertFamily, insertUserWithDevice, joinFamily, resetDb } from "./helpers";
@@ -419,5 +420,185 @@ describe("family invites and joining", () => {
     expect(res.status).toBe(410);
     expect(await used(t)).toBeNull();
     expect(await env.DB.prepare("SELECT 1 AS n FROM family_members WHERE user_id = ? AND family_id IN (?, ?)").bind(me.userId, f, g).first()).toBeNull();
+  });
+});
+
+describe("leaving, removing and demoting", () => {
+  const remove = (by: TestUser, fam: number, target: string) => api(by.accessToken, "DELETE", `/families/${fam}/members/${target}`);
+  const demote = (by: TestUser, fam: number, target: string) => api(by.accessToken, "DELETE", `/families/${fam}/admins/${target}`);
+  const roleOf = (fam: number, id: string) =>
+    env.DB.prepare("SELECT role FROM family_members WHERE family_id = ? AND user_id = ?").bind(fam, id).first<string>("role");
+  const owner = (fam: number) => env.DB.prepare("SELECT created_by FROM families WHERE id = ?").bind(fam).first<string | null>("created_by");
+  const epoch = (chatId: string) => env.DB.prepare("SELECT current_epoch FROM chats WHERE id = ?").bind(chatId).first<number>("current_epoch");
+  const inChat = async (chatId: string, id: string) =>
+    (await env.DB.prepare("SELECT 1 AS n FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chatId, id).first()) !== null;
+
+  it("member leaves: out of the family's groups (epoch bumped, chat_leavers row), family event to the rest", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const admin = await user([{ id: f, role: "admin" }]);
+    const kid = await user([{ id: f }]);
+    const other = await user([{ id: f }]);
+    const group = await createGroup(admin, [kid, other], "Cousins");
+    const sk = await socket(kid);
+    const so = await socket(other);
+    expect((await remove(kid, f, kid.userId)).status).toBe(204);
+    expect(await roleOf(f, kid.userId)).toBeNull();
+    expect(await inChat(group.id, kid.userId)).toBe(false);
+    expect(await epoch(group.id)).toBe(2);
+    expect(await env.DB.prepare("SELECT 1 AS n FROM chat_leavers WHERE chat_id = ? AND user_id = ?").bind(group.id, kid.userId).first()).not.toBeNull();
+    expect(await sk.next("removed")).toEqual({ type: "removed", chatId: group.id });
+    expect(await so.next("chat")).toEqual({ type: "chat", chatId: group.id });
+    expect(await so.next("family")).toEqual({ type: "family", familyId: f });
+    expect(await sk.next("family")).toEqual({ type: "family", familyId: f });
+  });
+
+  it("admin removes a member who is also in another family: other family's chats untouched, direct with a B-only person becomes no_shared_family on send", async () => {
+    const a = await insertFamily({ name: "A" });
+    const b = await insertFamily({ name: "B" });
+    const adminB = await user([{ id: b, role: "admin" }]);
+    const both = await user([{ id: a }, { id: b }]);
+    const aPeer = await user([{ id: a }]);
+    const bOnly = await user([{ id: b }]);
+    const groupA = await createGroup(aPeer, [both], "A group", []);
+    await env.DB.prepare("UPDATE chats SET family_id = ? WHERE id = ?").bind(a, groupA.id).run();
+    const groupB = await createGroup(adminB, [both, bOnly], "B group");
+    await env.DB.prepare("UPDATE chats SET family_id = ? WHERE id = ?").bind(b, groupB.id).run();
+    const direct = await createDirect(both, bOnly);
+    expect((await remove(adminB, b, both.userId)).status).toBe(204);
+    expect(await inChat(groupB.id, both.userId)).toBe(false);
+    expect(await epoch(groupB.id)).toBe(2);
+    expect(await inChat(groupA.id, both.userId)).toBe(true);
+    expect(await epoch(groupA.id)).toBe(1);
+    expect(await roleOf(a, both.userId)).toBe("member");
+    expect(await inChat(direct.id, both.userId)).toBe(true);
+    const ws = await socket(bOnly);
+    const id = newId();
+    ws.send({ type: "send", id, chatId: direct.id, envelope: { v: 1, epoch: 1, nonce: "AA", ct: "AA", sig: "AA" } });
+    expect(await ws.next("error")).toEqual({ type: "error", id, error: "no_shared_family" });
+  });
+
+  it("admin can't remove another admin (403)", async () => {
+    const f = await insertFamily();
+    const a = await user([{ id: f, role: "admin" }]);
+    const b = await user([{ id: f, role: "admin" }]);
+    expect((await remove(a, f, b.userId)).status).toBe(403);
+    expect(await roleOf(f, b.userId)).toBe("admin");
+  });
+
+  it("member can't remove anyone (403)", async () => {
+    const f = await insertFamily();
+    await user([{ id: f, role: "admin" }]);
+    const m = await user([{ id: f }]);
+    const n = await user([{ id: f }]);
+    expect((await remove(m, f, n.userId)).status).toBe(403);
+    expect(await roleOf(f, n.userId)).toBe("member");
+  });
+
+  it("admin removing someone outside the family gets 404; a hidden family is 404", async () => {
+    const f = await insertFamily();
+    const a = await user([{ id: f, role: "admin" }]);
+    const out = await user([{ id: 1 }]);
+    expect((await remove(a, f, out.userId)).status).toBe(404);
+    expect((await remove(a, 2, a.userId)).status).toBe(404);
+  });
+
+  it("last admin can't leave while others remain (409 last_admin with familyName)", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const a = await user([{ id: f, role: "admin" }]);
+    await user([{ id: f }]);
+    const res = await remove(a, f, a.userId);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "last_admin", familyId: f, familyName: "Cousins" });
+    expect(await roleOf(f, a.userId)).toBe("admin");
+  });
+
+  it("sole member leaves a declined family", async () => {
+    const me = await user([{ id: 1 }]);
+    const f = await insertFamily({ status: "declined", createdBy: me.userId });
+    await joinFamily(me.userId, f, "admin");
+    expect((await remove(me, f, me.userId)).status).toBe(204);
+    expect(await roleOf(f, me.userId)).toBeNull();
+    expect(await owner(f)).toBeNull();
+    const fams = (await (await api(me.accessToken, "GET", "/families")).json<{ families: { id: number }[] }>()).families;
+    expect(fams.map((x) => x.id)).toEqual([1]);
+  });
+
+  it("owner leaves: ownership passes to the longest-serving admin", async () => {
+    const o = await user([{ id: 1 }]);
+    const f = await insertFamily({ createdBy: o.userId });
+    await joinFamily(o.userId, f, "admin");
+    const later = await user([{ id: f, role: "admin" }]);
+    const earlier = await user([{ id: f, role: "admin" }]);
+    await user([{ id: f }]);
+    await env.DB.prepare("UPDATE family_members SET joined_at = 100 WHERE user_id = ?").bind(earlier.userId).run();
+    await env.DB.prepare("UPDATE family_members SET joined_at = 200 WHERE user_id = ?").bind(later.userId).run();
+    expect((await remove(o, f, o.userId)).status).toBe(204);
+    expect(await owner(f)).toBe(earlier.userId);
+  });
+
+  it("an admin can't remove the owner (403)", async () => {
+    const o = await user([{ id: 1 }]);
+    const f = await insertFamily({ createdBy: o.userId });
+    await joinFamily(o.userId, f, "member");
+    const a = await user([{ id: f, role: "admin" }]);
+    expect((await remove(a, f, o.userId)).status).toBe(403);
+  });
+
+  it("removal from family 1 clears the users admin mirror", async () => {
+    const op = await insertUserWithDevice({ admin: true, operator: true });
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = 1").bind(op.userId).run();
+    const other = await insertUserWithDevice({ admin: true });
+    expect((await remove(other, 1, other.userId)).status).toBe(204);
+    expect(await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(other.userId).first("is_admin")).toBe(0);
+  });
+
+  it("owner demotes an admin; family-1 demotion clears users.is_admin", async () => {
+    const f = await insertFamily();
+    const o = await user([{ id: f, role: "admin" }]);
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = ?").bind(o.userId, f).run();
+    const a = await user([{ id: f, role: "admin" }]);
+    await env.DB.prepare("UPDATE family_members SET admin_by = ?, admin_signer_pub = 'p', admin_sig = 's' WHERE user_id = ?").bind(o.userId, a.userId).run();
+    const sa = await socket(a);
+    expect((await demote(o, f, a.userId)).status).toBe(204);
+    expect(await env.DB.prepare("SELECT role, admin_by, admin_signer_pub, admin_sig FROM family_members WHERE family_id = ? AND user_id = ?")
+      .bind(f, a.userId).first()).toEqual({ role: "member", admin_by: null, admin_signer_pub: null, admin_sig: null });
+    expect(await sa.next("family")).toEqual({ type: "family", familyId: f });
+
+    const op = await insertUserWithDevice({ admin: true, operator: true });
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = 1").bind(op.userId).run();
+    const dad = await insertUserWithDevice({ admin: true });
+    await env.DB.prepare("UPDATE users SET admin_by = ?, admin_signer_pub = 'p', admin_sig = 's' WHERE id = ?").bind(op.userId, dad.userId).run();
+    expect((await demote(op, 1, dad.userId)).status).toBe(204);
+    expect(await env.DB.prepare("SELECT is_admin, admin_by, admin_signer_pub, admin_sig FROM users WHERE id = ?").bind(dad.userId).first())
+      .toEqual({ is_admin: 0, admin_by: null, admin_signer_pub: null, admin_sig: null });
+    expect(await roleOf(1, dad.userId)).toBe("member");
+  });
+
+  it("non-owner admin can't demote (403)", async () => {
+    const f = await insertFamily();
+    const o = await user([{ id: f, role: "admin" }]);
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = ?").bind(o.userId, f).run();
+    const a = await user([{ id: f, role: "admin" }]);
+    const b = await user([{ id: f, role: "admin" }]);
+    expect((await demote(a, f, b.userId)).status).toBe(403);
+    expect(await roleOf(f, b.userId)).toBe("admin");
+  });
+
+  it("owner can't be demoted (403)", async () => {
+    const f = await insertFamily();
+    const o = await user([{ id: f, role: "admin" }]);
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = ?").bind(o.userId, f).run();
+    expect((await demote(o, f, o.userId)).status).toBe(403);
+    expect(await roleOf(f, o.userId)).toBe("admin");
+  });
+
+  it("demoting a plain member or an outsider is 404", async () => {
+    const f = await insertFamily();
+    const o = await user([{ id: f, role: "admin" }]);
+    await env.DB.prepare("UPDATE families SET created_by = ? WHERE id = ?").bind(o.userId, f).run();
+    const m = await user([{ id: f }]);
+    const out = await user([{ id: 1 }]);
+    expect((await demote(o, f, m.userId)).status).toBe(404);
+    expect((await demote(o, f, out.userId)).status).toBe(404);
   });
 });

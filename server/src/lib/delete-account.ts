@@ -10,7 +10,7 @@ import { hubStub } from "../hub";
 import { notify } from "../notify";
 import { memberIds } from "./chatdb";
 import { ApiError } from "./errors";
-import { familyPeers, sharesChanged, sharingUserIds } from "./family";
+import { familyPeers, NEXT_OWNER_SQL, notifyFamily, sharesChanged, sharingUserIds } from "./family";
 import { eventStmt } from "./reset";
 
 export const DELETED_USER_NAME = "Deleted user";
@@ -92,8 +92,11 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
     db.prepare(`UPDATE invites SET name = ? WHERE (used_by = ? OR user_id = ?) AND ${guard}`)
       .bind(DELETED_USER_NAME, userId, userId, ...gb),
     db.prepare(`DELETE FROM ws_tickets WHERE user_id = ? AND ${guard}`).bind(userId, ...gb),
+    // The families they own pass to their longest-serving other admin (or to no one).
+    db.prepare(`UPDATE families SET created_by = ${NEXT_OWNER_SQL} WHERE created_by = ? AND ${guard} RETURNING id`)
+      .bind(userId, userId, ...gb),
   ];
-  const devIdx = 2, chatIdx = 5, msgIdx = 7, mediaIdx = 8;
+  const devIdx = 2, chatIdx = 5, msgIdx = 7, mediaIdx = 8, ownedIdx = 13;
   stmts.push(eventStmt(db, {
     kind: "account_deleted",
     userId,
@@ -141,6 +144,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const byChat = new Map<string, string[]>();
   for (const m of media) if (m.expired_at === null) byChat.set(m.chat_id, [...(byChat.get(m.chat_id) ?? []), m.key]);
   for (const [chatId, ks] of byChat) await notify(env, await memberIds(db, chatId), { type: "media_expired", chatId, keys: ks });
+  for (const { id } of results[ownedIdx].results as { id: number }[]) await notifyFamily(env, id);
   // Everyone who shared a family with them (their family_members rows stay, so this still works).
   await notify(env, await familyPeers(db, userId), { type: "account_deleted", userId });
 

@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { hubStub } from "../hub";
 import { notify } from "../notify";
+import { leaveGroupStmts, memberIds } from "./chatdb";
 import { ApiError } from "./errors";
 
 /** The original family, and the hidden family that holds reviewer accounts. */
@@ -132,4 +133,47 @@ export async function requireFamilyAdmin(db: D1Database, userId: string, familyI
   const fam = await getFamily(db, familyId);
   if ((await familyRole(db, userId, familyId)) !== "admin" || fam.status !== "approved") throw new ApiError("forbidden");
   return fam;
+}
+
+/**
+ * For an UPDATE of `families` whose owner [userId] is going: the longest-serving other live admin
+ * (`MIN(joined_at)`, then `user_id`), else NULL. Binds [userId] once.
+ */
+export const NEXT_OWNER_SQL = `(SELECT m.user_id FROM family_members m JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+  WHERE m.family_id = families.id AND m.role = 'admin' AND m.user_id <> ?
+  ORDER BY m.joined_at, m.user_id LIMIT 1)`;
+
+/** Clears the family #1 admin mirror on `users` (demotion or removal). */
+export const clearUserAdminStmt = (db: D1Database, userId: string) =>
+  db.prepare("UPDATE users SET is_admin = 0, admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL WHERE id = ?")
+    .bind(userId);
+
+/**
+ * Takes [userId] out of family [familyId] (they leave, or an admin removes them), in one batch: they
+ * leave each of the family's groups they are in (as a chat leave or removal does), ownership passes on
+ * if they owned it, and family #1's admin mirror is cleared. Then the chats, the family (them included)
+ * and the hub are told. Checks (who may, last admin) are the caller's.
+ */
+export async function removeFromFamily(env: Env, familyId: number, userId: string): Promise<void> {
+  const db = env.DB;
+  const { results } = await db.prepare(
+    `SELECT c.id FROM chats c JOIN chat_members m ON m.chat_id = c.id AND m.user_id = ?
+     WHERE c.family_id = ? AND c.kind = 'group'`,
+  ).bind(userId, familyId).all<{ id: string }>();
+  const chats = results.map((r) => r.id);
+  const now = Date.now();
+  const stmts = [
+    db.prepare(`UPDATE families SET created_by = ${NEXT_OWNER_SQL} WHERE id = ? AND created_by = ?`)
+      .bind(userId, familyId, userId),
+    db.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(familyId, userId),
+    ...chats.flatMap((chatId) => leaveGroupStmts(db, chatId, userId, now)),
+  ];
+  if (familyId === FAMILY_ONE) stmts.push(clearUserAdminStmt(db, userId));
+  await db.batch(stmts);
+  for (const chatId of chats) {
+    await notify(env, [userId], { type: "removed", chatId });
+    await notify(env, await memberIds(db, chatId), { type: "chat", chatId });
+  }
+  await notifyFamily(env, familyId, [userId]);
+  await sharesChanged(env);
 }

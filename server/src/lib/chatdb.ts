@@ -117,6 +117,16 @@ export async function memberIds(db: D1Database, chatId: string): Promise<string[
   return results.map((r) => r.user_id);
 }
 
+/** [userId] leaves group [chatId]: the chat moves to a new epoch and keeps them as a leaver. */
+export function leaveGroupStmts(db: D1Database, chatId: string, userId: string, now: number): D1PreparedStatement[] {
+  return [
+    db.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chatId, userId),
+    db.prepare("UPDATE chats SET current_epoch = current_epoch + 1 WHERE id = ?").bind(chatId),
+    db.prepare("INSERT OR REPLACE INTO chat_leavers (chat_id, user_id, left_at) VALUES (?, ?, ?)")
+      .bind(chatId, userId, now),
+  ];
+}
+
 /** The chat if [userId] is a member, else not_found. */
 export async function requireMemberChat(db: D1Database, chatId: string, userId: string): Promise<ChatOut> {
   const chat = await chatOut(db, chatId, userId);
