@@ -1,3 +1,4 @@
+import 'dart:async';
 // A stateful in-memory copy of the plan 1 API (server/src/routes/*.ts), served through
 // package:http's MockClient. Access tokens are JWT-shaped but unsigned.
 import 'dart:convert';
@@ -113,6 +114,9 @@ class FakeServer {
 
   /// `GET /families` answers 403 while set (a refresh that fails).
   bool failFamilies = false;
+
+  /// `POST /families/:id/join` waits for this to complete when set.
+  Completer<void>? joinGate;
 
   /// Family 1's name (`PUT /families/1` renames it).
   String family1Name = 'Family';
@@ -596,6 +600,7 @@ class FakeServer {
       return http.Response('', 204);
     }
     if (r.method == 'POST' && rest == '/join') {
+      await joinGate?.future;
       final inv = invites[_body(r)['inviteToken']];
       if (inv == null || inv.reviewer || inv.familyId != id || inv.usedBy != null || inv.revoked || !inv.expiresAt.isAfter(now())) {
         return _err('invite_invalid');

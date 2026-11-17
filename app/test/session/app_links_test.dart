@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:famchat/chat/providers.dart';
 import 'package:famchat/session/app_links.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
@@ -76,6 +77,27 @@ void main() {
     expect(find.text('Join Smiths?'), findsNothing);
     expect(server.users.values.single.familyRoles[10], 'member');
     expect(appRouter(tester).state.uri.path, '/');
+  });
+
+  testWidgets('signed in: a join that succeeds refreshes the families even if the sheet was dismissed meanwhile', (tester) async {
+    server.extraFamilies.add(approvedFamily());
+    final invite = server.addInvite(familyId: 10);
+    await start(tester);
+    await signInDirectly(tester, server);
+    server.users.values.single.familyRoles.remove(10);
+    links.tap('https://famchat.dev/join#$invite');
+    await tester.pumpAndSettle();
+    server.joinGate = Completer<void>();
+    await tester.tap(find.text('Join'));
+    await tester.pump();
+    await tester.tapAt(const Offset(10, 10)); // the barrier
+    await tester.pumpAndSettle();
+    appContainer(tester).read(familiesProvider); // keep it alive
+    final before = server.log.where((l) => l.startsWith('GET /api/families ')).length;
+    server.joinGate!.complete();
+    await tester.pumpAndSettle();
+    expect(server.users.values.single.familyRoles[10], 'member');
+    expect(server.log.where((l) => l.startsWith('GET /api/families ')).length, greaterThan(before));
   });
 
   testWidgets('signed in: Not now leaves the invite unused', (tester) async {

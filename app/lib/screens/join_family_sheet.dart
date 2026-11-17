@@ -34,21 +34,22 @@ Future<void> offerToJoinFamily({
     return;
   }
   if (!context.mounted) return;
-  final joined = await showModalBottomSheet<bool>(
+  // onJoined runs from the sheet itself, so a dismissal mid-join can't skip it.
+  await showModalBottomSheet<bool>(
     context: context,
-    builder: (_) => _JoinSheet(lookup: lookup, token: token, api: api, say: say),
+    builder: (_) => _JoinSheet(lookup: lookup, token: token, api: api, say: say, onJoined: onJoined),
   );
-  if (joined == true) onJoined();
 }
 
 const _expired = 'This invite link has expired or was already used.';
 
 class _JoinSheet extends StatefulWidget {
-  const _JoinSheet({required this.lookup, required this.token, required this.api, required this.say});
+  const _JoinSheet({required this.lookup, required this.token, required this.api, required this.say, required this.onJoined});
   final InviteLookup lookup;
   final String token;
   final ApiClient api;
   final void Function(String) say;
+  final VoidCallback onJoined;
 
   @override
   State<_JoinSheet> createState() => _JoinSheetState();
@@ -66,10 +67,12 @@ class _JoinSheetState extends State<_JoinSheet> {
       await widget.api.joinFamily(widget.lookup.familyId, widget.token);
       widget.say('You joined $name');
       joined = true;
+      widget.onJoined();
     } catch (e) {
       widget.say(switch (e) {
         ApiException(code: 'conflict') => "You're already in $name",
         ApiException(code: 'invite_invalid') => _expired,
+        ApiException(code: 'admin_invite') => 'This invite is for a new person. Ask for a member invite instead.',
         _ => apiErrorMessage(e),
       });
     }

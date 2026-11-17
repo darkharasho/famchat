@@ -102,11 +102,16 @@ Future<void> _start(BuildContext context, WidgetRef ref) async {
   final messenger = ScaffoldMessenger.of(context);
   try {
     await ref.read(apiClientProvider).createFamily(name);
-    await ref.read(familiesProvider.notifier).refresh();
-    messenger.showSnackBar(const SnackBar(content: Text("Request sent. You'll be told when it's approved.")));
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+    return;
   }
+  messenger.showSnackBar(const SnackBar(content: Text("Request sent. You'll be told when it's approved.")));
+  // The request is made; a failed refresh must not look like a failed request (a retry would burn
+  // another pending slot). The list catches up on the next refresh.
+  try {
+    await ref.read(familiesProvider.notifier).refresh();
+  } catch (_) {}
 }
 
 class _StartDialog extends StatefulWidget {

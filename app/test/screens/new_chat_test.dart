@@ -177,7 +177,7 @@ void main() {
     expect(find.byType(ConversationView), findsOneWidget);
   });
 
-  chatTestWidgets('note to self sends no family', (tester) async {
+  chatTestWidgets('note to self sends the only family', (tester) async {
     setWindow(tester, const Size(400, 800));
     final lone = FakeChatBackend();
     final me = await lone.addUser('Reviewer');
@@ -186,7 +186,53 @@ void main() {
     await settle(tester);
     await tester.tap(find.byKey(const Key('note-to-self')));
     await settle(tester);
-    expect(lone.requestedFamily.values.single, isNull);
+    expect(lone.requestedFamily.values.single, 1);
+  });
+
+  chatTestWidgets('note to self in a multi-family flow sends the chosen family', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    final server = twoFamilies();
+    backend.removeFamilyRole(bob.userId, 10);
+    backend.removeFamilyRole(dan.userId, 10);
+    await pumpChatApp(tester, alice, server: server);
+    go(tester, '/new');
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('new-group')));
+    await settle(tester);
+    await tester.tap(find.text('Smiths'));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('note-to-self')));
+    await settle(tester);
+    expect(backend.requestedFamily.values.single, 10);
+  });
+
+  chatTestWidgets('the automatic group title drops people the family step dropped', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice, server: twoFamilies());
+    go(tester, '/new');
+    await settle(tester);
+    await tester.tap(find.text('Bob'));
+    await tester.tap(find.text('Carol'));
+    await settle(tester);
+    await tester.tap(find.text('Smiths'));
+    await settle(tester);
+    expect(find.text('Carol'), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(const Key('group-title'))).controller!.text, 'Bob');
+  });
+
+  chatTestWidgets('a title I edited survives the family step', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice, server: twoFamilies());
+    go(tester, '/new');
+    await settle(tester);
+    await tester.tap(find.text('Bob'));
+    await tester.tap(find.text('Carol'));
+    await settle(tester);
+    await tester.tap(find.text('Smiths'));
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('group-title')), 'Mine');
+    await settle(tester);
+    expect(tester.widget<TextField>(find.byKey(const Key('group-title'))).controller!.text, 'Mine');
   });
 
   chatTestWidgets('adding people lists only the group\'s family', (tester) async {

@@ -90,6 +90,20 @@ void main() {
     expect(find.text('Waiting for approval'), findsOneWidget);
   });
 
+  testWidgets('a request that went through but whose refresh failed still says it was sent', (tester) async {
+    await openFamilies(tester);
+    server.failFamilies = true;
+    await tester.tap(find.byKey(const Key('start-family')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('family-name-field')), 'Club');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('start-family-send')));
+    await tester.pump(const Duration(minutes: 2));
+    await tester.pumpAndSettle();
+    expect(server.extraFamilies, hasLength(1));
+    expect(find.text("Request sent. You'll be told when it's approved."), findsOneWidget);
+  });
+
   testWidgets('the name is capped at 40 characters', (tester) async {
     await openFamilies(tester);
     await tester.tap(find.byKey(const Key('start-family')));

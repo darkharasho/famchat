@@ -108,7 +108,8 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
       _error = null;
     });
     try {
-      final id = await sync.createGroup('Note to self', const []);
+      final families = ref.read(myFamiliesProvider).value ?? const <Family>[];
+      final id = await sync.createGroup('Note to self', const [], familyId: _family ?? (families.length == 1 ? families.single.id : null));
       if (mounted) context.go('/chats/$id');
     } catch (e) {
       if (mounted) setState(() => _error = apiErrorMessage(e));
@@ -184,6 +185,10 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
                                 if (familyIdsOf(u).contains(f.id)) u.id,
                             };
                             _picked.removeWhere((p) => !inFamily.contains(p));
+                            if (!_titleEdited) {
+                              final all = ref.read(usersProvider).value ?? const {};
+                              _title.text = [for (final p in _picked) all[p]?.name ?? '?'].join(', ');
+                            }
                           }),
                         ),
                     ])
