@@ -62,31 +62,48 @@ Future<ResetDto> makeReset({
   );
 }
 
+FamilyRoleDto fam(int id, {bool admin = false, AdminProofDto? proof}) =>
+    FamilyRoleDto(id: id, admin: admin, adminProof: proof);
+
+/// A user; unless [families] is given, a member of family 1 (its admin if [admin], with [proof]).
 TrustInput user(
   String id, {
   required K server,
   K? trusted,
   Set<String>? known,
   bool admin = false,
-  bool? pinned,
   AdminProofDto? proof,
+  List<FamilyRoleDto>? families,
   List<ResetDto> resets = const [],
 }) =>
     TrustInput(
       userId: id,
-      isAdmin: admin,
-      pinnedAdmin: pinned ?? admin,
-      adminProof: proof,
+      families: families ?? [fam(1, admin: admin, proof: proof)],
       serverKey: server.pub,
       trustedKey: (trusted ?? server).pub,
       known: known ?? {(trusted ?? server).pub},
       resets: resets,
     );
 
+/// Family 1's pins when this device pinned every admin the server lists now.
+Map<int, Set<String>> pinListed(List<TrustInput> users) => {
+      1: {
+        for (final u in users)
+          if (u.families.any((f) => f.id == 1 && f.admin)) u.userId,
+      },
+    };
+
 Future<AdminProofDto> promotion(String userId, {required String by, required K signer}) async => AdminProofDto(
       byUserId: by,
       signerPub: signer.pub,
       sig: b64url(await signPromotion(signer.pair, userId: userId, byUserId: by)),
+    );
+
+Future<AdminProofDto> promotionV2(int familyId, String userId, {required String by, required K signer}) async =>
+    AdminProofDto(
+      byUserId: by,
+      signerPub: signer.pub,
+      sig: b64url(await signPromotionV2(signer.pair, familyId: familyId, userId: userId, byUserId: by)),
     );
 
 void main() {
@@ -98,8 +115,8 @@ void main() {
     mom2 = await K.make();
   });
 
-  Future<TrustOutcome> resolve(List<TrustInput> others) =>
-      resolveTrust([user('ME', server: me), ...others], myUserId: 'ME');
+  Future<TrustOutcome> resolve(List<TrustInput> others, {Map<int, Set<String>>? pinned}) =>
+      resolveTrust([user('ME', server: me), ...others], myUserId: 'ME', pinned: pinned ?? pinListed(others));
 
   test('a verified reset is acknowledged and witnessed', () async {
     final r = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
@@ -203,10 +220,11 @@ void main() {
   test('my own old key is learned from the history', () async {
     final me2 = await K.make();
     final r = await makeReset(userId: 'ME', signerUserId: 'ADM', signer: admin, old: me, next: me2);
-    final out = await resolveTrust([
+    final users = [
       user('ME', server: me2, resets: [r]),
       user('ADM', server: admin, admin: true),
-    ], myUserId: 'ME');
+    ];
+    final out = await resolveTrust(users, myUserId: 'ME', pinned: pinListed(users));
     expect(out.known['ME'], {me.pub, me2.pub});
     expect(out.trusted['ME'], me2.pub);
   });
@@ -231,13 +249,13 @@ void main() {
       final fake = await K.make();
       final r = await makeReset(userId: 'MOM', signerUserId: 'FAKE', signer: fake, old: mom1, next: mom2);
       final out = await resolve([
-        user('FAKE', server: fake, admin: true, pinned: false),
+        user('FAKE', server: fake, admin: true),
         user('MOM', server: mom2, trusted: mom1, resets: [r]),
-      ]);
+      ], pinned: {1: {}});
       expect(out.acknowledged, isEmpty);
       expect(out.witnessed, isEmpty);
       expect(out.retired['MOM'] ?? {}, isEmpty);
-      expect(out.admins, isNot(contains('FAKE')));
+      expect(out.admins[1], isNot(contains('FAKE')));
     });
 
     test('a promotion signed by a trusted admin makes a trusted admin', () async {
@@ -245,10 +263,10 @@ void main() {
       final r = await makeReset(userId: 'MOM', signerUserId: 'DAD', signer: dad, old: mom1, next: mom2);
       final out = await resolve([
         user('ADM', server: admin, admin: true),
-        user('DAD', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'ADM', signer: admin)),
+        user('DAD', server: dad, admin: true, proof: await promotion('DAD', by: 'ADM', signer: admin)),
         user('MOM', server: mom2, trusted: mom1, resets: [r]),
-      ]);
-      expect(out.admins, containsAll(['ADM', 'DAD']));
+      ], pinned: {1: {'ADM'}});
+      expect(out.admins[1], containsAll(['ADM', 'DAD']));
       expect(out.acknowledged, {'MOM'});
     });
 
@@ -256,11 +274,11 @@ void main() {
       final dad = await K.make(), fake = await K.make();
       final out = await resolve([
         user('ADM', server: admin, admin: true),
-        user('FAKE', server: fake, admin: true, pinned: false),
-        user('DAD', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'FAKE', signer: fake)),
-        user('KID', server: dad, admin: true, pinned: false, proof: await promotion('DAD', by: 'ADM', signer: admin)),
-      ]);
-      expect(out.admins, {'ADM'});
+        user('FAKE', server: fake, admin: true),
+        user('DAD', server: dad, admin: true, proof: await promotion('DAD', by: 'FAKE', signer: fake)),
+        user('KID', server: dad, admin: true, proof: await promotion('DAD', by: 'ADM', signer: admin)),
+      ], pinned: {1: {'ADM'}});
+      expect(out.admins, {1: {'ADM'}});
     });
 
     test("a retired admin key (a lost phone's) can't move anyone's trust", () async {
@@ -284,6 +302,122 @@ void main() {
       ]);
       expect(out.witnessed.map((w) => w.reset.id), [r2.id]);
       expect(out.acknowledged, {'MOM'});
+    });
+  });
+
+  group('per family', () {
+    test('a reset by an admin of a family the viewer and target share is acknowledged', () async {
+      final r = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(1), fam(2)]),
+        user('ADM', server: admin, families: [fam(2, admin: true)]),
+        user('MOM', server: mom2, trusted: mom1, families: [fam(2)], resets: [r]),
+      ], myUserId: 'ME', pinned: {1: {}, 2: {'ADM'}});
+      expect(out.admins, {1: <String>{}, 2: {'ADM'}});
+      expect(out.trusted['MOM'], mom2.pub);
+      expect(out.acknowledged, {'MOM'});
+      expect(out.witnessed.map((w) => w.reset.id), [r.id]);
+    });
+
+    test("a reset by an admin of the target's other family (not shared with the viewer) doesn't count", () async {
+      final r = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(1)]),
+        user('ADM', server: admin, families: [fam(1), fam(2, admin: true)]),
+        user('MOM', server: mom2, trusted: mom1, families: [fam(1), fam(2)], resets: [r]),
+      ], myUserId: 'ME', pinned: {1: {}});
+      expect(out.admins, {1: <String>{}});
+      expect(out.trusted['MOM'], mom1.pub);
+      expect(out.acknowledged, isNot(contains('MOM')));
+      expect(out.witnessed, isEmpty);
+      expect(out.retired['MOM'] ?? {}, isEmpty);
+    });
+
+    test('first sight pins every listed admin of that family only', () async {
+      final b = await K.make(), c = await K.make(), x = await K.make();
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(1), fam(2)]),
+        user('A', server: admin, families: [fam(1, admin: true)]),
+        user('X', server: x, families: [fam(1, admin: true)]),
+        user('B', server: b, families: [fam(1), fam(2, admin: true)]),
+        user('C', server: c, families: [fam(2), fam(3, admin: true)]),
+      ], myUserId: 'ME', pinned: {1: {'A'}});
+      expect(out.admins, {1: {'A'}, 2: {'B'}});
+    });
+
+    test("a seen family's unlisted pin is dropped (demoted)", () async {
+      final dad = await K.make();
+      final r = await makeReset(userId: 'MOM', signerUserId: 'DAD', signer: dad, old: mom1, next: mom2);
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('DAD', server: dad),
+        user('MOM', server: mom2, trusted: mom1, resets: [r]),
+      ], pinned: {1: {'ADM', 'DAD'}});
+      expect(out.admins, {1: {'ADM'}});
+      expect(out.acknowledged, isEmpty);
+      expect(out.witnessed, isEmpty);
+    });
+
+    test('a re-listed admin without a proof is not trusted again', () async {
+      final dad = await K.make();
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('DAD', server: dad, admin: true),
+      ], pinned: {1: {'ADM'}});
+      expect(out.admins, {1: {'ADM'}});
+    });
+
+    test('a v1 proof counts in family 1 only', () async {
+      final dad = await K.make();
+      final v1 = await promotion('DAD', by: 'ADM', signer: admin);
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(1), fam(2)]),
+        user('ADM', server: admin, families: [fam(1, admin: true), fam(2, admin: true)]),
+        user('DAD', server: dad, families: [fam(1, admin: true, proof: v1), fam(2, admin: true, proof: v1)]),
+      ], myUserId: 'ME', pinned: {1: {'ADM'}, 2: {'ADM'}});
+      expect(out.admins, {1: {'ADM', 'DAD'}, 2: {'ADM'}});
+    });
+
+    test("a v2 proof for family 2 doesn't promote in family 3", () async {
+      final dad = await K.make();
+      final v2 = await promotionV2(2, 'DAD', by: 'ADM', signer: admin);
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(2), fam(3)]),
+        user('ADM', server: admin, families: [fam(2, admin: true), fam(3, admin: true)]),
+        user('DAD', server: dad, families: [fam(2, admin: true, proof: v2), fam(3, admin: true, proof: v2)]),
+      ], myUserId: 'ME', pinned: {2: {'ADM'}, 3: {'ADM'}});
+      expect(out.admins, {2: {'ADM', 'DAD'}, 3: {'ADM'}});
+    });
+
+    test("a promotion signed by an admin of another family doesn't count", () async {
+      final dad = await K.make(), oth = await K.make();
+      final out = await resolveTrust([
+        user('ME', server: me, families: [fam(1), fam(2)]),
+        user('ADM', server: admin, families: [fam(1, admin: true), fam(2)]),
+        user('OTH', server: oth, families: [fam(2, admin: true)]),
+        user('DAD', server: dad, families: [fam(2, admin: true, proof: await promotionV2(2, 'DAD', by: 'ADM', signer: admin))]),
+      ], myUserId: 'ME', pinned: {1: {'ADM'}, 2: {'OTH'}});
+      expect(out.admins, {1: {'ADM'}, 2: {'OTH'}});
+    });
+
+    test('a former target (no families) gets no admin-signed reset counted, recovery still counts', () async {
+      final gran1 = await K.make(), gran2 = await K.make(), rk = await K.make();
+      final r = await makeReset(userId: 'MOM', signerUserId: 'ADM', signer: admin, old: mom1, next: mom2);
+      final rsig = await signRecoveryKey(gran1.pair, userId: 'GRAN', recoveryPub: b64urlDecode(rk.pub));
+      final rec = await makeReset(
+        userId: 'GRAN', signerUserId: 'GRAN', signer: rk, old: gran1, next: gran2, kind: 'recovery', recoverySig: b64url(rsig),
+      );
+      final out = await resolve([
+        user('ADM', server: admin, admin: true),
+        user('MOM', server: mom2, trusted: mom1, families: const [], resets: [r]),
+        user('GRAN', server: gran2, trusted: gran1, families: const [], resets: [rec]),
+      ]);
+      expect(out.admins, {1: {'ADM'}});
+      expect(out.trusted['MOM'], mom1.pub);
+      expect(out.retired['MOM'] ?? {}, isEmpty);
+      expect(out.trusted['GRAN'], gran2.pub);
+      expect(out.acknowledged, {'GRAN'});
+      expect(out.witnessed.map((w) => w.userId), ['GRAN']);
     });
   });
 

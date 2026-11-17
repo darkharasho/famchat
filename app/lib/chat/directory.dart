@@ -60,24 +60,25 @@ class Directory {
     // first use, like identity keys); after that only signed promotions add admins.
     final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
     final inputs = <TrustInput>[];
+    // Today's single family: this device's pins are family 1's (none yet on first sight).
+    final pinned1 = <String>{};
     for (final u in users) {
       final old = await _db.userById(u.id);
+      if (old?.pinnedAdmin ?? false) pinned1.add(u.id);
       final mine = u.id == _me.userId;
       // My own devices must chain to the key I hold; others' to a key trusted before (first seen
       // or acknowledged). A device under a new, unacknowledged key verifies but isn't trusted.
       final trusted = mine ? myPub : (old?.trustedIdentityPub ?? u.identityPub);
       inputs.add(TrustInput(
         userId: u.id,
-        isAdmin: u.isAdmin && !u.former,
-        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin && !u.former),
-        adminProof: u.adminProof,
+        families: u.former ? const [] : u.families,
         serverKey: u.identityPub,
         trustedKey: trusted,
         known: mine ? {myPub, ..._known(old)} : {..._known(old), trusted},
         resets: u.resets,
       ));
     }
-    final t = await resolveTrust(inputs, myUserId: _me.userId);
+    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: firstSight ? const {} : {1: pinned1});
     for (final u in users) {
       final mine = u.id == _me.userId;
       final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
@@ -88,7 +89,7 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
-        pinnedAdmin: t.admins.contains(u.id),
+        pinnedAdmin: t.admins.values.any((a) => a.contains(u.id)),
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,

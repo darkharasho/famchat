@@ -566,6 +566,7 @@ class FakeChatApi implements ChatApi {
             former: u.former,
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.former ? null : u.adminProof,
+            families: u.former ? const [] : [FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof)],
             deleted: u.deleted,
             avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),

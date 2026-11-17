@@ -302,6 +302,9 @@ class FakeServer {
               'isAdmin': u.isAdmin,
               'identityPub': u.identityPub,
               'adminProof': u.adminProof,
+              'families': [
+                {'id': 1, 'role': u.isAdmin ? 'admin' : 'member', 'adminProof': u.adminProof},
+              ],
               'devices': [
                 for (final d in devices.values.where((d) => d.userId == u.id))
                   {
