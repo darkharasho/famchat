@@ -381,3 +381,26 @@ git commit -m "feat(server): families schema, migration 0013 and test fixtures"
 - [ ] **Step 4: Run all app tests and analyze.** Run `flutter test && flutter analyze`. Expected: PASS with no new analyzer issues.
 - [ ] **Step 5: Final server check.** Run `cd server && npx vitest run --maxWorkers=2 && npm run typecheck`. Expected: PASS.
 - [ ] **Step 6: Commit.** Message: `feat(app): operator-only remove and reviewer controls`.
+
+---
+
+## Follow-ups carried from stage 1 execution
+
+Must be handled before the stage that makes `former` reachable (leaving or removing a family, stage 3):
+- Share and forward pickers still offer read-only direct chats; reactions, edits and delete-for-everyone in a read-only chat fail with `no_shared_family`. Hide them.
+- Shortcode overlay and the "preparing" bar can show above the read-only footer; in-flight compose state isn't cleared when a peer turns former.
+- Later joiners of a group see its past leavers as `former` (name, devices, avatar). Decide whether that's acceptable across families.
+
+Stage 2 (per-family admins and pinning):
+- When a user flips to `former`, the app clears their stored `pinnedAdmin`; a first admin without a proof can't be re-pinned on rejoin. Per-family pinning must handle rejoin.
+
+Stage 4 (email):
+- `users_verified_email` is case-sensitive; lowercase addresses before storing.
+
+Small hardening, any time:
+- `sharesChanged()` failures are logged and swallowed; consider one retry.
+- Admin promotion checks liveness before its batch; add a live-user `EXISTS` to both UPDATEs.
+- Group POST idempotent retry resolves the family before the existing-id check.
+- `GET /users` devices/resets subqueries filter through `users` with an OR; filter `user_id` directly before families grow.
+- Test gaps: operator-pick ordering/fallback, `requireAnyAdmin`/`requireOperator` directly, sole admin of two families, pinned→former and former→not-former flips.
+- Deploy runs migrations before the Worker; don't redeem invites during a deploy (an old-Worker redeem would create a user with no family).
