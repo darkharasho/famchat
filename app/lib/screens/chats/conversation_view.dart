@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,10 +18,9 @@ import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
-import '../../media/photo.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
-import '../../media/video.dart';
+import '../../media/send_media.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
@@ -463,6 +463,51 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Photos and videos being compressed and encrypted (before they appear in the list).
   int _preparing = 0;
 
+  /// Files are being dragged over the conversation (desktop and web).
+  bool _dragging = false;
+
+  /// Photos and videos dropped on the conversation are sent.
+  Widget _dropZone(Widget child) {
+    final theme = Theme.of(context);
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (details) async {
+        setState(() => _dragging = false);
+        final sorted = await pickedFromFiles(details.files.whereType<DropItemFile>().toList());
+        if (sorted.skipped > 0 || details.files.length > sorted.media.length + sorted.skipped) {
+          _snack('Only photos and videos can be sent here.');
+        }
+        await sendPicked(sorted.media);
+      },
+      child: Stack(children: [
+        child,
+        if (_dragging)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                key: const Key('drop-overlay'),
+                margin: const EdgeInsets.all(Space.md),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(Radii.lg),
+                  border: Border.all(color: theme.colorScheme.tertiary, width: 2),
+                ),
+                child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.file_download_outlined, size: 40, color: theme.colorScheme.onTertiaryContainer),
+                    const SizedBox(height: Space.sm),
+                    Text('Drop photos or videos to send',
+                        style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onTertiaryContainer)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+
   Future<void> _attach() async {
     var source = PickSource.library;
     if (cameraAvailable) {
@@ -505,40 +550,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   Future<void> sendPicked(List<PickedMedia> picked) async {
     final media = ref.read(mediaServiceProvider);
     if (media == null || picked.isEmpty) return;
-    final videos = ref.read(videoProcessorProvider);
-    var badImages = 0, badVideos = 0, bigVideos = 0;
-    for (final item in picked) {
-      if (mounted) setState(() => _preparing++);
-      try {
-        switch (item) {
-          case PickedPhoto(:final bytes):
-            await media.sendPhoto(widget.chatId, bytes);
-          case PickedVideo(:final file):
-            await media.sendVideo(widget.chatId, await videos.process(file));
-        }
-      } on UnsupportedImageException {
-        badImages++;
-      } on VideoTooLargeException {
-        bigVideos++;
-      } on UnsupportedVideoException {
-        badVideos++;
-      } on ArgumentError {
-        item is PickedVideo ? badVideos++ : badImages++;
-      } catch (_) {
-        item is PickedVideo ? badVideos++ : badImages++;
-      } finally {
+    final report = await sendMedia(
+      media,
+      ref.read(videoProcessorProvider),
+      widget.chatId,
+      picked,
+      onStart: () {
+        if (mounted) setState(() => _preparing++);
+      },
+      onEnd: () {
         if (mounted) setState(() => _preparing--);
-      }
-    }
-    if (bigVideos > 0) {
-      _snack(bigVideos == 1
-          ? 'That video is too large to send (${(maxVideoBytes / (1024 * 1024)).round()} MB max).'
-          : '$bigVideos videos are too large to send (${(maxVideoBytes / (1024 * 1024)).round()} MB max).');
-    } else if (badVideos > 0) {
-      _snack(badVideos == 1 ? "That video can't be sent." : "$badVideos videos can't be sent.");
-    } else if (badImages > 0) {
-      _snack(badImages == 1 ? "That image can't be sent." : "$badImages images can't be sent.");
-    }
+      },
+    );
+    if (report.problem case final p?) _snack(p);
   }
 
   void _snack(String text) {
@@ -837,7 +861,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             const SizedBox(width: Space.xs),
           ],
         ),
-        body: LayoutBuilder(builder: (context, c) {
+        body: _dropZone(LayoutBuilder(builder: (context, c) {
           // Wide panes keep the messages in a readable column; the backdrop runs edge to edge.
           final side = math.max(Space.md, (c.maxWidth - Widths.conversation) / 2);
           return Column(children: [
@@ -980,7 +1004,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
           ]);
-        }),
+        })),
       ),
     );
   }

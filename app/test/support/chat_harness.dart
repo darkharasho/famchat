@@ -12,6 +12,7 @@ import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
 import 'package:famchat/media/video.dart';
+import 'package:famchat/share/share.dart';
 import 'package:video_player/video_player.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/voice/providers.dart';
@@ -88,6 +89,7 @@ Future<ScriptedHubLink> pumpChatApp(
   MediaPicker? picker,
   VideoProcessor? videos,
   VideoFiles? videoFiles,
+  ShareSource? shares,
   FakeRecorders? recorders,
   FakeVoicePlayer? player,
   KlipyClient? gifs,
@@ -113,6 +115,8 @@ Future<ScriptedHubLink> pumpChatApp(
       videoProcessorProvider.overrideWithValue(videos ?? FakeVideoProcessor()),
       // No files or native players in tests: an in-memory stand-in (use FakeVideoPlatform to play).
       videoFilesProvider.overrideWithValue(videoFiles ?? fakeVideoFiles()),
+      // Nothing shared from other apps unless a test brings a source.
+      shareSourceProvider.overrideWithValue(shares ?? const NoShareSource()),
       // No microphone or speaker in tests: fakes, unless a test brings its own.
       voiceRecorderFactoryProvider.overrideWithValue((recorders ?? FakeRecorders()).call),
       voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),

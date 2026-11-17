@@ -16,6 +16,7 @@ import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
 import 'screens/pair_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/share_screen.dart';
 import 'screens/spikes_screen.dart';
 import 'screens/storage_screen.dart';
 import 'session/session_controller.dart';
@@ -87,6 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/search', builder: (context, state) => SearchScreen(chatId: state.uri.queryParameters['chat'])),
       GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
+      GoRoute(path: '/share', builder: (context, state) => const ShareScreen()),
       GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
       GoRoute(path: '/devices/add', builder: (context, state) => const AddDeviceScreen()),
       GoRoute(path: '/invite', builder: (context, state) => const InviteScreen()),

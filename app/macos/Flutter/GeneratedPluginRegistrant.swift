@@ -7,6 +7,7 @@ import Foundation
 
 import audio_session
 import cryptography_flutter
+import desktop_drop
 import emoji_picker_flutter
 import famchat_updater
 import file_selector_macos
@@ -28,6 +29,7 @@ import media_kit_video
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   AudioSessionPlugin.register(with: registry.registrar(forPlugin: "AudioSessionPlugin"))
   CryptographyFlutterPlugin.register(with: registry.registrar(forPlugin: "CryptographyFlutterPlugin"))
+  DesktopDropPlugin.register(with: registry.registrar(forPlugin: "DesktopDropPlugin"))
   EmojiPickerFlutterPlugin.register(with: registry.registrar(forPlugin: "EmojiPickerFlutterPlugin"))
   FamchatUpdaterPlugin.register(with: registry.registrar(forPlugin: "FamchatUpdaterPlugin"))
   FileSelectorPlugin.register(with: registry.registrar(forPlugin: "FileSelectorPlugin"))
