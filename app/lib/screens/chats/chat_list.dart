@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
+import '../../push/preview.dart';
 import '../../session/session_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
@@ -212,11 +213,7 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
     'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
-    'photo' => '📷 Photo',
-    'voice' => '🎤 Voice message',
-    'video' => '🎥 Video',
-    'gif' => 'GIF',
-    _ => 'Message',
+    _ => mediaLabel(m.kind) ?? 'Message',
   };
 }
 
