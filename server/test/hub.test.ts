@@ -14,6 +14,8 @@ interface Client {
   next(type: string, timeoutMs?: number): Promise<Msg>;
   none(type: string, waitMs?: number): Promise<void>;
   closed: Promise<number>;
+  /** Every message received, in order (never consumed by [next]). */
+  log: Msg[];
 }
 
 const open: WebSocket[] = [];
@@ -37,9 +39,12 @@ async function connect(u: TestUser): Promise<Client> {
   ws.accept();
   open.push(ws);
   const inbox: Msg[] = [];
+  const log: Msg[] = [];
   let wake: (() => void) | null = null;
   ws.addEventListener("message", (e) => {
-    inbox.push(JSON.parse(e.data as string) as Msg);
+    const m = JSON.parse(e.data as string) as Msg;
+    inbox.push(m);
+    log.push(m);
     wake?.();
   });
   const closed = new Promise<number>((r) => ws.addEventListener("close", (e) => r(e.code)));
@@ -50,6 +55,7 @@ async function connect(u: TestUser): Promise<Client> {
   return {
     ws,
     closed,
+    log,
     send: (m) => ws.send(JSON.stringify(m)),
     async next(type, timeoutMs = 2000) {
       const deadline = Date.now() + timeoutMs;
@@ -147,7 +153,83 @@ describe("presence", () => {
     await connect(b);
     await ca.none("presence");
   });
+
+  it("a quick reconnect during a cold peer load does not end with a stale offline", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const ca = await connect(a);
+    const cb = await connect(b);
+    await ca.next("presence");
+    // Cold cache, as after hibernation: the close has to load B's peers from D1.
+    await hubStub().sharesChanged();
+    // Hold that load open (a slow D1 read) so the reconnect lands inside it.
+    const g = await gate("peersOf");
+    cb.ws.close(1000, "bye");
+    await g.entered();
+    const cb2 = await connect(b);
+    await cb2.next("hello");
+    await g.release();
+    await new Promise((r) => setTimeout(r, 100));
+    const seen = ca.log.filter((m) => m.type === "presence" && m.userId === b.userId);
+    expect(seen.at(-1)).toEqual({ type: "presence", userId: b.userId, online: true });
+  });
+
+  it("hello is the first thing a new socket hears", async () => {
+    const a = await insertUserWithDevice();
+    // Hold the hello's online lookup open; an event for A arrives meanwhile.
+    const g = await gate("onlineUserIds");
+    const pending = connect(a);
+    await g.entered();
+    await hubStub().notify([a.userId], { type: "profile", userId: a.userId });
+    await g.release();
+    const ca = await pending;
+    await ca.next("hello");
+    expect(ca.log[0]?.type).toBe("hello");
+  });
 });
+
+const hubStub = () => env.HUB.get(env.HUB.idFromName("family"));
+
+/**
+ * Holds the hub's next call of [method] until released (a slow D1 read, made deterministic). Only
+ * the first call is held; the patch is removed on release.
+ */
+async function gate(method: "peersOf" | "onlineUserIds") {
+  type G = { entered: boolean; release: () => void };
+  type H = Record<string, unknown> & { __gate?: G };
+  await runInDurableObject(hubStub(), (hub: FamilyHub) => {
+    const h = hub as unknown as H;
+    const orig = (h[method] as (...a: unknown[]) => Promise<unknown>).bind(hub);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const g: G = { entered: false, release };
+    h.__gate = g;
+    h[method] = async (...args: unknown[]) => {
+      if (!g.entered) {
+        g.entered = true;
+        await held;
+      }
+      return orig(...args);
+    };
+  });
+  return {
+    async entered() {
+      for (let i = 0; i < 100; i++) {
+        if (await runInDurableObject(hubStub(), (hub: FamilyHub) => (hub as unknown as H).__gate?.entered)) return;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error(`${method} was never called`);
+    },
+    async release() {
+      await runInDurableObject(hubStub(), (hub: FamilyHub) => {
+        const h = hub as unknown as H;
+        delete h[method];
+        h.__gate?.release();
+        delete h.__gate;
+      });
+    },
+  };
+}
 
 describe("send", () => {
   it("acks with gap-free seqs and fans out to members only", async () => {

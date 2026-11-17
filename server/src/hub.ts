@@ -99,13 +99,17 @@ export class FamilyHub extends DurableObject<Env> {
     await this.prune();
     // A connect always reloads the user's peers: they may have joined a family since.
     this.peers.delete(userId);
-    await this.peersOf(userId);
+    const peers = await this.peersOf(userId);
+    // Before accept, so the new socket isn't counted yet: add the user as it will be once accepted.
+    const online = new Set(await this.onlineUserIds(undefined, userId));
+    if (peers.has(userId)) online.add(userId);
+    // No await from here on: nothing reaches the socket before hello, and presence can't interleave.
     const [client, server] = Object.values(new WebSocketPair());
     const wasOnline = this.sockets(userId).length > 0;
     this.ctx.acceptWebSocket(server, [`u:${userId}`, `d:${deviceId}`]);
     server.serializeAttachment({ userId, deviceId, at: this.now() } satisfies Att);
-    server.send(JSON.stringify({ type: "hello", online: await this.onlineUserIds(undefined, userId) }));
-    if (!wasOnline) await this.sendPresence(userId, true, server);
+    server.send(JSON.stringify({ type: "hello", online: [...online] }));
+    if (!wasOnline) this.sendPresence(userId, true, peers, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -229,9 +233,11 @@ export class FamilyHub extends DurableObject<Env> {
     );
   }
 
-  /** Sends [userId]'s presence to the sockets of everyone who shares a family with them. */
-  private async sendPresence(userId: string, online: boolean, exclude?: WebSocket): Promise<void> {
-    const peers = await this.peersOf(userId);
+  /**
+   * Sends [userId]'s presence to the sockets of [peers] (everyone who shares a family with them).
+   * Synchronous, so callers decide and send with no await in between.
+   */
+  private sendPresence(userId: string, online: boolean, peers: Set<string>, exclude?: WebSocket): void {
     const text = JSON.stringify({ type: "presence", userId, online });
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === exclude) continue;
@@ -245,7 +251,9 @@ export class FamilyHub extends DurableObject<Env> {
     if (!att) return;
     // Only once per socket: a revoked socket is seen here and again in webSocketClose.
     ws.serializeAttachment(null);
-    if (this.sockets(att.userId, ws).length === 0) await this.sendPresence(att.userId, false, ws);
+    // Peers first: a reconnect during this (maybe D1) load must be seen by the check below.
+    const peers = await this.peersOf(att.userId);
+    if (this.sockets(att.userId, ws).length === 0) this.sendPresence(att.userId, false, peers, ws);
   }
 
   private async memberIds(chatId: string): Promise<string[]> {
