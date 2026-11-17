@@ -390,9 +390,11 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
      that, the device adds an admin to a family only if their `families[].adminProof` is a valid
      promotion for that family: a v2 proof, or a v1 proof in family 1 only. The proof must be signed
      with the current key of a trusted admin of that family. An admin the server stops listing for a
-     family is unpinned there, and needs a fresh proof to be trusted again. When the user leaves a
-     family, its pins are dropped and it is no longer marked as seen, so rejoining is first sight
-     again. The device's own user always counts. A device upgraded from one-family pinning keeps its
+     family is unpinned there, and needs a fresh proof to be trusted again. A family the device has
+     seen keeps its pins frozen when the server stops listing it (the user left, or the server
+     omits it or the user's whole entry): they don't count meanwhile, and if the family is listed
+     again they are the starting point, so only never-seen families are trusted on first sight.
+     The device's own user always counts. A device upgraded from one-family pinning keeps its
      pinned admins as family 1's.
    - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin, other
      than the user, of a family that the user and this device's user are both in. For history only,

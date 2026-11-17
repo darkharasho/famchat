@@ -207,4 +207,28 @@ void main() {
       2: {'D'},
     });
   });
+
+  test('family pins: an update overwrites only the families it names, the rest stay seen and frozen', () async {
+    final db = ChatDb(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.updateFamilyPins({
+      1: {'A'},
+      2: {'B', 'C'},
+    });
+    await db.updateFamilyPins({
+      2: {'C'},
+      3: {},
+    });
+    expect(await db.familyPins(), {
+      1: {'A'},
+      2: {'C'},
+      3: <String>{},
+    });
+    await db.updateFamilyPins({});
+    expect(await db.familyPins(), {
+      1: {'A'},
+      2: {'C'},
+      3: <String>{},
+    });
+  });
 }

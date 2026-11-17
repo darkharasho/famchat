@@ -138,15 +138,74 @@ void main() {
     expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
   });
 
-  test('leaving a family drops its pins', () async {
+  test('leaving a family freezes its pins: they no longer count, and are kept for a rejoin', () async {
     backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
     backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: true));
     await dir.refresh();
     expect((await alice.db.familyPins())[2], {bob.userId});
     backend.removeFamilyRole(alice.userId, 2);
     await dir.refresh();
-    expect((await alice.db.familyPins()).keys, [1]);
+    expect(await alice.db.familyPins(), {
+      1: <String>{},
+      2: {bob.userId},
+    });
     expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isFalse);
+    // Back in family 2: Bob is still listed as its admin, so he is trusted again.
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
+    await dir.refresh();
+    expect((await alice.db.familyPins())[2], {bob.userId});
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+  });
+
+  /// After [gap] hides family 1 from Alice for one refresh, the server lists it again with a new,
+  /// unproven admin X who resets Bob: family 1 was seen, so X gains nothing.
+  Future<void> expectNoFreshFirstSight(Future<void> Function() gap, Future<void> Function() ungap) async {
+    final carol = await backend.addUser('Carol');
+    addTearDown(carol.dispose);
+    backend.setAdmin(carol.userId);
+    await dir.refresh();
+    expect(await alice.db.familyPins(), {
+      1: {carol.userId},
+    });
+    await gap();
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId}, reason: 'pins freeze, the seen mark stays');
+    await ungap();
+    final x = await backend.addUser('X');
+    addTearDown(x.dispose);
+    backend.setAdmin(x.userId);
+    final resetId = await backend.adminReset(bob.userId, by: x.userId);
+    final bob2 = await backend.claimReset(bob.userId, resetId);
+    addTearDown(bob2.dispose);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue, reason: 'manual banner, not silently accepted');
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+    expect((await alice.db.userById(carol.userId))!.pinnedAdmin, isTrue);
+    expect(await alice.db.allResets(), isEmpty);
+    expect(await alice.db.familyPins(), {
+      1: {carol.userId},
+    });
+  }
+
+  test("a server that drops family 1 from my entry for one refresh can't re-pin it", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.removeFamilyRole(alice.userId, 1),
+      () async => backend.addToFamily1(alice.userId),
+    );
+  });
+
+  test("a server that omits my entry for one refresh can't re-pin my families", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.omitFromUsers(alice.userId),
+      () async => backend.omitFromUsers(alice.userId, false),
+    );
+  });
+
+  test("a server that marks me former for one refresh can't re-pin my families", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.markFormer(alice.userId),
+      () async => backend.markFormer(alice.userId, false),
+    );
   });
 
   test('a demoted admin is unpinned', () async {

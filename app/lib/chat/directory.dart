@@ -112,8 +112,10 @@ class Directory {
         ));
       }
     }
-    // Only my families are kept: one I left is seen afresh if I join it again.
-    await _db.replaceFamilyPins(t.admins);
+    // Only the families on my entry are updated. One the server stops listing (or my whole entry,
+    // missing or former) keeps its pins frozen and stays seen: the server can't force a new first
+    // sight, which would trust whoever it lists then.
+    await _db.updateFamilyPins(t.admins);
     for (final w in t.witnessed) {
       await _db.recordReset(
         id: w.reset.id,

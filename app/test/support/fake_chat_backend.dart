@@ -32,6 +32,9 @@ class _User {
   /// In family 1 (as everyone non-former is, unless removed from it); its role is [isAdmin].
   bool inFamily1 = true;
 
+  /// Left out of `GET /users` altogether (a lie, or a glitch).
+  bool omitted = false;
+
   /// Roles in families other than family 1.
   final otherFamilies = <FamilyRoleDto>[];
   final resets = <_Reset>[];
@@ -249,6 +252,12 @@ class FakeChatBackend {
     if (familyId == 1) u.inFamily1 = false;
     u.otherFamilies.removeWhere((f) => f.id == familyId);
   }
+
+  /// The server lists [userId] in family 1 again.
+  void addToFamily1(String userId) => _users[userId]!.inFamily1 = true;
+
+  /// `GET /users` leaves [userId] out (or lists them again).
+  void omitFromUsers(String userId, [bool omit = true]) => _users[userId]!.omitted = omit;
 
   /// `POST /admin/users/:id/admin` signed by [by]'s identity key.
   Future<void> promote(String userId, {required String by}) async {
@@ -575,6 +584,7 @@ class FakeChatApi implements ChatApi {
   @override
   Future<List<UserDto>> users() => _run('GET /users', () => [
         for (final u in b._users.values)
+          if (!u.omitted)
           UserDto(
             id: u.id,
             name: u.name,

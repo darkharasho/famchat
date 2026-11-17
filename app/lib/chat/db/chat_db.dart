@@ -161,7 +161,8 @@ class LocalResets extends Table {
 }
 
 /// Families this device has seen and pinned admins for (lib/chat/resets.dart): a family absent here
-/// is seen for the first time at the next directory refresh.
+/// is seen for the first time at the next directory refresh. A directory refresh never removes a
+/// row, so the server can't make a family new again.
 @DataClassName('FamilyRow')
 class LocalFamilies extends Table {
   IntColumn get id => integer()();
@@ -557,7 +558,21 @@ class ChatDb extends _$ChatDb {
     return pins;
   }
 
-  /// Replaces every family's pins with [pins]: a family absent from it is no longer seen.
+  /// Replaces the pins of the families in [pins] and marks them seen. Other families keep their
+  /// seen mark and their pins, frozen: a family is never seen for the first time twice.
+  Future<void> updateFamilyPins(Map<int, Set<String>> pins) => transaction(() async {
+        await (delete(localFamilyAdmins)..where((a) => a.familyId.isIn(pins.keys))).go();
+        await batch((b) {
+          b.insertAllOnConflictUpdate(localFamilies, [for (final id in pins.keys) FamilyRow(id: id)]);
+          b.insertAll(localFamilyAdmins, [
+            for (final e in pins.entries)
+              for (final u in e.value) FamilyAdminRow(familyId: e.key, userId: u),
+          ]);
+        });
+      });
+
+  /// Replaces every family's pins with [pins], from a trusted device's pairing handover: a family
+  /// absent from it is no longer seen.
   Future<void> replaceFamilyPins(Map<int, Set<String>> pins) => transaction(() async {
         await delete(localFamilyAdmins).go();
         await delete(localFamilies).go();

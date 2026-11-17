@@ -14,7 +14,7 @@
 - Proof v2 bytes: `ByteWriter/Writer("famchat-admin-v2").str(str(familyId)).str(userId).str(byUserId)`, `familyId` as its decimal string. v1 stays `"famchat-admin-v1" ‖ str(userId) ‖ str(byUserId)` and counts **only for family 1**.
 - A family's creator has no proof; a device pins admins on first sight of a family (the families listed on its own user's `/users` entry it hasn't pinned before).
 - After first sight a device adds an admin of family F only through a proof that verifies (v2 for F, or v1 when F = 1) under the current trusted key of an admin it already trusts in F (or its own user).
-- A device drops a pin as soon as the server stops listing that user as an admin of F. Families no longer on my own entry lose their pins and their "seen" mark (rejoining is a new first sight).
+- A device drops a pin as soon as the server stops listing that user as an admin of F. A family the device has seen keeps its pins frozen when the server stops listing it (on my own entry, or my entry missing or former); only never-seen families are trusted on first sight.
 - Upgrade: an existing device's pinned admins become family 1's pins and family 1 is marked seen (only if `adminsPinned` meta was set). No new warnings for anyone today.
 - Old clients keep working: `isAdmin`/`adminProof` at the top level of `/users` still describe family 1; `POST /admin/users/:id/admin` keeps accepting v1 for family 1; old pairing bundles (per-user `admin` bool) pin into family 1.
 - Server never sees message bodies; no change to message crypto.
