@@ -52,6 +52,54 @@ describe("POST /api/admin/users/:id/reset", () => {
     expect((await postReset(admin, other.userId, r.body)).status).toBe(404);
   });
 
+  const resetEvent = async () =>
+    (await env.DB.prepare("SELECT payload FROM events WHERE kind = 'reset'").first<{ payload: string }>())!.payload;
+
+  it("an admin of the target's second family can reset them (familyId in response and event)", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const admin = await insertUserWithDevice({ name: "Aunt", families: [{ id: f, role: "admin" }] });
+    const target = await insertUserWithDevice({ name: "Cousin", families: [{ id: 1 }, { id: f }] });
+    const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
+    const res = await postReset(admin, target.userId, r.body);
+    expect(res.status).toBe(201);
+    expect((await res.json<{ familyId: number }>()).familyId).toBe(f);
+    expect(JSON.parse(await resetEvent()).familyId).toBe(f);
+  });
+
+  it("an admin of a family the target isn't in gets 404", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const admin = await insertUserWithDevice({ families: [{ id: f, role: "admin" }] });
+    const target = await insertUserWithDevice({ name: "Mom" });
+    const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
+    expect((await postReset(admin, target.userId, r.body)).status).toBe(404);
+  });
+
+  it("a member (non-admin) of the target's family gets 403", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const member = await insertUserWithDevice({ families: [{ id: f }] });
+    const target = await insertUserWithDevice({ name: "Cousin", families: [{ id: f }] });
+    const r = await signedReset(member, { userId: target.userId, identityPub: target.keys.identityPub });
+    expect((await postReset(member, target.userId, r.body)).status).toBe(403);
+  });
+
+  it("a pending family's admin can't reset its members", async () => {
+    const f = await insertFamily({ name: "Cousins", status: "pending" });
+    const admin = await insertUserWithDevice({ families: [{ id: f, role: "admin" }] });
+    const target = await insertUserWithDevice({ name: "Cousin", families: [{ id: f }] });
+    const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
+    expect((await postReset(admin, target.userId, r.body)).status).toBe(404);
+  });
+
+  it("family-1 admin still resets family-1 members (familyId 1)", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const target = await insertUserWithDevice({ name: "Mom" });
+    const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
+    const res = await postReset(admin, target.userId, r.body);
+    expect(res.status).toBe(201);
+    expect((await res.json<{ familyId: number }>()).familyId).toBe(1);
+    expect(JSON.parse(await resetEvent()).familyId).toBe(1);
+  });
+
   it("an admin can't reset themselves", async () => {
     const admin = await insertUserWithDevice({ admin: true });
     const r = await signedReset(admin, { userId: admin.userId, identityPub: admin.keys.identityPub });

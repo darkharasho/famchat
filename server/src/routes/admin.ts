@@ -141,7 +141,7 @@ admin.get("/usage", requireAuth, requireAdmin, async (c) => {
  * (docs/protocol.md "Account resets"). Their devices are revoked and their chats rotated at once;
  * the returned one-time link signs them in again with a new identity key on the same account.
  */
-admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
+admin.post("/users/:id/reset", requireAuth, requireAnyAdmin, async (c) => {
   const db = c.env.DB;
   const userId = c.req.param("id");
   const adminId = c.get("userId");
@@ -156,13 +156,17 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
   if (userId === adminId) throw new ApiError("invalid_request");
 
   const [target, signer] = await Promise.all([
-    // Only members of family #1 are reset (reviewers aren't in it: the operator removes them instead).
+    // The authorizing family: the lowest-numbered approved one where the caller is admin and the
+    // target a member (reviewers sit only in the hidden reviewer family, which has no admins).
     db.prepare(
-      `SELECT u.name, u.identity_pub FROM users u
+      `SELECT u.name, u.identity_pub, MIN(am.family_id) AS family_id FROM users u
+       JOIN family_members tm ON tm.user_id = u.id
+       JOIN family_members am ON am.family_id = tm.family_id AND am.user_id = ? AND am.role = 'admin'
+       JOIN families f ON f.id = tm.family_id AND f.status = 'approved'
        WHERE u.id = ? AND u.deleted_at IS NULL
-         AND EXISTS (SELECT 1 FROM family_members m WHERE m.family_id = ? AND m.user_id = u.id)`,
-    ).bind(userId, FAMILY_ONE)
-      .first<{ name: string; identity_pub: string }>(),
+       GROUP BY u.id`,
+    ).bind(adminId, userId)
+      .first<{ name: string; identity_pub: string; family_id: number }>(),
     db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(adminId).first<string>("identity_pub"),
   ]);
   if (!target) throw new ApiError("not_found");
@@ -181,8 +185,9 @@ admin.post("/users/:id/reset", requireAuth, requireAdmin, async (c) => {
     actorId: adminId,
     now,
     invite: { tokenHash: await sha256Hex(token), name: target.name, createdBy: adminId, expiresAt },
+    familyId: target.family_id,
   });
-  return c.json({ resetId, inviteToken: token, inviteUrl: inviteUrl(c.env, token), expiresAt }, 201);
+  return c.json({ resetId, familyId: target.family_id, inviteToken: token, inviteUrl: inviteUrl(c.env, token), expiresAt }, 201);
 });
 
 /**

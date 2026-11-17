@@ -16,6 +16,8 @@ export interface ResetPlan {
   recoverySig: string | null;
   actorId: string | null;
   now: number;
+  /** Admin reset: the family whose admin authorized it (goes in the event payload). */
+  familyId?: number;
   /** Admin reset: the one-time link that signs the user in again. */
   invite?: { tokenHash: string; name: string; createdBy: string; expiresAt: number };
   /**
@@ -103,7 +105,7 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
     kind: r ? "recovered" : "reset",
     userId,
     actorId: p.actorId,
-    payload: { resetId: s.resetId, ...(r ? { deviceId: r.device.id } : {}) },
+    payload: { resetId: s.resetId, ...(p.familyId !== undefined ? { familyId: p.familyId } : {}), ...(r ? { deviceId: r.device.id } : {}) },
     at: now,
   }, { sql: guard, binds: gb }));
 

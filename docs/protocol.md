@@ -146,8 +146,9 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - The operator (`users.operator = 1`, set by hand or by redeeming a bootstrap invite) holds the
   account-wide powers: `DELETE /admin/users/:id` and the three reviewer endpoints are operator-only
   (403 for anyone else, family admins included). `POST /admin/recovery-key` takes an admin of any
-  non-hidden family. `POST /admin/users/:id/reset` still checks admin of family #1 and needs the
-  target to have a `family_members` row in family #1 (else 404).
+  non-hidden family. `POST /admin/users/:id/reset` takes an admin of any family (403
+  otherwise) and needs a family that is `approved`, where the caller is admin and the target a member
+  (else 404); the lowest such family id authorizes the reset.
 - Redeeming an invite joins the invite's family (`invites.family_id`: family #1 for admin and
   bootstrap invites, the hidden reviewer family for reviewer invites), as admin when `make_admin`.
   The recovery redeem accepts an admin of any non-hidden family.
@@ -360,7 +361,7 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
 1. The admin's device makes `resetId` (ULID), a one-time Ed25519 **claim key**, and signs the statement
    (kind `admin`, `oldIdentityPub` = the user's identity key from `/users`) with its identity key.
    `POST /admin/users/:id/reset {resetId, oldIdentityPub, claimPub, createdAt, sig}` (admin) →
-   `201 {resetId, inviteToken, inviteUrl, expiresAt}`. The server checks the signature against the
+   `201 {resetId, familyId, inviteToken, inviteUrl, expiresAt}`; `familyId` is the family whose admin authorized the reset (also in the `reset` audit event payload). The server checks the signature against the
    caller's identity key (400), `|createdAt − now| ≤ 10 min` (400), that `oldIdentityPub` is the
    user's key now (409 `conflict`: refresh `/users`), and that the target isn't the caller (400). In
    one transaction it records the reset, revokes every device of the user (sockets closed with 4001),
