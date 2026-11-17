@@ -154,9 +154,13 @@ class ChatDto {
     required this.lastMessageAt,
     required this.createdAt,
     required this.members,
+    this.mutedUntil,
   });
 
   final String id, kind, createdBy;
+
+  /// This user's mute: no notifications from the chat until then (Unix ms), or null.
+  final int? mutedUntil;
   final String? title;
   final int currentEpoch, lastSeq, createdAt;
   final int? lastMessageAt;
@@ -176,6 +180,7 @@ class ChatDto {
         lastMessageAt: _f<int?>(j, 'lastMessageAt'),
         createdAt: _f(j, 'createdAt'),
         members: [for (final m in _list(j, 'members')) MemberDto.fromJson(m)],
+        mutedUntil: _f<int?>(j, 'mutedUntil'),
       );
 }
 
@@ -229,6 +234,9 @@ abstract interface class ChatApi {
   });
   Future<ChatDto> addMembers(String chatId, List<String> userIds, List<ChatKeyWrap> wraps);
   Future<void> removeMember(String chatId, String userId);
+
+  /// Mutes the chat for this user until [until] (Unix ms), or unmutes it (null).
+  Future<void> muteChat(String chatId, int? until);
   Future<void> createEpoch(String chatId, int epoch, List<ChatKeyWrap> wraps);
   Future<List<MessageDto>> messages(String chatId, {int? after, int? before, int limit = 100});
   Future<List<ChatKeyWrap>> wraps({String? chatId});

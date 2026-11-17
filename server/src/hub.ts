@@ -256,8 +256,11 @@ export class FamilyHub extends DurableObject<Env> {
     const seq = (inserted.results[0] as { seq: number }).seq;
     send(ws, { type: "ack", id, seq, createdAt: now });
 
+    // Silent sends (reactions, edits, deletes) reach sockets marked as such and push no one.
+    const silent = m.silent === true;
     const msg = JSON.stringify({
       type: "msg",
+      ...(silent ? { silent: true } : {}),
       message: messageOut({
         chat_id: chatId, seq, id, sender_user_id: att.userId, sender_device_id: att.deviceId,
         envelope: JSON.stringify(env), created_at: now,
@@ -268,6 +271,7 @@ export class FamilyHub extends DurableObject<Env> {
       for (const s of this.sockets(u, ws)) trySend(s, msg);
       if (u !== att.userId) others.push(u);
     }
+    if (silent) return;
     // Not awaited: the next send shouldn't wait for the push lookup and the queue.
     this.pushOffline({ chatId, senderUserId: att.userId, messageId: id }, others).catch((e) =>
       console.error("push hook failed", e),
@@ -280,10 +284,12 @@ export class FamilyHub extends DurableObject<Env> {
    */
   private async pushOffline(msg: Omit<PushJob, "userIds">, userIds: string[]): Promise<void> {
     if (userIds.length === 0) return;
+    // Members who muted the chat until later get no push.
     const { results } = await this.env.DB.prepare(
       `SELECT id, user_id FROM devices WHERE user_id IN (${userIds.map(() => "?").join(",")})
-       AND revoked_at IS NULL AND push_token IS NOT NULL ORDER BY id`,
-    ).bind(...userIds).all<{ id: string; user_id: string }>();
+       AND revoked_at IS NULL AND push_token IS NOT NULL
+       AND user_id NOT IN (SELECT user_id FROM chat_members WHERE chat_id = ? AND muted_until > ?) ORDER BY id`,
+    ).bind(...userIds, msg.chatId, Date.now()).all<{ id: string; user_id: string }>();
     const targets = results.filter((d) =>
       this.ctx.getWebSockets(`d:${d.id}`).every((s) => s.readyState !== WebSocket.READY_STATE_OPEN),
     );

@@ -59,11 +59,11 @@ chats.post("/", async (c) => {
   const existing = await db.prepare("SELECT created_by FROM chats WHERE id = ?").bind(id).first<{ created_by: string }>();
   if (existing) {
     if (existing.created_by !== me) throw new ApiError("invalid_request");
-    return c.json({ chat: await chatOut(db, id), created: false }, 200);
+    return c.json({ chat: await chatOut(db, id, me), created: false }, 200);
   }
   if (directKey) {
     const dup = await db.prepare("SELECT id FROM chats WHERE direct_key = ?").bind(directKey).first<{ id: string }>();
-    if (dup) return c.json({ chat: await chatOut(db, dup.id), created: false }, 200);
+    if (dup) return c.json({ chat: await chatOut(db, dup.id, me), created: false }, 200);
   }
   if ((await sameSide(db, others, c.get("reviewer"))) !== others.length) throw new ApiError("invalid_request");
 
@@ -89,11 +89,11 @@ chats.post("/", async (c) => {
     const dup = directKey
       ? await db.prepare("SELECT id FROM chats WHERE direct_key = ?").bind(directKey).first<{ id: string }>()
       : null;
-    if (dup) return c.json({ chat: await chatOut(db, dup.id), created: false }, 200);
+    if (dup) return c.json({ chat: await chatOut(db, dup.id, me), created: false }, 200);
     throw e;
   }
   await notify(c.env, members, { type: "chat", chatId: id });
-  return c.json({ chat: await chatOut(db, id), created: true }, 201);
+  return c.json({ chat: await chatOut(db, id, me), created: true }, 201);
 });
 
 /** Adds people to a group. Wraps for the current epoch must cover every new device; older epochs may come too. */
@@ -132,7 +132,7 @@ chats.post("/:id/members", async (c) => {
     ),
     ...wrapInserts(db, wraps, now),
   ]);
-  const out = (await chatOut(db, chat.id))!;
+  const out = (await chatOut(db, chat.id, me))!;
   await notify(c.env, out.members.map((m) => m.userId), { type: "chat", chatId: chat.id });
   return c.json({ chat: out });
 });
@@ -155,11 +155,32 @@ chats.delete("/:id/members/:userId", async (c) => {
   return c.body(null, 204);
 });
 
+/** Latest accepted mute time (year 9999): "until I turn it back on" is sent as a far-off time. */
+const MAX_MUTE = 253_402_300_799_000;
+
+/** Mutes (no pushes until [until], Unix ms) or unmutes (null) the chat for the caller. */
+chats.put("/:id/mute", async (c) => {
+  const db = c.env.DB;
+  const me = c.get("userId");
+  const body = await readJson(c);
+  const until = body.until;
+  if (until !== null && (!Number.isInteger(until) || (until as number) < 0 || (until as number) > MAX_MUTE)) {
+    throw new ApiError("invalid_request");
+  }
+  const chatId = c.req.param("id");
+  const res = await db.prepare("UPDATE chat_members SET muted_until = ? WHERE chat_id = ? AND user_id = ?")
+    .bind(until, chatId, me).run();
+  if (res.meta.changes !== 1) throw new ApiError("not_found");
+  await notify(c.env, [me], { type: "chat", chatId });
+  return c.body(null, 204);
+});
+
 /** Publishes the key of the chat's current epoch (after a leave or removal). First one wins. */
 chats.post("/:id/epochs", async (c) => {
   const db = c.env.DB;
   const device = c.get("deviceId");
-  const chat = await requireMemberChat(db, c.req.param("id"), c.get("userId"));
+  const me = c.get("userId");
+  const chat = await requireMemberChat(db, c.req.param("id"), me);
   const body = await readJson(c);
   if (!Number.isInteger(body.epoch)) throw new ApiError("invalid_request");
   const wraps = parseWraps(body.wraps);
@@ -195,7 +216,7 @@ chats.post("/:id/epochs", async (c) => {
   }
   if (created[0].meta.changes !== 1) throw new ApiError("stale_epoch");
   await notify(c.env, chat.members.map((m) => m.userId), { type: "keys", chatId: chat.id, epoch: chat.currentEpoch });
-  return c.json({ chat: await chatOut(db, chat.id) }, 201);
+  return c.json({ chat: await chatOut(db, chat.id, me) }, 201);
 });
 
 function seqParam(v: string | undefined): number | undefined {

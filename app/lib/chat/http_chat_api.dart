@@ -63,6 +63,9 @@ class HttpChatApi implements ChatApi {
       _call('DELETE', '/chats/${_seg(chatId)}/members/${_seg(userId)}');
 
   @override
+  Future<void> muteChat(String chatId, int? until) => _call('PUT', '/chats/${_seg(chatId)}/mute', {'until': until});
+
+  @override
   Future<void> createEpoch(String chatId, int epoch, List<ChatKeyWrap> wraps) => _call('POST', '/chats/${_seg(chatId)}/epochs', {
         'epoch': epoch,
         'wraps': [for (final w in wraps) w.toJson()],

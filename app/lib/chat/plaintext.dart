@@ -40,9 +40,20 @@ sealed class Plaintext {
     if (kind is! String) throw const FormatException('missing kind');
     switch (kind) {
       case 'text':
-        final text = j['text'];
+        final text = j['text'], replyTo = j['replyTo'];
         if (text is! String || text.isEmpty) throw const FormatException('bad text');
-        return TextBody(text);
+        if (replyTo != null && (replyTo is! String || replyTo.isEmpty)) throw const FormatException('bad replyTo');
+        return TextBody(text, replyTo: replyTo as String?);
+      case 'edit':
+        final target = j['target'], text = j['text'];
+        if (target is! String || target.isEmpty || text is! String || text.isEmpty) {
+          throw const FormatException('bad edit');
+        }
+        return EditBody(target, text);
+      case 'delete':
+        final target = j['target'];
+        if (target is! String || target.isEmpty) throw const FormatException('bad delete');
+        return DeleteBody(target);
       case 'reaction':
         final target = j['target'], emoji = j['emoji'];
         if (target is! String || target.isEmpty || emoji is! String || emoji.length > 32) {
@@ -60,12 +71,35 @@ sealed class Plaintext {
 }
 
 class TextBody extends Plaintext {
-  const TextBody(this.text);
+  const TextBody(this.text, {this.replyTo});
   final String text;
+
+  /// The message this one replies to, if any.
+  final String? replyTo;
   @override
   String get kind => 'text';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'text': text};
+  Map<String, Object?> toJson() => {'kind': kind, 'text': text, if (replyTo != null) 'replyTo': replyTo};
+}
+
+/// New text for the sender's own text message [target]; the latest edit wins.
+class EditBody extends Plaintext {
+  const EditBody(this.target, this.text);
+  final String target, text;
+  @override
+  String get kind => 'edit';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'text': text};
+}
+
+/// Unsends the sender's own message [target].
+class DeleteBody extends Plaintext {
+  const DeleteBody(this.target);
+  final String target;
+  @override
+  String get kind => 'delete';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target};
 }
 
 /// [emoji] empty removes the sender's reaction on [target].

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/reactions.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/pairing/bundle.dart';
@@ -194,6 +195,60 @@ void main() {
     final list = await alice.d.db.watchChatList(alice.d.userId).first;
     expect(list.single.unread, 0);
     expect(list.single.last?.id, target);
+  });
+
+  test('replies, edits and deletes reach the others, silently, and only the sender can change a message', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    final hi = await alice.sync.sendText(chatId, 'hi');
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    final reply = await bob.sync.sendText(chatId, 'hey', replyTo: hi);
+    await until(() async => (await carol.rows(chatId)).length == 2);
+    expect(replyTargetOf((await carol.d.db.messageById(reply))!), hi);
+
+    await alice.sync.editText(chatId, hi, 'hello');
+    await bob.sync.editText(chatId, hi, 'bob was here'); // not his: ignored by everyone
+    await until(() async => (await carol.rows(chatId)).length == 4);
+    var changes = messageChanges(await carol.rows(chatId));
+    expect(changes.textOf((await carol.d.db.messageById(hi))!), 'hello');
+
+    await alice.sync.deleteMessage(chatId, hi);
+    await until(() async => (await carol.rows(chatId)).length == 5);
+    changes = messageChanges(await carol.rows(chatId));
+    expect(changes.isDeleted(hi), isTrue);
+
+    // Only the two texts notify; the edits and the delete were sent silent.
+    expect(backend.silentIds, hasLength(3));
+    // Changes aren't unread, and the list shows the latest real message.
+    final list = await carol.d.db.watchChatList(carol.d.userId).first;
+    expect(list.single.unread, 2);
+    expect(list.single.last?.id, reply);
+  });
+
+  test('reactions are sent silent', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final id = await alice.sync.sendText(chatId, 'x');
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    await bob.sync.react(chatId, id, '👍');
+    await until(() async => (await alice.rows(chatId)).length == 2);
+    expect(backend.silentIds, hasLength(1));
+  });
+
+  test("muting is per user and reaches the user's other devices", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final alice2 = await start(await backend.addDevice(alice.d.userId));
+    await until(() async => await alice2.d.db.chatById(chatId) != null);
+    await alice.sync.mute(chatId, 4102444800000);
+    expect((await alice.d.db.chatById(chatId))!.mutedUntil, 4102444800000);
+    await until(() async => (await alice2.d.db.chatById(chatId))!.mutedUntil == 4102444800000, reason: 'other device');
+    await bob.sync.syncAll();
+    expect((await bob.d.db.chatById(chatId))!.mutedUntil, isNull);
+    await alice.sync.mute(chatId, null);
+    expect((await alice.d.db.chatById(chatId))!.mutedUntil, isNull);
   });
 
   test("read receipt reaches the sender and clears the reader's unread on other devices", () async {

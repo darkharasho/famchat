@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/screens/chats/conversation_view.dart';
@@ -64,6 +65,30 @@ void main() {
     expect(tester.getTopLeft(find.text('Bob')).dy, greaterThan(tester.getTopLeft(find.text('Cousins')).dy));
     expect(find.text('you there?'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
+  });
+
+  chatTestWidgets('a muted chat shows a muted bell; the preview shows edits and deletes', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await seed(tester);
+    await tester.runAsync(() async {
+      await alice.db.setMutedUntil('group1', DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+      await alice.db.insertMessageIfAbsent(text('m3', 'group1', 1, carol.userId, 'pizza?'));
+      await alice.db.insertMessageIfAbsent(text('m4', 'group1', 2, carol.userId, 'x').copyWith(
+            kind: 'edit',
+            body: const Value('{"kind":"edit","target":"m3","text":"tacos?"}'),
+            targetId: const Value('m3'),
+          ));
+      await alice.db.insertMessageIfAbsent(text('m5', 'direct1', 3, bob.userId, 'x').copyWith(
+            kind: 'delete',
+            body: const Value('{"kind":"delete","target":"m2"}'),
+            targetId: const Value('m2'),
+          ));
+    });
+    await pumpChatApp(tester, alice);
+    expect(find.byIcon(Icons.notifications_off_outlined), findsOneWidget);
+    expect(find.text('tacos?'), findsOneWidget);
+    expect(find.text('Deleted a message'), findsOneWidget);
+    expect(find.text('1'), findsWidgets, reason: 'edits and deletes are not unread');
   });
 
   chatTestWidgets('tapping a chat opens it full screen on a phone', (tester) async {
