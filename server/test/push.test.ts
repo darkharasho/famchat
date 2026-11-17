@@ -1,7 +1,7 @@
 import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PushJob } from "../src/hub";
-import { deliverJob, handlePushBatch, sendAll } from "../src/push/consumer";
+import { deliverJob, handlePushBatch, notificationFor, sendAll } from "../src/push/consumer";
 import { invalidateAccessToken, parseServiceAccount } from "../src/push/fcm";
 import { addDevice, createDirect, createGroup, insertMessage } from "./chat-helpers";
 import { BASE, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
@@ -209,6 +209,16 @@ describe("push queue consumer", () => {
     const ctx = createExecutionContext();
     await handlePushBatch(batch, e, (async () => new Response("down", { status: 500 })) as typeof fetch);
     expect((await getQueueResult(batch, ctx)).retryMessages.map((m) => m.msgId)).toEqual(["m1"]);
+  });
+});
+
+describe("mention pushes", () => {
+  it("say who mentioned you", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad], "Parents", [dadLaptop]);
+    const id = await insertMessage(chat.id, mom);
+    const note = await notificationFor(env.DB, { chatId: chat.id, senderUserId: mom.userId, messageId: id, userIds: [dad.userId], mention: true });
+    expect(note).toEqual({ title: "Parents", body: "Mom mentioned you", chatId: chat.id });
   });
 });
 

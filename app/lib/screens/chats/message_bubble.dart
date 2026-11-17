@@ -78,6 +78,7 @@ class MessageBubble extends StatefulWidget {
     this.avatar,
     this.avatarSpace = 0,
     this.shownText,
+    this.mentionNames = const [],
     this.edited = false,
     this.deleted = false,
     this.quote,
@@ -116,6 +117,9 @@ class MessageBubble extends StatefulWidget {
 
   /// The text to show (its latest edit) instead of the stored one.
   final String? shownText;
+
+  /// Names of the people this text @mentions (bold in it).
+  final List<String> mentionNames;
 
   /// Shows "edited" by the time; [deleted] shows the message as deleted.
   final bool edited, deleted;
@@ -370,7 +374,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: Space.sm,
         children: [
-          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg),
+          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames),
           if (showMeta) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
         ],
       );

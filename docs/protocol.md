@@ -77,6 +77,10 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
 A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"<messageId>"}`
 (clients that don't know `replyTo` just show the text).
 
+In a group, a text may @mention members: `{"kind":"text","text":"@Mom can you?","mentions":["<userId>"]}`.
+The text holds `@<name>`; `mentions` lists who that is. The `send` frame repeats the list (the server
+can't read the text) so mentioned members are pushed even when they muted the chat.
+
 Edits and deletes are messages too, and count only when their sender is the target's sender:
 
 ```
@@ -129,10 +133,10 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   `stale` (token cleared), `retry`, `auth` or `error`. `configured: false` means the Worker has no
   `FCM_SERVICE_ACCOUNT` secret, so push is off.
 - A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
-  name, body "New message". Group: title = group title, body "New message from <sender>". Never message
-  content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
-- Who gets one: every device of the other members (except those who muted the chat, and none at all for
-  a `silent` send) that has a token and **no open socket** when the
+  name, body "New message". Group: title = group title, body "New message from <sender>" ("<sender>
+  mentioned you" for those @mentioned). Never message content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
+- Who gets one: every device of the other members (except those who muted the chat and weren't
+  @mentioned, and none at all for a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
   answered no ping for 90 s are closed first (code 4002).
   Mobile apps close their socket when sent to the background.
@@ -410,7 +414,7 @@ Frames are JSON text. One socket per device carries every chat.
 ### Client → hub
 | frame | effect |
 |---|---|
-| `{type:"send", id, chatId, envelope, silent?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames |
+| `{type:"send", id, chatId, envelope, silent?, mentions?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute |
 | `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
@@ -422,7 +426,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
-| `{type:"msg", message: Message, silent?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify |
+| `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
 | `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |

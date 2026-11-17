@@ -6,6 +6,9 @@ import '../crypto/encoding.dart';
 
 const maxTextLength = 4000;
 
+/// At most this many @mentions in one text (the server's limit too).
+const maxMentions = 50;
+
 final _ulid = RegExp(r'^[0-9A-HJKMNP-TV-Z]{26}$');
 
 /// The trimmed text if it can be sent (1–4000 characters), else null.
@@ -40,10 +43,13 @@ sealed class Plaintext {
     if (kind is! String) throw const FormatException('missing kind');
     switch (kind) {
       case 'text':
-        final text = j['text'], replyTo = j['replyTo'];
+        final text = j['text'], replyTo = j['replyTo'], mentions = j['mentions'];
         if (text is! String || text.isEmpty) throw const FormatException('bad text');
         if (replyTo != null && (replyTo is! String || replyTo.isEmpty)) throw const FormatException('bad replyTo');
-        return TextBody(text, replyTo: replyTo as String?);
+        if (mentions != null && (mentions is! List || mentions.length > maxMentions || mentions.any((m) => m is! String))) {
+          throw const FormatException('bad mentions');
+        }
+        return TextBody(text, replyTo: replyTo as String?, mentions: [...?(mentions as List?)?.cast<String>()]);
       case 'edit':
         final target = j['target'], text = j['text'];
         if (target is! String || target.isEmpty || text is! String || text.isEmpty) {
@@ -73,15 +79,23 @@ sealed class Plaintext {
 }
 
 class TextBody extends Plaintext {
-  const TextBody(this.text, {this.replyTo});
+  const TextBody(this.text, {this.replyTo, this.mentions = const []});
   final String text;
 
   /// The message this one replies to, if any.
   final String? replyTo;
+
+  /// Users @mentioned in [text] (docs/protocol.md "Messages").
+  final List<String> mentions;
   @override
   String get kind => 'text';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'text': text, if (replyTo != null) 'replyTo': replyTo};
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'text': text,
+        if (replyTo != null) 'replyTo': replyTo,
+        if (mentions.isNotEmpty) 'mentions': mentions,
+      };
 }
 
 /// New text for the sender's own text message [target]; the latest edit wins.

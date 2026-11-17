@@ -374,6 +374,60 @@ describe("send", () => {
     expect(jobs.map((j) => j.userIds)).toEqual([[c.userId]]);
   });
 
+  it("a mention reaches the mentioned member even when they muted the chat, as its own job", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const d = await insertUserWithDevice();
+    const outsider = await insertUserWithDevice();
+    for (const u of [b, c, d]) await setPushToken(u.deviceId, u.userId);
+    const chat = await createGroup(a, [b, c, d]);
+    for (const u of [b, d]) {
+      expect((await api(u.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: Date.now() + 3_600_000 })).status).toBe(204);
+    }
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const id = newId();
+    // Mentioning yourself, a non-member or junk changes nothing.
+    ca.send({
+      type: "send", id, chatId: chat.id, envelope: envelope(),
+      mentions: [b.userId, a.userId, outsider.userId, "x", b.userId],
+    });
+    await ca.next("ack");
+    for (let i = 0; i < 50 && jobs.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs.length).toBe(2);
+    const byKind = Object.fromEntries(jobs.map((j) => [j.mention ? "mention" : "plain", j.userIds]));
+    expect(byKind).toEqual({ mention: [b.userId], plain: [c.userId] });
+  });
+
+  it("msg frames carry the mentions of members, for notifications before decryption", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const chat = await createGroup(a, [b, c]);
+    const ca = await connect(a);
+    const cb = await connect(b);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope(), mentions: [b.userId, newId()] });
+    expect((await cb.next("msg")).mentions).toEqual([b.userId]);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
+    expect((await cb.next("msg")).mentions).toBeUndefined();
+  });
+
+  it("a mention list that isn't a short list of ids is refused", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createGroup(a, [b]);
+    const ca = await connect(a);
+    for (const mentions of ["x", [1], Array.from({ length: 51 }, () => newId())]) {
+      const id = newId();
+      ca.send({ type: "send", id, chatId: chat.id, envelope: envelope(), mentions });
+      expect((await ca.next("error")).error).toBe("invalid_request");
+    }
+  });
+
   it("muting tells the user's own sockets the chat changed", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();

@@ -3,6 +3,8 @@ import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../chat/mentions.dart';
+
 /// A run of text, and the link it opens if it is one.
 typedef TextPart = ({String text, Uri? uri});
 
@@ -41,12 +43,15 @@ List<TextPart> splitLinks(String text) {
 
 Future<void> openLink(Uri uri) => launchUrl(uri, mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
 
-/// [text] in [style], with its links underlined and tappable.
+/// [text] in [style], with its links underlined and tappable, and `@name` of [mentions] in bold.
 class LinkText extends StatefulWidget {
-  const LinkText(this.text, {super.key, this.style, this.linkColor, this.onOpen = openLink});
+  const LinkText(this.text, {super.key, this.style, this.linkColor, this.onOpen = openLink, this.mentions = const []});
 
   final String text;
   final TextStyle? style;
+
+  /// Names whose `@name` stands out.
+  final List<String> mentions;
 
   /// Defaults to the style's color.
   final Color? linkColor;
@@ -59,7 +64,7 @@ class LinkText extends StatefulWidget {
 class _LinkTextState extends State<LinkText> {
   /// Made when the text changes, not on every build: a rebuild while a link is pressed (a new
   /// message, a hover) must not dispose the recognizer handling the tap.
-  List<TextPart> _parts = const [];
+  List<({String text, Uri? uri, bool mention})> _parts = const [];
   final _recognizers = <TapGestureRecognizer>[];
 
   @override
@@ -71,15 +76,36 @@ class _LinkTextState extends State<LinkText> {
   @override
   void didUpdateWidget(LinkText old) {
     super.didUpdateWidget(old);
-    if (old.text != widget.text) _split();
+    if (old.text != widget.text || !_sameNames(old.mentions, widget.mentions)) _split();
   }
+
+  static bool _sameNames(List<String> a, List<String> b) =>
+      a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((x) => x);
 
   void _split() {
     _clear();
-    _parts = splitLinks(widget.text);
+    _parts = [
+      for (final p in splitLinks(widget.text))
+        if (p.uri != null || widget.mentions.isEmpty)
+          (text: p.text, uri: p.uri, mention: false)
+        else
+          ..._splitMentions(p.text),
+    ];
     for (final p in _parts) {
       if (p.uri != null) _recognizers.add(TapGestureRecognizer()..onTap = () => widget.onOpen(p.uri!));
     }
+  }
+
+  List<({String text, Uri? uri, bool mention})> _splitMentions(String text) {
+    final out = <({String text, Uri? uri, bool mention})>[];
+    var at = 0;
+    for (final (s, e) in mentionRanges(text, widget.mentions)) {
+      if (s > at) out.add((text: text.substring(at, s), uri: null, mention: false));
+      out.add((text: text.substring(s, e), uri: null, mention: true));
+      at = e;
+    }
+    if (at < text.length) out.add((text: text.substring(at), uri: null, mention: false));
+    return out;
   }
 
   @override
@@ -97,7 +123,7 @@ class _LinkTextState extends State<LinkText> {
 
   @override
   Widget build(BuildContext context) {
-    if (_recognizers.isEmpty) return Text(widget.text, style: widget.style);
+    if (_recognizers.isEmpty && !_parts.any((p) => p.mention)) return Text(widget.text, style: widget.style);
     final link = (widget.style ?? const TextStyle()).copyWith(
       color: widget.linkColor,
       decoration: TextDecoration.underline,
@@ -107,7 +133,9 @@ class _LinkTextState extends State<LinkText> {
     return Text.rich(
       TextSpan(children: [
         for (final p in _parts)
-          if (p.uri == null)
+          if (p.mention)
+            TextSpan(text: p.text, style: const TextStyle(fontWeight: FontWeight.w700))
+          else if (p.uri == null)
             TextSpan(text: p.text)
           else
             TextSpan(text: p.text, style: link, mouseCursor: SystemMouseCursors.click, recognizer: _recognizers[i++]),

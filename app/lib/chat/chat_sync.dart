@@ -538,9 +538,21 @@ class ChatSync {
       'envelope': env.toJson(),
       // Changes to other messages notify no one (docs/protocol.md "send").
       if (changeKinds.contains(row.kind)) 'silent': true,
+      // The server can't read the text: it needs these to push the people mentioned.
+      if (_mentionsOf(row) case final m when m.isNotEmpty) 'mentions': m,
     })) {
       _inflight.add(row.id);
       _handedToHub.add(row.id);
+    }
+  }
+
+  static List<String> _mentionsOf(MessageRow row) {
+    if (row.kind != 'text' || row.body == null) return const [];
+    try {
+      final p = Plaintext.decode(utf8.encode(row.body!));
+      return p is TextBody ? p.mentions : const [];
+    } on FormatException {
+      return const [];
     }
   }
 
@@ -578,10 +590,11 @@ class ChatSync {
 
   /// Queues a text message (optionally a reply to [replyTo]) and returns its id. Throws
   /// [ArgumentError] for empty or too-long text.
-  Future<String> sendText(String chatId, String text, {String? replyTo}) {
+  /// [mentions]: users @mentioned in it (see `lib/chat/mentions.dart`).
+  Future<String> sendText(String chatId, String text, {String? replyTo, List<String> mentions = const []}) {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
-    return _enqueueMessage(chatId, TextBody(t, replyTo: replyTo));
+    return _enqueueMessage(chatId, TextBody(t, replyTo: replyTo, mentions: mentions.take(maxMentions).toList()));
   }
 
   /// Replaces the text of this user's text message [messageId]. Throws [ArgumentError] for empty or

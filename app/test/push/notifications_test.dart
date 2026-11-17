@@ -270,6 +270,19 @@ void main() {
       await n.stop();
       await events.close();
     });
+    test('a mention of me notifies through a mute and says so', () async {
+      final events = StreamController<Map<String, Object?>>.broadcast();
+      final notifier = FakeNotifier();
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+        ..start();
+      await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+      events.add({...msg(chatB, 'dad'), 'mentions': ['someone-else']});
+      events.add({...msg(chatB, 'dad'), 'mentions': ['me']});
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad mentioned you')]);
+      await n.stop();
+      await events.close();
+    });
   });
 
   test('pushTestSummary', () {

@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/mentions.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
@@ -29,6 +30,7 @@ import '../../widgets/typing_dots.dart';
 import 'chat_list.dart' show messageSnippet;
 import 'chats_shell.dart' show shortcutModifier;
 import 'emoji_input.dart';
+import 'mention_suggestions.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -75,6 +77,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Where a query closed with Esc started: it stays closed until the user moves on.
   int? _dismissedAt;
+
+  /// The `@name` being typed in a group, and the members it matches.
+  MentionQuery? _mentionQuery;
+  List<Person> _peopleMatches = const [];
+
+  /// Which query the suggestions are for (the highlight resets when it changes).
+  String? _suggestKey;
+
+  /// Who can be @mentioned here (other members of a group: id → name); set in build.
+  Map<String, String> _people = const {};
 
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
@@ -157,36 +169,57 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 
   void _updateSuggestions() {
-    final q = shortcodeQueryAt(_text.value);
-    if (q?.start != _dismissedAt) _dismissedAt = null;
-    final matches = q == null || q.start == _dismissedAt ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
-    final same = q?.query == _query?.query && q?.start == _query?.start;
+    final mq = _people.isEmpty ? null : mentionQueryAt(_text.value);
+    final q = mq == null ? shortcodeQueryAt(_text.value) : null;
+    final start = mq?.start ?? q?.start;
+    if (start != _dismissedAt) _dismissedAt = null;
+    final dismissed = start != null && start == _dismissedAt;
+    final people = mq == null || dismissed ? const <Person>[] : matchingPeople(mq.query, _people).take(6).toList();
+    final matches = q == null || dismissed ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
+    final key = mq != null ? '@${mq.start}:${mq.query}' : (q != null ? ':${q.start}:${q.query}' : null);
+    final same = key == _suggestKey;
     if (!mounted) return;
-    if (same && _matches.length == matches.length) {
+    if (same && _matches.length == matches.length && _peopleMatches.length == people.length) {
       _query = q;
+      _mentionQuery = mq;
       return;
     }
     setState(() {
       _query = q;
+      _mentionQuery = mq;
       _matches = matches;
+      _peopleMatches = people;
+      _suggestKey = key;
       if (!same) _selected = 0;
     });
   }
 
-  bool get _suggesting => _matches.isNotEmpty && _query != null;
+  bool get _mentioning => _peopleMatches.isNotEmpty && _mentionQuery != null;
+
+  bool get _suggesting => (_matches.isNotEmpty && _query != null) || _mentioning;
 
   void _pickSuggestion([ShortcodeMatch? m]) {
+    if (_mentioning) return _pickPerson(_peopleMatches[_selected]);
     final query = _query;
     if (query == null || _matches.isEmpty) return;
     _text.value = replaceShortcodeQuery(_text.value, query, (m ?? _matches[_selected]).emoji);
     if (!_pickerOpen) _focus.requestFocus();
   }
 
-  void _moveSelection(int by) => setState(() => _selected = (_selected + by) % _matches.length);
+  void _pickPerson(Person p) {
+    final query = _mentionQuery;
+    if (query == null) return;
+    _text.value = insertMention(_text.value, query, p.name);
+    if (!_pickerOpen) _focus.requestFocus();
+  }
+
+  void _moveSelection(int by) =>
+      setState(() => _selected = (_selected + by) % (_mentioning ? _peopleMatches.length : _matches.length));
 
   void _dismissSuggestions() => setState(() {
-        _dismissedAt = _query?.start;
+        _dismissedAt = _mentionQuery?.start ?? _query?.start;
         _matches = const [];
+        _peopleMatches = const [];
       });
 
   void _insertEmoji(String emoji) => _text.value = insertEmoji(_text.value, emoji);
@@ -290,7 +323,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
       } else {
-        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id);
+        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
       }
       if (editing != null) {
         _endEdit();
@@ -608,6 +641,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final title = chatTitle(chat, members, users, me);
     final other = otherMember(chat, members, me);
     final group = chat.kind == 'group';
+    _people = group
+        ? {for (final m in members) if (m.userId != me && users[m.userId] != null) m.userId: users[m.userId]!.name}
+        : const {};
     final otherOnline = other != null && online.contains(other);
     final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
@@ -661,6 +697,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
+                mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
@@ -830,7 +867,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   alignment: Alignment.centerLeft,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 360),
-                    child: ShortcodeSuggestions(matches: _matches, selected: _selected, onPick: _pickSuggestion),
+                    child: _mentioning
+                        ? MentionSuggestions(people: _peopleMatches, selected: _selected, onPick: _pickPerson)
+                        : ShortcodeSuggestions(matches: _matches, selected: _selected, onPick: _pickSuggestion),
                   ),
                 ),
               ),

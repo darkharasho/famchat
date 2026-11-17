@@ -136,6 +136,9 @@ class FakeChatBackend {
 
   /// Ids of messages that were sent with `silent: true`.
   final silentIds = <String>{};
+
+  /// The `mentions` of each send that had them, by message id.
+  final sentMentions = <String, List<Object?>>{};
   final _wraps = <String, ChatKeyWrap>{};
   final _hubs = <String, FakeHubLink>{};
 
@@ -453,6 +456,7 @@ class FakeChatBackend {
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
         if (m['silent'] == true) silentIds.add(id);
+        if (m['mentions'] is List) sentMentions[id] = m['mentions'] as List<Object?>;
         if (h.dropNextAck) {
           h.dropNextAck = false;
           h.drop();

@@ -17,11 +17,16 @@ export interface PushJob {
   deviceIds?: string[];
   /** 0 for the first try. */
   attempt?: number;
+  /** These users were @mentioned: "<sender> mentioned you". */
+  mention?: boolean;
 }
 
 export interface PushHook {
   notify(job: PushJob): Promise<void>;
 }
+
+/** At most this many @mentions per message (a family is smaller). */
+export const MAX_MENTIONS = 50;
 
 export const noPush: PushHook = { notify: async () => {} };
 
@@ -225,7 +230,10 @@ export class FamilyHub extends DurableObject<Env> {
     const chatId = m.chatId;
     const env = m.envelope;
     this.prune(ws);
-    if (!isUlid(id) || typeof chatId !== "string" || !validEnvelope(env)) {
+    const mentions = m.mentions;
+    const badMentions = mentions !== undefined &&
+      !(Array.isArray(mentions) && mentions.length <= MAX_MENTIONS && mentions.every((u) => typeof u === "string"));
+    if (!isUlid(id) || typeof chatId !== "string" || !validEnvelope(env) || badMentions) {
       return send(ws, { type: "error", id: typeof id === "string" ? id : undefined, error: "invalid_request" });
     }
     const db = this.env.DB;
@@ -261,38 +269,52 @@ export class FamilyHub extends DurableObject<Env> {
     const seq = (inserted.results[0] as { seq: number }).seq;
     send(ws, { type: "ack", id, seq, createdAt: now });
 
+    const memberList = await this.memberIds(chatId);
+    // Only members other than the sender can be mentioned; silent changes mention no one.
+    const mentioned = silent ? [] : [...new Set((mentions as string[] | undefined) ?? [])]
+      .filter((u) => u !== att.userId && memberList.includes(u));
     const msg = JSON.stringify({
       type: "msg",
       ...(silent ? { silent: true } : {}),
+      ...(mentioned.length ? { mentions: mentioned } : {}),
       message: messageOut({
         chat_id: chatId, seq, id, sender_user_id: att.userId, sender_device_id: att.deviceId,
         envelope: JSON.stringify(env), created_at: now,
       }),
     });
     const others: string[] = [];
-    for (const u of await this.memberIds(chatId)) {
+    for (const u of memberList) {
       for (const s of this.sockets(u, ws)) trySend(s, msg);
       if (u !== att.userId) others.push(u);
     }
     if (silent) return;
+    // Mentioned members get their own job (other text, and it reaches them through a mute).
+    const job = { chatId, senderUserId: att.userId, messageId: id };
     // Not awaited: the next send shouldn't wait for the push lookup and the queue.
-    this.pushOffline({ chatId, senderUserId: att.userId, messageId: id }, others).catch((e) =>
-      console.error("push hook failed", e),
-    );
+    this.pushOffline(job, others.filter((u) => !mentioned.includes(u))).catch((e) => console.error("push hook failed", e));
+    if (mentioned.length > 0) {
+      this.pushOffline({ ...job, mention: true }, mentioned, { throughMute: true }).catch((e) =>
+        console.error("push hook failed", e),
+      );
+    }
   }
 
   /**
    * Pushes go per device: every device of [userIds] with a push token and no open socket. A phone is
    * pushed even while the same person's desktop app is connected (it may be at home, unwatched).
    */
-  private async pushOffline(msg: Omit<PushJob, "userIds">, userIds: string[]): Promise<void> {
+  private async pushOffline(
+    msg: Omit<PushJob, "userIds">,
+    userIds: string[],
+    { throughMute = false } = {},
+  ): Promise<void> {
     if (userIds.length === 0) return;
-    // Members who muted the chat until later get no push.
+    // Members who muted the chat until later get no push (unless they were mentioned).
     const { results } = await this.env.DB.prepare(
       `SELECT id, user_id FROM devices WHERE user_id IN (${userIds.map(() => "?").join(",")})
        AND revoked_at IS NULL AND push_token IS NOT NULL
-       AND user_id NOT IN (SELECT user_id FROM chat_members WHERE chat_id = ? AND muted_until > ?) ORDER BY id`,
-    ).bind(...userIds, msg.chatId, Date.now()).all<{ id: string; user_id: string }>();
+       AND (? OR user_id NOT IN (SELECT user_id FROM chat_members WHERE chat_id = ? AND muted_until > ?)) ORDER BY id`,
+    ).bind(...userIds, throughMute ? 1 : 0, msg.chatId, Date.now()).all<{ id: string; user_id: string }>();
     const targets = results.filter((d) =>
       this.ctx.getWebSockets(`d:${d.id}`).every((s) => s.readyState !== WebSocket.READY_STATE_OPEN),
     );
