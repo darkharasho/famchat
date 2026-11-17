@@ -130,4 +130,28 @@ void main() {
       expect(controller.calls, [true]);
     },
   );
+
+  testWidgets(
+    'on Android without notification permission, toggling stores the value but registers nothing',
+    (t) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final messaging = FakeMessaging()..grantOnRequest = false;
+      final registered = <(String, bool)>[];
+      final controller = PushController(
+        messaging: messaging,
+        register: (token, previews) async => registered.add((token, previews)),
+        previewsOn: () async => false,
+        openRoute: (_) {},
+        isChatVisible: (_) => false,
+        showInApp: (_, _) {},
+        enrich: (m) async => m,
+        askNow: false,
+      );
+      final previews = await pump(t, push: messaging, local: false, controller: controller);
+      await t.tap(find.byKey(switchKey));
+      await t.pump();
+      expect(previews.sets, [true]);
+      expect(registered, isEmpty);
+    },
+  );
 }

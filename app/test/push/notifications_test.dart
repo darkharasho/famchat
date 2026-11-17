@@ -217,6 +217,14 @@ void main() {
       expect(h.registered, isEmpty);
     });
 
+    test('setPreviews without notification permission registers nothing and asks nothing', () async {
+      final h = Harness(askNow: false)..messaging.grantOnRequest = false;
+      await h.controller.start();
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
+      expect(h.messaging.requests, 0);
+    });
+
     test('setPreviews offline does not throw', () async {
       final h = Harness()..failRegister = true;
       await h.controller.setPreviews(true);

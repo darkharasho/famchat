@@ -97,11 +97,13 @@ class PushController {
     }
   }
 
-  /// Tells the server the new setting by re-sending the current token. With no token (push not
-  /// set up on this device) the stored value is all there is.
+  /// Tells the server the new setting by re-sending the current token. Without notification
+  /// permission (never asked here) or a token, nothing is registered and the stored value is all
+  /// there is; [enable] sends it once push is allowed.
   Future<void> setPreviews(bool on) async {
     if (_stopped) return;
     try {
+      if (!await messaging.permissionGranted()) return;
       final token = await messaging.getToken();
       if (token != null) await _register(token, on);
     } catch (_) {
