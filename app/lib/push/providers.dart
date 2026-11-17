@@ -11,6 +11,7 @@ import 'package:material_ui/material_ui.dart';
 import '../chat/providers.dart';
 import '../router.dart';
 import '../session/session_controller.dart';
+import 'android_previews.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
 import 'preview_setting.dart';
@@ -39,8 +40,15 @@ final pushControllerProvider = Provider<PushController?>((ref) {
     openRoute: router.go,
     isChatVisible: (id) => appInFront() && _path(router) == '/chats/$id',
     showInApp: (m, route) => showPushSnackBar(ref.read(rootMessengerKeyProvider).currentState, m, route, router.go),
+    enrich: (m) async {
+      if (!m.isPreview) return m;
+      final text = await previewNotificationText(m, previewsOn: readPreviewsOn, openDb: () async => ref.read(chatDbProvider));
+      return m.withBody(text.body);
+    },
     askNow: !kIsWeb,
   );
+  // Android draws preview notifications itself, so FCM's tap streams miss their taps.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) unawaited(routeAndroidNotificationTaps(router.go));
   unawaited(c.start());
   ref.onDispose(() => unawaited(c.stop()));
   return c;

@@ -696,5 +696,7 @@ ChatDb openChatDb() => ChatDb(
           sqlite3Wasm: Uri.parse('sqlite3.wasm'),
           driftWorker: Uri.parse('drift_worker.js'),
         ),
+        // Android's push handler runs in a background isolate; both share one connection.
+        native: const DriftNativeOptions(shareAcrossIsolates: true),
       ),
     );

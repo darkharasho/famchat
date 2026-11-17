@@ -64,9 +64,12 @@ class Harness {
       openRoute: routes.add,
       isChatVisible: (id) => id == visible,
       showInApp: (m, route) => shown.add((m, route)),
+      enrich: (m) async => enrich(m),
       askNow: askNow,
     );
   }
+
+  PushMessage Function(PushMessage) enrich = (m) => m;
 
   final messaging = FakeMessaging();
   final registered = <String>[];
@@ -250,6 +253,48 @@ void main() {
       h.messaging.foreground.add(const PushMessage(title: 'FamChat', body: 'Test notification'));
       await settle();
       expect(h.shown.map((s) => (s.$1.title, s.$2)), [('Parents', '/chats/$chatB'), ('FamChat', null)]);
+    });
+
+    test('PushMessage.fromData reads title and body from data', () {
+      final m = PushMessage.fromData({
+        'chatId': chatA,
+        'messageId': 'M1',
+        'senderUserId': 'mom',
+        'senderDeviceId': 'd-mom',
+        'epoch': '1',
+        'env': '{"v":1}',
+        'title': 'Mom',
+        'body': 'New message',
+        'preview': '1',
+      });
+      expect((m.chatId, m.title, m.body, m.messageId, m.senderUserId, m.senderDeviceId, m.isPreview),
+          (chatA, 'Mom', 'New message', 'M1', 'mom', 'd-mom', true));
+      expect(m.envelope, {'v': 1});
+      // The notification block wins when there is one; junk env is no envelope.
+      final n = PushMessage.fromData({'title': 'x', 'body': 'y', 'env': 'not json'}, title: 'Mom', body: 'New message');
+      expect((n.title, n.body, n.envelope, n.isPreview), ('Mom', 'New message', null, false));
+    });
+
+    test('foreground preview is enriched before showInApp', () async {
+      final h = Harness()..enrich = (m) => PushMessage(chatId: m.chatId, title: m.title, body: 'see you at 6');
+      await h.controller.start();
+      h.messaging.foreground.add(const PushMessage(chatId: chatB, title: 'Mom', body: 'New message'));
+      await settle();
+      expect(h.shown.map((s) => (s.$1.title, s.$1.body, s.$2)), [('Mom', 'see you at 6', '/chats/$chatB')]);
+    });
+
+    test('foreground preview for the visible chat is still suppressed', () async {
+      var enriched = 0;
+      final h = Harness(visible: chatA)
+        ..enrich = (m) {
+          enriched++;
+          return PushMessage(chatId: m.chatId, title: m.title, body: 'see you at 6');
+        };
+      await h.controller.start();
+      h.messaging.foreground.add(const PushMessage(chatId: chatA, title: 'Mom', body: 'New message'));
+      await settle();
+      expect(enriched, 1);
+      expect(h.shown, isEmpty);
     });
   });
 

@@ -31,6 +31,7 @@ class FakePushController extends PushController {
         openRoute: (_) {},
         isChatVisible: (_) => false,
         showInApp: (_, _) {},
+        enrich: (m) async => m,
         askNow: false,
       );
   final calls = <bool>[];

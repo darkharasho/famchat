@@ -30,6 +30,7 @@ class PushController {
     required this.openRoute,
     required this.isChatVisible,
     required this.showInApp,
+    required this.enrich,
     required this.askNow,
   });
 
@@ -48,6 +49,9 @@ class PushController {
   /// Shows a foreground push inside the app; [route] is where "Open" goes (null: nowhere).
   final void Function(PushMessage message, String? route) showInApp;
 
+  /// A foreground push as it should show: a preview push gets its decrypted text. Never throws.
+  final Future<PushMessage> Function(PushMessage message) enrich;
+
   /// Ask for permission at start (phones). The web asks from a button instead ([enable]); there
   /// a permission granted earlier is still used at start.
   final bool askNow;
@@ -57,7 +61,7 @@ class PushController {
 
   Future<void> start() async {
     _subs.add(messaging.onMessageOpenedApp.listen(_open));
-    _subs.add(messaging.onMessage.listen(_foreground));
+    _subs.add(messaging.onMessage.listen((m) => unawaited(_foreground(m))));
     _subs.add(messaging.onTokenRefresh.listen(_register));
     try {
       final initial = await messaging.getInitialMessage();
@@ -110,10 +114,17 @@ class PushController {
     if (route != null) openRoute(route);
   }
 
-  void _foreground(PushMessage m) {
-    final chatId = m.chatId;
+  Future<void> _foreground(PushMessage m) async {
+    var shown = m;
+    try {
+      shown = await enrich(m);
+    } catch (_) {
+      // The generic text, then.
+    }
+    if (_stopped) return;
+    final chatId = shown.chatId;
     if (chatId != null && isChatVisible(chatId)) return;
-    showInApp(m, chatRoute(chatId));
+    showInApp(shown, chatRoute(chatId));
   }
 
   Future<void> stop() async {
