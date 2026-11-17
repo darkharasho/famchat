@@ -286,26 +286,38 @@ class ChatSync {
     }
     if (key == null) return waiting;
     final Plaintext p;
+    final List<int> raw;
     try {
-      p = Plaintext.decode(await decryptEnvelope(
+      raw = await decryptEnvelope(
         envelope: env,
         chatKey: key,
         chatId: m.chatId,
         messageId: m.id,
         senderDeviceId: m.senderDeviceId,
         senderSignPub: device.signPub,
-      ));
+      );
+      p = Plaintext.decode(raw);
     } on CryptoFailure {
       return base;
     } on FormatException {
       return base;
     }
-    return _classify(base, p);
+    return _classify(base, p, forwarded: _forwardedFlag(raw));
+  }
+
+  /// Whether a decoded plaintext says `"forwarded": true` (kept beside any kind).
+  static bool _forwardedFlag(List<int> raw) {
+    try {
+      final j = jsonDecode(utf8.decode(raw));
+      return j is Map && j['forwarded'] == true;
+    } on FormatException {
+      return false;
+    }
   }
 
   /// [base] stored as plaintext [p]'s kind.
-  static MessageRow _classify(MessageRow base, Plaintext p) {
-    final body = jsonEncode(p.toJson());
+  static MessageRow _classify(MessageRow base, Plaintext p, {bool forwarded = false}) {
+    final body = jsonEncode({...p.toJson(), if (forwarded && p is! UnknownBody) 'forwarded': true});
     return switch (p) {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
@@ -331,7 +343,7 @@ class ChatSync {
         await db.replaceMessage(r.copyWith(kind: 'invalid', body: const Value(null), targetId: const Value(null)));
         continue;
       }
-      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p));
+      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p, forwarded: _forwardedFlag(utf8.encode(body))));
     }
   }
 
@@ -567,9 +579,11 @@ class ChatSync {
   void flushSoon() => unawaited(_enqueue(_flushOutbox));
 
   /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
-  Future<String> enqueueMessage(String chatId, Plaintext p, {String? id}) => _enqueueMessage(chatId, p, id: id);
+  /// [forwarded] marks a copy of another message (`"forwarded": true`).
+  Future<String> enqueueMessage(String chatId, Plaintext p, {String? id, bool forwarded = false}) =>
+      _enqueueMessage(chatId, p, id: id, forwarded: forwarded);
 
-  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId, String? id}) async {
+  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId, String? id, bool forwarded = false}) async {
     id ??= newUlid(_now());
     await db.insertMessageIfAbsent(MessageRow(
       id: id,
@@ -578,7 +592,7 @@ class ChatSync {
       senderUserId: me.userId,
       senderDeviceId: me.deviceId,
       kind: p.kind,
-      body: jsonEncode(p.toJson()),
+      body: jsonEncode({...p.toJson(), if (forwarded) 'forwarded': true}),
       targetId: targetId,
       envelope: null,
       createdAt: _now().millisecondsSinceEpoch,

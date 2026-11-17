@@ -53,7 +53,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, copy, edit, delete }
+enum MessageAction { reply, forward, copy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -84,6 +84,8 @@ class MessageBubble extends StatefulWidget {
     this.quote,
     this.onOpenQuote,
     this.onReply,
+    this.onForward,
+    this.forwarded = false,
     this.onEdit,
     this.onDelete,
     this.highlighted = false,
@@ -129,7 +131,10 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onOpenQuote;
 
   /// Null hides the action.
-  final VoidCallback? onReply, onEdit, onDelete;
+  final VoidCallback? onReply, onForward, onEdit, onDelete;
+
+  /// A copy forwarded from another message: labelled so.
+  final bool forwarded;
 
   /// Briefly tinted after jumping to it.
   final bool highlighted;
@@ -153,14 +158,21 @@ class _MessageBubbleState extends State<MessageBubble> {
   String? get _copyText => !widget.deleted && widget.message.kind == 'text' ? _text : null;
 
   bool get _hasActions =>
-      _reactable || widget.onReply != null || widget.onEdit != null || widget.onDelete != null || _copyText != null;
+      _reactable ||
+      widget.onReply != null ||
+      widget.onForward != null ||
+      widget.onEdit != null ||
+      widget.onDelete != null ||
+      _copyText != null;
 
   /// Touch: a sheet with the reactions and the actions.
   Future<void> _openActions() async {
     final picked = await showModalBottomSheet<Object>(
       context: context,
+      // As tall as its rows (up to most of the screen): the default cap of 9/16 clips them on phones.
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: Space.md),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (_reactable)
@@ -178,6 +190,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   List<MessageAction> get _actions => [
         if (widget.onReply != null) MessageAction.reply,
+        if (widget.onForward != null) MessageAction.forward,
         if (_copyText != null) MessageAction.copy,
         if (widget.onEdit != null) MessageAction.edit,
         if (widget.onDelete != null) MessageAction.delete,
@@ -185,6 +198,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   static (IconData, String) _look(MessageAction a) => switch (a) {
         MessageAction.reply => (Icons.reply_rounded, 'Reply'),
+        MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
         MessageAction.edit => (Icons.edit_outlined, 'Edit'),
         MessageAction.delete => (Icons.delete_outline_rounded, 'Delete'),
@@ -232,6 +246,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onReact(e == _myEmoji ? '' : e);
       case MessageAction.reply:
         widget.onReply?.call();
+      case MessageAction.forward:
+        widget.onForward?.call();
       case MessageAction.copy:
         final text = _copyText;
         if (text == null) return;
@@ -402,6 +418,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                 widget.senderName!,
                 style: theme.textTheme.labelMedium?.copyWith(color: fg, fontWeight: FontWeight.w700),
               ),
+            ),
+          if (widget.forwarded && !widget.deleted)
+            Padding(
+              padding: photo != null || gif != null ? const EdgeInsets.fromLTRB(10, 2, 10, 6) : const EdgeInsets.only(bottom: 2),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.shortcut_rounded, size: 14, color: meta),
+                const SizedBox(width: 4),
+                Text('Forwarded', style: theme.textTheme.labelSmall?.copyWith(color: meta, fontStyle: FontStyle.italic)),
+              ]),
             ),
           if (quote != null && !widget.deleted)
             Padding(

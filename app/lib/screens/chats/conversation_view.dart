@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/forward.dart';
 import '../../chat/mentions.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
@@ -30,6 +31,7 @@ import '../../widgets/typing_dots.dart';
 import 'chat_list.dart' show messageSnippet;
 import 'chats_shell.dart' show shortcutModifier;
 import 'emoji_input.dart';
+import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
@@ -400,6 +402,27 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     await ref.read(chatSyncProvider)?.deleteMessage(widget.chatId, m.id);
   }
 
+  Future<void> _forward(MessageRow m) async {
+    final to = await showForwardPicker(context, fromChatId: widget.chatId);
+    if (to == null || !mounted) return;
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    try {
+      await forwardMessage(
+        message: m,
+        changes: _changes,
+        toChatId: to.id,
+        sync: sync,
+        media: ref.read(mediaServiceProvider),
+      );
+      _snack('Forwarded to ${to.title}');
+    } on ForwardException catch (e) {
+      _snack(e.reason == 'media expired' ? "That's no longer available to forward." : "That message can't be forwarded.");
+    } catch (_) {
+      _snack("Couldn't forward that message.");
+    }
+  }
+
   /// Scrolls until [id]'s bubble is built, centers it and tints it for a moment.
   Future<void> _jumpTo(String id) async {
     for (var i = 0; i < 60; i++) {
@@ -701,6 +724,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
+                onForward: forwardableKinds.contains(m.kind) && m.body != null && !changes.isDeleted(m.id) ? () => _forward(m) : null,
+                forwarded: isForwarded(m),
                 onEdit: m.senderUserId == me && m.kind == 'text' && !changes.isDeleted(m.id) ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
                 mine: m.senderUserId == me,

@@ -187,6 +187,60 @@ class MediaService {
     );
   }
 
+  /// Copies a photo or voice message into [chatId] (forwarding): its blobs are loaded, then encrypted
+  /// under a new key and uploaded again, since media access follows the chat it was sent to. Returns
+  /// the new message id, or null when the media expired. Throws [ArgumentError] for other kinds.
+  Future<String?> forwardMedia(String chatId, Plaintext body) async {
+    final key = newMediaKey();
+    final messageId = newUlid();
+    switch (body) {
+      case PhotoBody():
+        final full = await load(body.fullRef);
+        final thumb = await load(body.thumbRef);
+        if (full == null || thumb == null) return null;
+        final t = await stage(
+            chatId: chatId, messageId: messageId, kind: 'thumb', purpose: MediaPurpose.thumb, key: key, plaintext: thumb, position: 0);
+        final f = await stage(
+            chatId: chatId, messageId: messageId, kind: 'photo', purpose: MediaPurpose.file, key: key, plaintext: full, position: 1);
+        return sync.enqueueMessage(
+          chatId,
+          PhotoBody(
+            mediaKey: f.id,
+            thumbKey: t.id,
+            key: key,
+            sha256: f.sha256,
+            thumbSha256: t.sha256,
+            width: body.width,
+            height: body.height,
+            bytes: full.length,
+            mime: body.mime,
+          ),
+          id: messageId,
+          forwarded: true,
+        );
+      case VoiceBody():
+        final clip = await load(body.ref);
+        if (clip == null) return null;
+        final c = await stage(
+            chatId: chatId, messageId: messageId, kind: 'voice', purpose: MediaPurpose.file, key: key, plaintext: clip, position: 0);
+        return sync.enqueueMessage(
+          chatId,
+          VoiceBody(
+            mediaKey: c.id,
+            key: key,
+            sha256: c.sha256,
+            durationMs: body.durationMs,
+            waveform: body.waveform,
+            bytes: clip.length,
+          ),
+          id: messageId,
+          forwarded: true,
+        );
+      default:
+        throw ArgumentError.value(body.kind, 'body', 'not a media message');
+    }
+  }
+
   /// Encrypts [plaintext] under [key], caches the plaintext (so the sender sees it at once) and keeps
   /// the blob for upload before message [messageId] is sent. For new kinds (voice): stage each blob,
   /// then `sync.enqueueMessage(chatId, body, id: messageId)` (and add the kind to

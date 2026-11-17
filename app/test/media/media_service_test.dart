@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/forward.dart';
+import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/media.dart';
@@ -114,6 +116,83 @@ void main() {
     // The sender shows it from its own cache without downloading.
     expect(await alice.media.load(p.fullRef), original);
     expect(alice.d.media.downloads, isEmpty);
+  });
+
+  group('forwarding', () {
+    Future<(Node, Node, Node, String, String)> trio() async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final carol = await start(await backend.addUser('Carol'));
+      final ab = await alice.sync.openDirect(bob.d.userId);
+      final ac = await alice.sync.openDirect(carol.d.userId);
+      for (final n in [alice, bob, carol]) {
+        await n.sync.idle;
+      }
+      return (alice, bob, carol, ab, ac);
+    }
+
+    Future<String> forward(Node n, String fromChat, String id, String to) async {
+      final rows = await n.rows(fromChat);
+      return forwardMessage(
+        message: rows.firstWhere((r) => r.id == id),
+        changes: messageChanges(rows),
+        toChatId: to,
+        sync: n.sync,
+        media: n.media,
+      );
+    }
+
+    test('a received photo goes to another chat as a new upload, marked forwarded', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final original = photoBytes(500);
+      final id = await sentPhoto(bob, ab, original);
+      await until(() async => (await alice.photos(ab)).isNotEmpty, reason: 'alice gets it');
+      final fwd = await forward(alice, ab, id, ac);
+      await until(() async => (await carol.photos(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final p = (await carol.photos(ac)).single;
+      final first = (await alice.photos(ab)).single;
+      expect(p.mediaKey, isNot(first.mediaKey), reason: "media access follows the chat: Carol can't read Bob's upload");
+      expect(b64url(p.key), isNot(b64url(first.key)));
+      expect(await carol.media.load(p.fullRef), original);
+      expect(isForwarded((await carol.row(fwd))!), isTrue);
+      expect(isForwarded((await alice.row(id))!), isFalse);
+    });
+
+    test('a voice clip forwards with its length and waveform', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final clip = RecordedVoice(bytes: photoBytes(800, 3), duration: const Duration(seconds: 4), waveform: [1, 2, 3]);
+      final id = await bob.media.sendVoice(ab, clip);
+      await until(() async => (await alice.voices(ab)).isNotEmpty, reason: 'alice gets it');
+      await forward(alice, ab, id, ac);
+      await until(() async => (await carol.voices(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final v = (await carol.voices(ac)).single;
+      expect(v.durationMs, 4000);
+      expect(v.waveform, [1, 2, 3]);
+      expect(await carol.media.load(v.ref), clip.bytes);
+    });
+
+    test('a text forwards its latest edit, without its reply or mentions', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final id = await bob.sync.sendText(ab, 'typo', replyTo: 'x', mentions: [alice.d.userId]);
+      await bob.sync.editText(ab, id, 'fixed');
+      await until(() async => (await alice.rows(ab)).length == 2, reason: 'alice gets both');
+      final fwd = await forward(alice, ab, id, ac);
+      await until(() async => (await carol.rows(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final body = Plaintext.decode(utf8.encode((await carol.row(fwd))!.body!)) as TextBody;
+      expect((body.text, body.replyTo), ('fixed', null));
+      expect(body.mentions, isEmpty);
+    });
+
+    test('a photo whose media expired cannot be forwarded', () async {
+      final (alice, bob, _, ab, ac) = await trio();
+      final id = await sentPhoto(bob, ab, photoBytes(300));
+      await until(() async => (await alice.photos(ab)).isNotEmpty);
+      final p = (await alice.photos(ab)).single;
+      alice.d.hub.dropEventTypes.add('media_expired');
+      backend.expireMedia([p.mediaKey, p.thumbKey]);
+      await expectLater(forward(alice, ab, id, ac), throwsA(isA<ForwardException>()));
+      expect(await alice.rows(ac), isEmpty);
+    });
   });
 
   test('the message is sent only after both blobs uploaded', () async {
