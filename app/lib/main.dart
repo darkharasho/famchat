@@ -13,6 +13,7 @@ import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 import 'theme/app_theme.dart';
 import 'update/update_banner.dart';
+import 'media/video_io.dart';
 import 'voice/voice_io.dart';
 import 'window/title_bar.dart';
 
@@ -27,6 +28,7 @@ Future<void> main() async {
   if (audioErr != null) debugPrint('audio backend unavailable: $audioErr');
   // Recordings and decrypted voice clips a crash or kill left behind.
   unawaited(sweepVoiceFiles());
+  unawaited(sweepVideoFiles());
   final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
   // FCM on Android, iOS and the web once Firebase is configured; otherwise null and push is off.
   final push = await initPush();

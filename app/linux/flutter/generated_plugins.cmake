@@ -9,6 +9,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   media_kit_libs_linux
   record_linux
   url_launcher_linux
+  media_kit_video
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

@@ -72,7 +72,17 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
  "durationMs",                                1..900000 accepted (senders stop at 600000, 10 minutes)
  "waveform",                                  b64url of 0–128 peak bytes (0–255), oldest first; senders send 64
  "bytes", "mime":"audio/mp4"}                 size of the .m4a
+
+{"kind":"video", "mediaKey",                  media key of the MP4
+ "key", "sha256",                             b64url 32-byte media key; SHA-256 of the encrypted blob
+ "thumbKey"?, "thumbSha256"?,                 a JPEG poster frame (both or neither), under the same key
+ "width", "height",                           display size in pixels (after rotation)
+ "durationMs",                                1..3600000
+ "bytes", "mime":"video/mp4"}                 size of the file (phones compress to 720p first)
 ```
+
+A text, GIF, photo, voice or video message may say `"forwarded": true`: a copy of a message from another chat. Media blobs are
+uploaded again under a new media key (media access follows the chat), so the copy stands alone.
 
 A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"<messageId>"}`
 (clients that don't know `replyTo` just show the text).
@@ -372,8 +382,8 @@ writes an `events` row (audit log; not exposed by the API yet).
 ### Media
 - `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
   (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
-  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb` or `voice`
-  with caps 15 MiB, 1 MiB and 8 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
+  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb`, `voice` or `video`
+  with caps 15 MiB, 1 MiB, 8 MiB and 64 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
   Re-posting a key you already stored for the same chat and size returns `200` (safe retry); any
   other reuse is `conflict`. Upload the blobs first, then send the message that references them.
 - `GET /media/:key` → the blob (`application/octet-stream`) for members of its chat (`not_found`

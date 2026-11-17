@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { newId } from "../src/lib/ids";
-import { MEDIA_CAP, MEDIA_TARGET } from "../src/lib/media";
+import { KIND_LIMITS, MEDIA_CAP, MEDIA_TARGET } from "../src/lib/media";
 import { api, createGroup, type TestUser } from "./chat-helpers";
 import { insertUserWithDevice, resetDb } from "./helpers";
 import { download, GiB, insertMedia, listen, MiB, randomBytes, upload, usage } from "./media-helpers";
@@ -78,7 +78,7 @@ describe("upload and download", () => {
   });
 
   it("bad kind, key or chatId → 400", async () => {
-    for (const q of [{ chatId, kind: "video" }, { chatId, key: "nope" }, { chatId: "nope" }, { chatId, messageId: "x" }]) {
+    for (const q of [{ chatId, kind: "movie" }, { chatId, key: "nope" }, { chatId: "nope" }, { chatId, messageId: "x" }]) {
       const res = await upload(alice, q, randomBytes(10));
       expect(res.status, JSON.stringify(q)).toBe(400);
     }
@@ -129,6 +129,11 @@ describe("upload and download", () => {
   it("thumb over 1 MiB → too_large", async () => {
     expect((await upload(alice, { chatId, kind: "thumb" }, randomBytes(MiB + 1))).status).toBe(413);
     expect((await upload(alice, { chatId, kind: "thumb" }, randomBytes(MiB))).status).toBe(201);
+  });
+
+  it("videos are accepted, up to 64 MiB", async () => {
+    expect((await upload(alice, { chatId, kind: "video" }, randomBytes(MiB))).status).toBe(201);
+    expect(KIND_LIMITS.get("video")).toBe(64 * MiB);
   });
 
   it("voice up to 8 MiB accepted", async () => {

@@ -20,6 +20,7 @@ import '../../gifs/providers.dart';
 import '../../media/photo.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
+import '../../media/video.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
@@ -459,55 +460,85 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     unawaited(client.share(picked.slug));
   }
 
-  /// Photos being compressed and encrypted (before they appear in the list).
+  /// Photos and videos being compressed and encrypted (before they appear in the list).
   int _preparing = 0;
 
   Future<void> _attach() async {
-    final media = ref.read(mediaServiceProvider);
-    if (media == null) return;
-    var camera = false;
+    var source = PickSource.library;
     if (cameraAvailable) {
-      final choice = await showModalBottomSheet<bool>(
+      final choice = await showModalBottomSheet<PickSource>(
         context: context,
         builder: (context) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Photo library'),
-              onTap: () => Navigator.pop(context, false),
+              title: const Text('Photos and videos'),
+              onTap: () => Navigator.pop(context, PickSource.library),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Camera'),
-              onTap: () => Navigator.pop(context, true),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(context, PickSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Record a video'),
+              onTap: () => Navigator.pop(context, PickSource.cameraVideo),
             ),
           ]),
         ),
       );
       if (choice == null) return;
-      camera = choice;
+      source = choice;
     }
-    final List<Uint8List> picked;
+    final List<PickedMedia> picked;
     try {
-      picked = await ref.read(photoPickerProvider)(camera: camera);
+      picked = await ref.read(photoPickerProvider)(source);
     } catch (e) {
-      _snack("Couldn't open the photo picker.");
+      _snack("Couldn't open the picker.");
       return;
     }
-    var failed = 0;
-    for (final bytes in picked) {
-      setState(() => _preparing++);
+    await sendPicked(picked);
+  }
+
+  /// Sends each photo and video as its own message, saying which couldn't be sent.
+  Future<void> sendPicked(List<PickedMedia> picked) async {
+    final media = ref.read(mediaServiceProvider);
+    if (media == null || picked.isEmpty) return;
+    final videos = ref.read(videoProcessorProvider);
+    var badImages = 0, badVideos = 0, bigVideos = 0;
+    for (final item in picked) {
+      if (mounted) setState(() => _preparing++);
       try {
-        await media.sendPhoto(widget.chatId, bytes);
+        switch (item) {
+          case PickedPhoto(:final bytes):
+            await media.sendPhoto(widget.chatId, bytes);
+          case PickedVideo(:final file):
+            await media.sendVideo(widget.chatId, await videos.process(file));
+        }
       } on UnsupportedImageException {
-        failed++;
+        badImages++;
+      } on VideoTooLargeException {
+        bigVideos++;
+      } on UnsupportedVideoException {
+        badVideos++;
       } on ArgumentError {
-        failed++;
+        item is PickedVideo ? badVideos++ : badImages++;
+      } catch (_) {
+        item is PickedVideo ? badVideos++ : badImages++;
       } finally {
         if (mounted) setState(() => _preparing--);
       }
     }
-    if (failed > 0) _snack(failed == 1 ? "That image can't be sent." : "$failed images can't be sent.");
+    if (bigVideos > 0) {
+      _snack(bigVideos == 1
+          ? 'That video is too large to send (${(maxVideoBytes / (1024 * 1024)).round()} MB max).'
+          : '$bigVideos videos are too large to send (${(maxVideoBytes / (1024 * 1024)).round()} MB max).');
+    } else if (badVideos > 0) {
+      _snack(badVideos == 1 ? "That video can't be sent." : "$badVideos videos can't be sent.");
+    } else if (badImages > 0) {
+      _snack(badImages == 1 ? "That image can't be sent." : "$badImages images can't be sent.");
+    }
   }
 
   void _snack(String text) {
@@ -523,7 +554,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final t = FamTokens.of(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
       IconButton(
-        tooltip: 'Attach photo',
+        tooltip: 'Attach photo or video',
         icon: const Icon(Icons.add_photo_alternate_outlined),
         style: IconButton.styleFrom(fixedSize: const Size.square(48)),
         onPressed: _attach,
@@ -947,7 +978,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 class _ComposeBanner extends StatelessWidget {

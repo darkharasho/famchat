@@ -11,6 +11,8 @@ import 'package:famchat/main.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
+import 'package:famchat/media/video.dart';
+import 'package:video_player/video_player.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/voice/providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -83,7 +85,9 @@ Future<ScriptedHubLink> pumpChatApp(
   String name = 'Alice',
   bool admin = false,
   MediaDb? mediaDb,
-  PhotoPicker? picker,
+  MediaPicker? picker,
+  VideoProcessor? videos,
+  VideoFiles? videoFiles,
   FakeRecorders? recorders,
   FakeVoicePlayer? player,
   KlipyClient? gifs,
@@ -106,6 +110,9 @@ Future<ScriptedHubLink> pumpChatApp(
       photoProcessorProvider.overrideWithValue(FakeProcessor()),
       mediaOffloadProvider.overrideWithValue(null), // isolates never answer under fake time
       if (picker != null) photoPickerProvider.overrideWithValue(picker),
+      videoProcessorProvider.overrideWithValue(videos ?? FakeVideoProcessor()),
+      // No files or native players in tests: an in-memory stand-in (use FakeVideoPlatform to play).
+      videoFilesProvider.overrideWithValue(videoFiles ?? fakeVideoFiles()),
       // No microphone or speaker in tests: fakes, unless a test brings its own.
       voiceRecorderFactoryProvider.overrideWithValue((recorders ?? FakeRecorders()).call),
       voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),
@@ -149,3 +156,10 @@ Future<T> inApp<T>(WidgetTester tester, Future<T> Function() f) async {
   if (!done) throw StateError('operation did not finish');
   return value;
 }
+
+/// Decrypted videos "written" to memory: [released] lists what the player let go.
+VideoFiles fakeVideoFiles({List<Uri>? released}) => VideoFiles(
+      playable: (id, bytes) async => Uri.parse('https://video.test/$id.mp4'),
+      release: (uri) async => released?.add(uri),
+      controllerFor: VideoPlayerController.networkUrl,
+    );

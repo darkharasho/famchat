@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
 
 import '../api/models.dart';
 import '../chat/providers.dart';
@@ -15,6 +16,8 @@ import 'media_service.dart';
 import 'photo.dart';
 import 'photo_picker.dart';
 import 'photo_processor.dart';
+import 'video.dart';
+import 'video_io.dart';
 
 final mediaDbProvider = Provider<MediaDb>((ref) {
   final db = openMediaDb();
@@ -29,7 +32,21 @@ final mediaApiProvider = Provider<MediaApi>((ref) => HttpMediaApi(ref.watch(apiC
 
 final photoProcessorProvider = Provider<PhotoProcessor>((ref) => PlatformPhotoProcessor());
 
-final photoPickerProvider = Provider<PhotoPicker>((ref) => pickPhotos);
+final photoPickerProvider = Provider<MediaPicker>((ref) => pickMedia);
+
+final videoProcessorProvider = Provider<VideoProcessor>((ref) => PlatformVideoProcessor());
+
+/// How a decrypted video reaches a player (files on disk natively, blob: URLs on the web).
+class VideoFiles {
+  const VideoFiles({required this.playable, required this.release, required this.controllerFor});
+  final Future<Uri> Function(String id, Uint8List bytes) playable;
+  final Future<void> Function(Uri uri) release;
+  final VideoPlayerController Function(Uri uri) controllerFor;
+}
+
+final videoFilesProvider = Provider<VideoFiles>(
+  (ref) => const VideoFiles(playable: playableVideo, release: releaseVideo, controllerFor: videoControllerFor),
+);
 
 /// Decrypted media kept locally: smaller on the web, where storage may live in memory.
 const mediaCacheBytes = kIsWeb ? 48 * 1024 * 1024 : 256 * 1024 * 1024;
@@ -40,6 +57,7 @@ final mediaServiceProvider = Provider<MediaService?>((ref) {
     if (prev is SignedIn && next is SignedOut) {
       unawaited(ref.read(mediaDbProvider).wipe());
       unawaited(sweepVoiceFiles()); // decrypted clips and unsent recordings
+      unawaited(sweepVideoFiles());
     }
   });
   final sync = ref.watch(chatSyncProvider);

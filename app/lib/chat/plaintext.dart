@@ -72,6 +72,8 @@ sealed class Plaintext {
         return VoiceBody._fromJson(j);
       case 'gif':
         return GifBody._fromJson(j);
+      case 'video':
+        return VideoBody._fromJson(j);
       default:
         return UnknownBody(kind, j);
     }
@@ -248,6 +250,72 @@ class VoiceBody extends Plaintext {
       sha256: _bytes32(j, 'sha256'),
       durationMs: _positive(j, 'durationMs', maxDurationMs),
       waveform: List.unmodifiable(wave),
+      bytes: _positive(j, 'bytes', 1 << 30),
+      mime: _mime(j),
+    );
+  }
+}
+
+/// A video: one encrypted MP4 blob in R2, and (when one could be made) an encrypted JPEG poster
+/// frame, both under one fresh media [key] and pinned by the SHA-256 of their ciphertext.
+class VideoBody extends Plaintext {
+  const VideoBody({
+    required this.mediaKey,
+    required this.key,
+    required this.sha256,
+    this.thumbKey,
+    this.thumbSha256,
+    required this.width,
+    required this.height,
+    required this.durationMs,
+    required this.bytes,
+    this.mime = 'video/mp4',
+  }) : assert((thumbKey == null) == (thumbSha256 == null));
+
+  /// Receivers accept videos up to this long.
+  static const maxDurationMs = 60 * 60 * 1000;
+
+  /// Media key (`/api/media/:key`) of the video, and of its poster frame if it has one.
+  final String mediaKey;
+  final String? thumbKey;
+
+  /// The 32-byte media key, and SHA-256 of each encrypted blob.
+  final Uint8List key, sha256;
+  final Uint8List? thumbSha256;
+
+  /// Display size in pixels, length, and file size in bytes.
+  final int width, height, durationMs, bytes;
+  final String mime;
+
+  @override
+  String get kind => 'video';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'mediaKey': mediaKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        if (thumbKey != null) 'thumbKey': thumbKey,
+        if (thumbSha256 != null) 'thumbSha256': b64url(thumbSha256!),
+        'width': width,
+        'height': height,
+        'durationMs': durationMs,
+        'bytes': bytes,
+        'mime': mime,
+      };
+
+  factory VideoBody._fromJson(Map<String, Object?> j) {
+    final hasThumb = j.containsKey('thumbKey') || j.containsKey('thumbSha256');
+    return VideoBody(
+      mediaKey: _mediaId(j, 'mediaKey'),
+      key: _bytes32(j, 'key'),
+      sha256: _bytes32(j, 'sha256'),
+      thumbKey: hasThumb ? _mediaId(j, 'thumbKey') : null,
+      thumbSha256: hasThumb ? _bytes32(j, 'thumbSha256') : null,
+      width: _positive(j, 'width', 100000),
+      height: _positive(j, 'height', 100000),
+      durationMs: _positive(j, 'durationMs', maxDurationMs),
       bytes: _positive(j, 'bytes', 1 << 30),
       mime: _mime(j),
     );

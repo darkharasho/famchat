@@ -326,6 +326,7 @@ class ChatSync {
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
+      VideoBody() => base.copyWith(kind: 'video', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
@@ -573,7 +574,7 @@ class ChatSync {
   Future<bool> Function(MessageRow row)? beforeSend;
 
   /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
-  static const mediaKinds = {'photo', 'voice'};
+  static const mediaKinds = {'photo', 'voice', 'video'};
 
   /// Queues an outbox flush (after work queued before it).
   void flushSoon() => unawaited(_enqueue(_flushOutbox));

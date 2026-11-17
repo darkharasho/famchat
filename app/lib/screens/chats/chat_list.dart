@@ -199,7 +199,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
   final c = messageChanges([m, ...changes]);
   if (c.isDeleted(m.id)) return '${who}Deleted a message';
   return switch (m.kind) {
-    'text' || 'photo' || 'voice' || 'gif' => '$who${messageSnippet(m, c)}',
+    'text' || 'photo' || 'voice' || 'gif' || 'video' => '$who${messageSnippet(m, c)}',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
@@ -213,6 +213,7 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
     'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
     'photo' => '📷 Photo',
     'voice' => '🎤 Voice message',
+    'video' => '🎥 Video',
     'gif' => 'GIF',
     _ => 'Message',
   };
