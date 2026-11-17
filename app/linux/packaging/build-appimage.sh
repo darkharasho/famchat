@@ -2,9 +2,9 @@
 # Pack the `flutter build linux --release` bundle into an AppImage (release.yml runs this on
 # Ubuntu 22.04, so it runs on that glibc and newer).
 #   app/linux/packaging/build-appimage.sh <version> <out-dir>
-# GTK 3 comes from the system, as on any Flutter Linux install. libmpv (voice playback) is bundled
-# with its dependencies from the build machine (libmpv-dev must be installed there); AppRun uses
-# it only when the system has no libmpv of its own.
+# GTK 3 comes from the system, as on any Flutter Linux install. libmpv (voice and video) is bundled
+# with its dependencies from the build machine (libmpv-dev must be installed there); AppRun puts
+# the bundled libraries the system lacks on the library path when it has no libmpv.so.1.
 set -euo pipefail
 version="${1:?version}"
 out="${2:?out dir}"
