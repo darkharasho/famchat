@@ -266,6 +266,18 @@ never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 charact
 - `PUT /families/:id {name}` → `204`: renames. Allowed for an admin of an approved family, and for
   the creator of their own pending or declined family (a pending or declined family has no other
   admin power). Others get `403 forbidden`. Members get a `family` event.
+- `POST /families/:id/invites {name}` → `201 {inviteToken, inviteUrl, expiresAt}`: a member invite
+  (`/join#<token>`, 7 days) for family `:id`. Admin of an approved family only, else `403 forbidden`.
+  An `email` field is `400 invalid_request` for now.
+- `POST /families/invite-lookup {inviteToken}` → `{familyId, familyName, invitedName, alreadyMember}`
+  for an invite that is unused, unexpired, not revoked, not a reset or reviewer invite, and for an
+  approved family. Anything else is `410 invite_invalid`.
+- `POST /families/:id/join {inviteToken}` → `200 {family: Family}`: joins `:id` as a member with the
+  caller's existing account and uses up the invite. `410 invite_invalid` if the invite is unusable or
+  is for another family; `409 conflict` if the caller is already a member (the invite stays usable).
+  Members get a `family` event.
+- Signed-out `POST /auth/invite/redeem` of a family invite joins that family, and is `410` if the
+  family is not approved.
 - `POST /families/:id/admins/:userId`: promotes a member (see "Account resets", line 431); also reviewer-blocked.
 
 ### Operator: family requests

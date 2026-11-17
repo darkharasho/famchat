@@ -7,6 +7,7 @@ import { insertFamily, insertUserWithDevice, joinFamily, resetDb } from "./helpe
 import { promotionMessage, promotionMessageV2 } from "../src/lib/reset";
 import { sign } from "./reset-helpers";
 import { socket, closeSockets } from "./ws-helpers";
+import { randomToken, sha256Hex } from "../src/lib/tokens";
 
 beforeEach(resetDb);
 afterEach(closeSockets);
@@ -296,5 +297,127 @@ describe("GET/POST/PUT /families", () => {
       expect((await api(admin.accessToken, "PUT", `/families/${f}`, { name: n })).status, String(n)).toBe(400);
     }
     expect((await api(admin.accessToken, "PUT", `/families/${f}`, { name: "x".repeat(40) })).status).toBe(204);
+  });
+});
+
+describe("family invites and joining", () => {
+  type FamilyOut = { id: number; name: string; status: string; role: string; memberCount: number; owner: boolean };
+  const famInvite = async (
+    familyId: number,
+    o: { name?: string; createdBy?: string | null; expiresAt?: number; used?: boolean; revoked?: boolean; reviewer?: boolean; userId?: string } = {},
+  ) => {
+    const token = randomToken();
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id, used_by, used_at, revoked_at, reviewer, user_id)
+       VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      await sha256Hex(token), o.name ?? "Auntie", o.createdBy ?? null, now, o.expiresAt ?? now + 86_400_000, familyId,
+      o.used ? "someone" : null, o.used ? now : null, o.revoked ? now : null, o.reviewer ? 1 : 0, o.userId ?? null,
+    ).run();
+    return token;
+  };
+  const used = (token: string) =>
+    sha256Hex(token).then((h) => env.DB.prepare("SELECT used_by FROM invites WHERE token_hash = ?").bind(h).first<string | null>("used_by"));
+
+  it("family admin creates an invite for their family", async () => {
+    const f = await insertFamily();
+    const admin = await user([{ id: f, role: "admin" }]);
+    const res = await api(admin.accessToken, "POST", `/families/${f}/invites`, { name: "Auntie" });
+    expect(res.status).toBe(201);
+    const body = await res.json<{ inviteToken: string; inviteUrl: string; expiresAt: number }>();
+    expect(body.inviteUrl).toBe(`${env.APP_ORIGIN}/join#${body.inviteToken}`);
+    expect(body.expiresAt).toBeGreaterThan(Date.now() + 6 * 86_400_000);
+    const row = await env.DB.prepare("SELECT family_id, make_admin, created_by, name FROM invites WHERE token_hash = ?")
+      .bind(await sha256Hex(body.inviteToken)).first<Record<string, unknown>>();
+    expect(row).toEqual({ family_id: f, make_admin: 0, created_by: admin.userId, name: "Auntie" });
+  });
+
+  it("member gets 403", async () => {
+    const f = await insertFamily();
+    const member = await user([{ id: f }]);
+    expect((await api(member.accessToken, "POST", `/families/${f}/invites`, { name: "A" })).status).toBe(403);
+  });
+
+  it("pending family's admin gets 403", async () => {
+    const f = await insertFamily({ status: "pending" });
+    const admin = await user([{ id: f, role: "admin" }]);
+    expect((await api(admin.accessToken, "POST", `/families/${f}/invites`, { name: "A" })).status).toBe(403);
+  });
+
+  it("email in the invite body is 400", async () => {
+    const f = await insertFamily();
+    const admin = await user([{ id: f, role: "admin" }]);
+    expect((await api(admin.accessToken, "POST", `/families/${f}/invites`, { name: "A", email: "a@b.c" })).status).toBe(400);
+  });
+
+  it("lookup returns family name and alreadyMember", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const t = await famInvite(f, { name: "Pat" });
+    const outsider = await user([{ id: 1 }]);
+    const insider = await user([{ id: f }]);
+    const look = (u: { accessToken: string }) => api(u.accessToken, "POST", "/families/invite-lookup", { inviteToken: t });
+    expect(await (await look(outsider)).json()).toEqual({ familyId: f, familyName: "Cousins", invitedName: "Pat", alreadyMember: false });
+    expect(await (await look(insider)).json()).toEqual({ familyId: f, familyName: "Cousins", invitedName: "Pat", alreadyMember: true });
+  });
+
+  it("lookup of a used, expired, reset or reviewer invite is 410", async () => {
+    const f = await insertFamily();
+    const me = await user([{ id: 1 }]);
+    const bad = [
+      await famInvite(f, { used: true }),
+      await famInvite(f, { expiresAt: Date.now() - 1 }),
+      await famInvite(f, { revoked: true }),
+      await famInvite(f, { userId: me.userId }),
+      await famInvite(f, { reviewer: true }),
+      await famInvite(await insertFamily({ status: "pending" })),
+      await famInvite(await insertFamily({ hidden: true })),
+      "nonsense-token",
+    ];
+    for (const t of bad) {
+      const res = await api(me.accessToken, "POST", "/families/invite-lookup", { inviteToken: t });
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({ error: "invite_invalid" });
+    }
+  });
+
+  it("join adds me as member, uses the invite, and both sides now see each other in /users", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const other = await user([{ id: f }]);
+    const me = await user([{ id: 1 }]);
+    const t = await famInvite(f);
+    const sm = await socket(other);
+    const res = await api(me.accessToken, "POST", `/families/${f}/join`, { inviteToken: t });
+    expect(res.status).toBe(200);
+    const { family } = await res.json<{ family: FamilyOut }>();
+    expect(family).toMatchObject({ id: f, name: "Cousins", status: "approved", role: "member", memberCount: 2, owner: false });
+    expect(await used(t)).toBe(me.userId);
+    expect(await sm.next("family")).toEqual({ type: "family", familyId: f });
+    const ids = async (u: { accessToken: string }) =>
+      (await (await api(u.accessToken, "GET", "/users")).json<{ users: { id: string }[] }>()).users.map((x) => x.id);
+    expect(await ids(me)).toContain(other.userId);
+    expect(await ids(other)).toContain(me.userId);
+    expect(await env.DB.prepare("SELECT 1 AS n FROM events WHERE kind = 'family_joined' AND user_id = ?").bind(me.userId).first()).not.toBeNull();
+  });
+
+  it("joining a family I'm in is 409 and the invite stays usable", async () => {
+    const f = await insertFamily();
+    const me = await user([{ id: f }]);
+    const t = await famInvite(f);
+    const res = await api(me.accessToken, "POST", `/families/${f}/join`, { inviteToken: t });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+    expect(await used(t)).toBeNull();
+  });
+
+  it("join with a token for another family is 410", async () => {
+    const f = await insertFamily();
+    const g = await insertFamily();
+    const me = await user([{ id: 1 }]);
+    const t = await famInvite(g);
+    const res = await api(me.accessToken, "POST", `/families/${f}/join`, { inviteToken: t });
+    expect(res.status).toBe(410);
+    expect(await used(t)).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 AS n FROM family_members WHERE user_id = ? AND family_id IN (?, ?)").bind(me.userId, f, g).first()).toBeNull();
   });
 });
