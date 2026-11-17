@@ -21,7 +21,7 @@ class FamilyScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Deleted accounts stay in the directory but are no longer family.
-    final family = ref.watch(familyProvider).whenData((all) => [for (final u in all) if (!u.deleted) u]);
+    final family = ref.watch(familyProvider).whenData((all) => [for (final u in all) if (!u.deleted && !u.former) u]);
     final me = ref.watch(meProvider).value;
     final session = ref.watch(sessionProvider);
     final myId = session is SignedIn ? session.session.userId : null;

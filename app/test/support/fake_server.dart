@@ -16,6 +16,7 @@ class FakeUser {
   String name;
   bool isAdmin;
   bool deleted = false;
+  bool former = false;
 
   /// A reviewer account: only other reviewers see it, and it sees only them.
   final bool reviewer;
@@ -310,6 +311,7 @@ class FakeServer {
               ],
               'resets': u.resets,
               'deleted': u.deleted,
+              'former': u.former,
             },
         ],
       });

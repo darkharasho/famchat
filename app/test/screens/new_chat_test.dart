@@ -47,6 +47,16 @@ void main() {
     expect(find.text('Carol'), findsNothing);
   });
 
+  chatTestWidgets('former people are not offered', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    backend.markFormer(carol.userId);
+    await pumpChatApp(tester, alice);
+    go(tester, '/new');
+    await settle(tester);
+    expect(find.text('Bob'), findsOneWidget);
+    expect(find.text('Carol'), findsNothing);
+  });
+
   chatTestWidgets('picking two asks for a title and creates a group', (tester) async {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);

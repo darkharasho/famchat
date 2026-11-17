@@ -466,6 +466,9 @@ class FakeChatBackend {
         if (c == null || !c.members.containsKey(h.userId)) {
           return h._deliver({'type': 'error', 'id': id, 'error': 'not_member'});
         }
+        if (c.kind == 'direct' && c.members.keys.any((u) => u != h.userId && _users[u]!.former)) {
+          return h._deliver({'type': 'error', 'id': id, 'error': 'no_shared_family'});
+        }
         if (env['epoch'] != c.currentEpoch || !c.epochs.contains(c.currentEpoch)) {
           return h._deliver({'type': 'error', 'id': id, 'error': 'stale_epoch'});
         }

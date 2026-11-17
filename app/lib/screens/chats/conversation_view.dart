@@ -792,6 +792,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final title = chatTitle(chat, members, users, me);
     final other = otherMember(chat, members, me);
     final group = chat.kind == 'group';
+    // No family in common any more: the history stays, but nothing new can be sent.
+    final readOnly = !group && other != null && users[other]?.former == true;
     _people = group
         ? {for (final m in members) if (m.userId != me && users[m.userId] != null) m.userId: users[m.userId]!.name}
         : const {};
@@ -1041,7 +1043,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               shape: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
               child: SafeArea(
                 top: false,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                child: readOnly
+                    ? Padding(
+                        key: const Key('no-shared-family'),
+                        padding: EdgeInsets.symmetric(horizontal: side, vertical: Space.md),
+                        child: Text(
+                          "You're no longer in a family together",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      )
+                    : Column(mainAxisSize: MainAxisSize.min, children: [
                   if (_preview != null && _editing == null && !_recording.active)
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),

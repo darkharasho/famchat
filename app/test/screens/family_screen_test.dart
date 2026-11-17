@@ -47,6 +47,17 @@ void main() {
     expect(find.text('Media storage'), findsOneWidget, reason: 'usage screen linked');
   });
 
+  testWidgets('former people are not listed as family', (tester) async {
+    await openFamily(tester);
+    final key = await tester.runAsync(() async => b64url(await publicKeyOf(await newIdentityKey())));
+    final exId = server.addUser('Ex Cousin', identityPub: key!);
+    server.users[exId]!.former = true;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mom'), findsOneWidget);
+    expect(find.text('Ex Cousin'), findsNothing);
+  });
+
   testWidgets('reset needs confirmation, then shows the new link', (tester) async {
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {

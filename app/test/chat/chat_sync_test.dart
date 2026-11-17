@@ -383,6 +383,19 @@ void main() {
     expect(backend.storedMessages(chatId).where((m) => m.id == id), isEmpty);
   });
 
+  test('no_shared_family fails the send and refreshes the directory', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    backend.markFormer(bob.d.userId);
+    final before = backend.calls.where((c) => c == 'GET /users').length;
+    final id = await alice.sync.sendText(chatId, 'anyone?');
+    await until(() async => (await alice.d.db.messageById(id))?.state == 'failed', reason: 'the send fails');
+    await until(() => backend.calls.where((c) => c == 'GET /users').length > before, reason: 'directory refreshed');
+    expect((await alice.d.db.userById(bob.d.userId))?.former, isTrue);
+    expect(backend.storedMessages(chatId), isEmpty);
+  });
+
   test('added member reads history', () async {
     final (alice, bob, carol) = await trio();
     final chatId = await alice.sync.createGroup('G', [bob.d.userId]);
