@@ -317,9 +317,14 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
         var responder = self as UIResponder?
         
         if #available(iOS 18.0, *) {
+            // FamChat: UIApplication.open is unavailable to app extensions at compile time
+            // (APPLICATION_EXTENSION_API_ONLY), so it's called through the runtime.
+            let selector = NSSelectorFromString("openURL:options:completionHandler:")
+            typealias OpenURL = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, AnyObject?) -> Void
             while responder != nil {
-                if let application = responder as? UIApplication {
-                    application.open(url!, options: [:], completionHandler: nil)
+                if let application = responder as? UIApplication, application.responds(to: selector), let url = url {
+                    let open = unsafeBitCast(application.method(for: selector), to: OpenURL.self)
+                    open(application, selector, url as NSURL, NSDictionary(), nil)
                 }
                 responder = responder?.next
             }

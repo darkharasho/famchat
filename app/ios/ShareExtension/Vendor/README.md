@@ -4,7 +4,10 @@ The share extension compiles these files itself instead of linking the plugin's 
 Flutter puts plugin packages under a versioned path (`.packages/receive_sharing_intent-1.9.0`), and
 the extension must not link Flutter anyway.
 
-- `RSIShareViewController.swift`, `RSIComposeView.swift`: unmodified copies.
+- `RSIComposeView.swift`: unmodified copy.
+- `RSIShareViewController.swift`: copy, modified in `redirectToHostApp` to call
+  `UIApplication.open` through the Objective-C runtime (extensions must build with
+  `APPLICATION_EXTENSION_API_ONLY`, which rejects a direct call).
 - `SharedTypes.swift`: the constants and `SharedMediaFile`/`SharedMediaType` from the plugin's
   `ReceiveSharingIntentPlugin.swift`, without the Flutter plugin class.
 
