@@ -206,6 +206,37 @@ void main() {
     });
   });
 
+  group('emoticons', () {
+    chatTestWidgets('<3 and :| become emoji as the following space is typed', (tester) async {
+      await open(tester);
+      await tester.enterText(composer, 'love you <3');
+      await tester.enterText(composer, 'love you <3 ');
+      await settle(tester);
+      expect(text(tester).text, 'love you ❤️ ');
+      await tester.enterText(composer, 'love you ❤️ hmm :|');
+      await tester.enterText(composer, 'love you ❤️ hmm :| ');
+      await settle(tester);
+      expect(text(tester).text, 'love you ❤️ hmm 😐 ');
+    });
+
+    chatTestWidgets('an emoticon ending the message is converted when sent', (tester) async {
+      await open(tester);
+      await tester.enterText(composer, 'see you soon :)');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send'));
+      await settle(tester);
+      expect(find.text('see you soon 🙂'), findsOneWidget);
+    });
+
+    chatTestWidgets('URLs stay as typed', (tester) async {
+      await open(tester);
+      await tester.enterText(composer, 'http://example.com');
+      await tester.enterText(composer, 'http://example.com ');
+      await settle(tester);
+      expect(text(tester).text, 'http://example.com ');
+    });
+  });
+
   chatTestWidgets('a message of only a few emoji shows bigger', (tester) async {
     MessageRow row(String id, int seq, String body) => MessageRow(
           id: id,

@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
@@ -208,7 +209,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _send() async {
     final sync = ref.read(chatSyncProvider);
-    final text = _text.text;
+    final text = replaceTrailingEmoticon(_text.text);
     if (sync == null || text.trim().isEmpty) return;
     try {
       await sync.sendText(widget.chatId, text);
@@ -317,7 +318,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             keyboardType: TextInputType.multiline,
-            inputFormatters: const [ShortcodeFormatter()],
+            inputFormatters: const [ShortcodeFormatter(), EmoticonFormatter()],
             onTap: _closePicker,
             style: Theme.of(context).textTheme.bodyLarge,
             decoration: InputDecoration(
