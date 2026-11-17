@@ -164,11 +164,12 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   revoked device, exactly as after a leave.
 
 ### Push (plan 9)
-- `PUT /devices/me/push {token: string | null, previews?: boolean}` → 204: this device's FCM token (1–4096 chars), or null to
-  stop pushes. The token is removed from any other device row that had it. `previews` (optional boolean,
-  else 400 `invalid_request`) opts this device into message previews (`devices.push_previews`): omitted
-  keeps the stored value, and it resets to false when the token is cleared or taken by another device. Revoking a device or signing
-  out clears it. Android, iOS and web register one; desktop apps don't (they notify from the socket).
+- `PUT /devices/me/push {token: string | null, previews?: boolean}` → 204: this device's FCM token
+  (1–4096 chars), or null to stop pushes. The token is removed from any other device row that had it.
+  `previews` (optional boolean, else 400 `invalid_request`) opts this device into message previews
+  (`devices.push_previews`): omitted keeps the stored value, and it resets to false whenever the token
+  is cleared (null, revoke, sign-out, account reset/delete, stale token) or taken by another device.
+  Android, iOS and web register one; desktop apps don't (they notify from the socket).
 - `POST /devices/me/push/test` → `{configured, error?, devices: [{id, name, result}]}`: sends "FamChat" /
   "Test notification" to the caller's own devices that have a token, right away. `result` is `ok`,
   `stale` (token cleared), `retry`, `auth` or `error`. `configured: false` means the Worker has no

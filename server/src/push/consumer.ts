@@ -120,7 +120,7 @@ export async function sendAll(
   const stale = sent.filter((s) => s.result === "stale");
   if (stale.length) {
     await env.DB.batch(
-      stale.map((s) => env.DB.prepare("UPDATE devices SET push_token = NULL WHERE id = ? AND push_token = ?").bind(s.d.id, s.d.push_token)),
+      stale.map((s) => env.DB.prepare("UPDATE devices SET push_token = NULL, push_previews = 0 WHERE id = ? AND push_token = ?").bind(s.d.id, s.d.push_token)),
     ).catch((e) => console.error("stale tokens not cleared", e)); // cleared on the next push
   }
   return sent.map((s) => ({ deviceId: s.d.id, result: s.result }));

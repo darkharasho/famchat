@@ -82,7 +82,7 @@ export async function resetAccount(env: Env, p: ResetPlan): Promise<boolean> {
   }
   const revokeIdx = stmts.length;
   stmts.push(db.prepare(
-    `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
+    `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL, push_previews = 0
      WHERE user_id = ? AND revoked_at IS NULL AND ${guard} RETURNING id`,
   ).bind(now, userId, ...gb));
   const bumpIdx = stmts.length;

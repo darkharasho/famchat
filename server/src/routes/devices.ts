@@ -35,8 +35,9 @@ devices.get("/", async (c) => {
 
 /**
  * Sets (or with null, clears) this device's FCM token and, optionally, whether its pushes carry the
- * envelope for an on-device preview (kept when omitted, reset to off when the token is cleared). A token belongs to one app install, so it
- * is taken away from any other device row that still had it (an app signed in again).
+ * envelope for an on-device preview (kept when omitted, reset to off when the token is cleared). A
+ * token belongs to one app install, so it is taken away from any other device row that still had it
+ * (an app signed in again).
  */
 devices.put("/me/push", async (c) => {
   const body = await readJson(c);
@@ -91,7 +92,7 @@ devices.delete("/:id", async (c) => {
   const now = Date.now();
   const [res, bumped] = await db.batch([
     db.prepare(
-      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
+      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL, push_previews = 0
        WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
     ).bind(now, id, userId),
     db.prepare(

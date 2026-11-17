@@ -56,6 +56,12 @@ describe("PUT /api/devices/me/push", () => {
     expect(await previewsOf(a.deviceId)).toBe(0);
   });
 
+  it("null token with previews true leaves previews off", async () => {
+    const a = await insertUserWithDevice();
+    expect((await setToken(a.accessToken, null, true)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
   it("a token taken by another device clears that row's previews", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();
@@ -171,6 +177,7 @@ describe("push queue consumer", () => {
   it("stale tokens are cleared and the others still sent", async () => {
     const { mom, dad, dadLaptop } = await family();
     const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id IN (?, ?)").bind(dadLaptop, dad.deviceId).run();
     const { env: e, sa } = await pushEnv();
     const g = fakeGoogle((t) => (t === "dad-laptop" ? fcmError(404, "UNREGISTERED") : Response.json({ name: "x" })));
     const out = await deliverJob(e, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId] }, g.fetcher);
@@ -180,6 +187,8 @@ describe("push queue consumer", () => {
     ]);
     expect(await tokenOf(dadLaptop)).toBeNull();
     expect(await tokenOf(dad.deviceId)).toBe("dad-phone");
+    expect(await previewsOf(dadLaptop)).toBe(0);
+    expect(await previewsOf(dad.deviceId)).toBe(1);
   });
 
   it("transient failures re-queue only the failed devices, up to three attempts", async () => {
