@@ -1,4 +1,5 @@
-import { env, SELF } from "cloudflare:test";
+import { createExecutionContext, env, SELF } from "cloudflare:test";
+import { app } from "../src/index";
 import { beforeEach, describe, expect, it } from "vitest";
 import { BASE, insertUserWithDevice, resetDb } from "./helpers";
 
@@ -12,7 +13,17 @@ describe("GET /api/me", () => {
     const u = await insertUserWithDevice({ admin: true, name: "Mom" });
     const res = await me(u.accessToken);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ userId: u.userId, deviceId: u.deviceId, name: "Mom", isAdmin: true, recoveryCodeSet: false, reviewer: false });
+    expect(await res.json()).toEqual({ userId: u.userId, deviceId: u.deviceId, name: "Mom", isAdmin: true, recoveryCodeSet: false, reviewer: false, gifKey: null });
+  });
+
+  it("hands out the KLIPY app key when the server has one (the app calls KLIPY itself)", async () => {
+    const u = await insertUserWithDevice();
+    const res = await app.fetch(
+      new Request(`${BASE}/api/me`, { headers: { authorization: `Bearer ${u.accessToken}` } }),
+      { ...env, KLIPY_APP_KEY: "klipy-key" },
+      createExecutionContext(),
+    );
+    expect((await res.json<{ gifKey: string | null }>()).gifKey).toBe("klipy-key");
   });
 
   it("reads isAdmin from the database, not the token", async () => {

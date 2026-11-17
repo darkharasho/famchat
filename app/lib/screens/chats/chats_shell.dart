@@ -24,9 +24,12 @@ String get shortcutModifier =>
 /// Signed-in home. Phones: the chat list, or one conversation full screen. From [twoPaneWidth]:
 /// the list and the open conversation side by side.
 class ChatsShell extends ConsumerWidget {
-  const ChatsShell({super.key, this.chatId});
+  const ChatsShell({super.key, this.chatId, this.jumpTo});
 
   final String? chatId;
+
+  /// A message to scroll to once the chat opens (from search).
+  final String? jumpTo;
 
   static const twoPaneWidth = 720.0;
   static const listWidth = 360.0;
@@ -44,6 +47,9 @@ class ChatsShell extends ConsumerWidget {
       bindings: {
         SingleActivator(LogicalKeyboardKey.keyK, control: !apple, meta: apple): () => showQuickSwitcher(context),
         SingleActivator(LogicalKeyboardKey.keyN, control: !apple, meta: apple): () => context.go('/new'),
+        SingleActivator(LogicalKeyboardKey.keyF, control: !apple, meta: apple, shift: true): () => context.go('/search'),
+        if (id != null)
+          SingleActivator(LogicalKeyboardKey.keyF, control: !apple, meta: apple): () => context.go('/search?chat=$id'),
         if (id != null) const SingleActivator(LogicalKeyboardKey.escape): () => context.go('/'),
       },
       child: Focus(
@@ -51,7 +57,9 @@ class ChatsShell extends ConsumerWidget {
         child: LayoutBuilder(builder: (context, c) {
           final wide = c.maxWidth >= twoPaneWidth;
           if (!wide) {
-            return id == null ? const _ListPane(selectedId: null) : ConversationView(key: ValueKey(id), chatId: id);
+            return id == null
+                ? const _ListPane(selectedId: null)
+                : ConversationView(key: ValueKey(id), chatId: id, jumpTo: jumpTo);
           }
           return Row(children: [
             SizedBox(width: listWidth, child: _ListPane(selectedId: id)),
@@ -59,7 +67,7 @@ class ChatsShell extends ConsumerWidget {
             Expanded(
               child: id == null
                   ? const _WelcomePane()
-                  : ConversationView(key: ValueKey(id), chatId: id, showBack: false),
+                  : ConversationView(key: ValueKey(id), chatId: id, showBack: false, jumpTo: jumpTo),
             ),
           ]);
         }),
@@ -86,6 +94,11 @@ class _ListPane extends ConsumerWidget {
             tooltip: 'Find a chat ($shortcutModifier+K)',
             icon: const Icon(Icons.search_rounded),
             onPressed: () => showQuickSwitcher(context),
+          ),
+          IconButton(
+            tooltip: 'Search messages ($shortcutModifier+Shift+F)',
+            icon: const Icon(Icons.manage_search_rounded),
+            onPressed: () => context.go('/search'),
           ),
           IconButton(
             tooltip: 'New chat',

@@ -384,6 +384,27 @@ class ChatDb extends _$ChatDb {
         ]))
       .get();
 
+  /// Text messages (newest first, at most [limit]) whose text or one of their sender's edits matches
+  /// the LIKE [pattern] (escaped with `\`). Callers check the latest text themselves.
+  Future<List<MessageRow>> searchCandidates(String pattern, {String? chatId, int limit = 300}) async {
+    final rows = await customSelect(
+      "SELECT * FROM local_messages m WHERE m.kind = 'text' AND (? IS NULL OR m.chat_id = ?) AND ("
+      "json_extract(m.body, '\$.text') LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM local_messages e "
+      "WHERE e.kind = 'edit' AND e.target_id = m.id AND e.sender_user_id = m.sender_user_id "
+      "AND json_extract(e.body, '\$.text') LIKE ? ESCAPE '\\')) "
+      'ORDER BY m.created_at DESC, m.id DESC LIMIT ?',
+      variables: [
+        Variable<String>(chatId),
+        Variable<String>(chatId),
+        Variable.withString(pattern),
+        Variable.withString(pattern),
+        Variable.withInt(limit),
+      ],
+      readsFrom: {localMessages},
+    ).get();
+    return [for (final r in rows) localMessages.map(r.data)];
+  }
+
   /// Chats with members, last message and unread count (others' messages, not changes, above my read
   /// position and my join point), newest activity first.
   Stream<List<ChatListItem>> watchChatList(String myUserId) => customSelect(

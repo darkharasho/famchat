@@ -53,8 +53,12 @@ class Me {
     required this.isAdmin,
     this.recoveryCodeSet = false,
     this.reviewer = false,
+    this.gifKey,
   });
   final String userId, deviceId, name;
+
+  /// The KLIPY app key for GIF search, or null when the server has none (no GIF button).
+  final String? gifKey;
   final bool isAdmin;
 
   /// An admin recovery code was saved (its key is registered).

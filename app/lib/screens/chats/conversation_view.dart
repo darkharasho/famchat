@@ -13,6 +13,8 @@ import '../../chat/emoji/shortcodes.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
+import '../../gifs/gif_picker.dart';
+import '../../gifs/providers.dart';
 import '../../media/photo.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
@@ -25,6 +27,7 @@ import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
 import '../../widgets/typing_dots.dart';
 import 'chat_list.dart' show messageSnippet;
+import 'chats_shell.dart' show shortcutModifier;
 import 'emoji_input.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
@@ -32,10 +35,13 @@ import 'timeline.dart';
 
 /// One chat: header, messages, typing line and the composer.
 class ConversationView extends ConsumerStatefulWidget {
-  const ConversationView({super.key, required this.chatId, this.showBack = true});
+  const ConversationView({super.key, required this.chatId, this.showBack = true, this.jumpTo});
 
   final String chatId;
   final bool showBack;
+
+  /// A message to scroll to once the messages are loaded (from search).
+  final String? jumpTo;
 
   @override
   ConsumerState<ConversationView> createState() => _ConversationViewState();
@@ -75,10 +81,23 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// A message just jumped to, tinted for a moment.
   String? _highlight;
+  Timer? _unhighlight;
   final _scroll = ScrollController();
   final _bubbleKeys = <String, GlobalKey>{};
 
   GlobalKey _keyFor(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// The [ConversationView.jumpTo] already scrolled to.
+  String? _jumped;
+
+  void _maybeJump(bool loaded) {
+    final target = widget.jumpTo;
+    if (target == null || !loaded || _jumped == target) return;
+    _jumped = target;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_jumpTo(target));
+    });
+  }
 
   @override
   void initState() {
@@ -169,6 +188,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _text.dispose();
     _focus.dispose();
     _scroll.dispose();
+    _unhighlight?.cancel();
     _emojiPopover.dispose();
     super.dispose();
   }
@@ -309,8 +329,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         await Scrollable.ensureVisible(ctx, alignment: 0.5, duration: const Duration(milliseconds: 250));
         if (!mounted) return;
         setState(() => _highlight = id);
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
-        if (mounted && _highlight == id) setState(() => _highlight = null);
+        _unhighlight?.cancel();
+        _unhighlight = Timer(const Duration(milliseconds: 1200), () {
+          if (mounted) setState(() => _highlight = null);
+        });
         return;
       }
       if (!_scroll.hasClients) return;
@@ -321,6 +343,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       await WidgetsBinding.instance.endOfFrame;
     }
     _snack("That message isn't available.");
+  }
+
+  Future<void> _pickGif() async {
+    final client = ref.read(gifClientProvider).value;
+    final sync = ref.read(chatSyncProvider);
+    if (client == null || sync == null) return;
+    _closePicker();
+    if (_emojiPopover.isShowing) _emojiPopover.hide();
+    final picked = await showGifPicker(context, client);
+    if (picked == null) return;
+    await sync.enqueueMessage(widget.chatId, picked.body);
+    unawaited(client.share(picked.slug));
   }
 
   /// Photos being compressed and encrypted (before they appear in the list).
@@ -392,6 +426,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         style: IconButton.styleFrom(fixedSize: const Size.square(48)),
         onPressed: _attach,
       ),
+      if (ref.watch(gifClientProvider).value != null && _editing == null)
+        IconButton(
+          tooltip: 'GIF',
+          icon: const Icon(Icons.gif_box_outlined),
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          onPressed: _pickGif,
+        ),
       Expanded(
         child: CallbackShortcuts(
           bindings: _suggesting
@@ -498,6 +539,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final loaded = ref.watch(messagesProvider(chatId));
     final messages = loaded.value ?? const <MessageRow>[];
     if (_initialIds == null && loaded.hasValue) _initialIds = {for (final m in messages) m.id};
+    _maybeJump(loaded.hasValue);
     ref.listen(messagesProvider(chatId), (_, _) => _markRead());
     final theme = Theme.of(context);
     final tokens = FamTokens.of(context);
@@ -636,6 +678,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             ),
           ]),
           actions: [
+            IconButton(
+              tooltip: 'Search in this chat ($shortcutModifier+F)',
+              icon: const Icon(Icons.search_rounded),
+              onPressed: () => context.go('/search?chat=$chatId'),
+            ),
             IconButton(
               tooltip: 'Chat info',
               icon: const Icon(Icons.info_outline_rounded),
@@ -790,7 +837,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 class _ComposeBanner extends StatelessWidget {

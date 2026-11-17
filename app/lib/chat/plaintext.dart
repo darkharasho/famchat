@@ -64,6 +64,8 @@ sealed class Plaintext {
         return PhotoBody._fromJson(j);
       case 'voice':
         return VoiceBody._fromJson(j);
+      case 'gif':
+        return GifBody._fromJson(j);
       default:
         return UnknownBody(kind, j);
     }
@@ -236,6 +238,47 @@ class VoiceBody extends Plaintext {
       mime: _mime(j),
     );
   }
+}
+
+/// A GIF from KLIPY (docs/protocol.md "GIFs"). KLIPY's terms have each viewer load it straight from
+/// KLIPY, so only its link travels (encrypted, like any message).
+class GifBody extends Plaintext {
+  const GifBody({required this.slug, required this.title, required this.url, required this.width, required this.height});
+
+  /// KLIPY's id for it, and its title (shown to screen readers).
+  final String slug, title;
+
+  /// An https URL on klipy.com (animated WebP or GIF).
+  final String url;
+  final int width, height;
+
+  @override
+  String get kind => 'gif';
+
+  @override
+  Map<String, Object?> toJson() =>
+      {'kind': kind, 'slug': slug, 'title': title, 'url': url, 'width': width, 'height': height};
+
+  factory GifBody._fromJson(Map<String, Object?> j) {
+    final slug = j['slug'], title = j['title'], url = j['url'];
+    if (slug is! String || slug.isEmpty || slug.length > 200) throw const FormatException('bad slug');
+    if (title is! String || title.length > 500) throw const FormatException('bad title');
+    if (url is! String || !isKlipyMediaUrl(url)) throw const FormatException('bad url');
+    return GifBody(
+      slug: slug,
+      title: title,
+      url: url,
+      width: _positive(j, 'width', 4096),
+      height: _positive(j, 'height', 4096),
+    );
+  }
+}
+
+/// https on klipy.com or a subdomain, with no credentials or port: the only links a GIF loads.
+bool isKlipyMediaUrl(String url) {
+  final u = Uri.tryParse(url);
+  if (u == null || u.scheme != 'https' || u.userInfo.isNotEmpty || u.hasPort) return false;
+  return u.host == 'klipy.com' || u.host.endsWith('.klipy.com');
 }
 
 String _mediaId(Map<String, Object?> j, String k) {

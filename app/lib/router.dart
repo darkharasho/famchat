@@ -10,6 +10,7 @@ import 'screens/recovery_code_screen.dart';
 import 'screens/chats/chats_shell.dart';
 import 'screens/chats/group_info_screen.dart';
 import 'screens/chats/new_chat_screen.dart';
+import 'screens/chats/search_screen.dart';
 import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
@@ -68,7 +69,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/', builder: (context, state) => const ChatsShell()),
       GoRoute(
         path: '/chats/:id',
-        builder: (context, state) => ChatsShell(chatId: state.pathParameters['id']),
+        builder: (context, state) => ChatsShell(chatId: state.pathParameters['id'], jumpTo: state.uri.queryParameters['m']),
       ),
       GoRoute(
         path: '/chats/:id/info',
@@ -84,6 +85,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           preselected: [...?state.uri.queryParameters['with']?.split(',').where((s) => s.isNotEmpty)],
         ),
       ),
+      GoRoute(path: '/search', builder: (context, state) => SearchScreen(chatId: state.uri.queryParameters['chat'])),
       GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
       GoRoute(path: '/devices', builder: (context, state) => const DevicesScreen()),
       GoRoute(path: '/devices/add', builder: (context, state) => const AddDeviceScreen()),

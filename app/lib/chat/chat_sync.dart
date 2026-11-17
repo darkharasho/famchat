@@ -313,6 +313,7 @@ class ChatSync {
       DeleteBody(:final target) => base.copyWith(kind: 'delete', body: Value(body), targetId: Value(target)),
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
+      GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
