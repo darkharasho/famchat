@@ -8,6 +8,7 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/reactions.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/pairing/bundle.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,12 +16,13 @@ import 'package:flutter_test/flutter_test.dart';
 import '../support/fake_chat_backend.dart';
 
 class Node {
-  Node(this.d)
+  Node(this.d, {void Function()? onFamiliesChanged})
       : sync = ChatSync(
           db: d.db,
           api: d.api,
           hub: d.hub,
           me: d.me,
+          onFamiliesChanged: onFamiliesChanged,
           typingTtl: const Duration(milliseconds: 300),
           typingThrottle: const Duration(milliseconds: 200),
         );
@@ -46,8 +48,8 @@ void main() {
   late FakeChatBackend backend;
   final nodes = <Node>[];
 
-  Future<Node> start(TestDevice d) async {
-    final n = Node(d);
+  Future<Node> start(TestDevice d, {void Function()? onFamiliesChanged}) async {
+    final n = Node(d, onFamiliesChanged: onFamiliesChanged);
     nodes.add(n);
     await n.sync.start();
     await n.sync.idle;
@@ -249,6 +251,33 @@ void main() {
     await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == key, reason: 'new key');
     backend.setAvatar(bob.d.userId, null);
     await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == null, reason: 'removed');
+  });
+
+  test("a group's family id is stored; a direct chat has none", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final direct = await alice.sync.openDirect(bob.d.userId);
+    final group = await alice.sync.createGroup('Us', [bob.d.userId]);
+    await alice.sync.idle;
+    expect((await alice.d.db.chatById(group))!.familyId, 1);
+    expect((await alice.d.db.chatById(direct))!.familyId, isNull);
+    await until(() async => (await bob.d.db.chatById(group))?.familyId == 1, reason: 'bob stores it');
+    backend.setChatFamily(group, 2);
+    await until(() async => (await bob.d.db.chatById(group))?.familyId == 2, reason: 'bob follows the server');
+  });
+
+  test('a family event refreshes the directory and the families', () async {
+    var familiesChanged = 0;
+    final alice = await start(await backend.addUser('Alice'), onFamiliesChanged: () => familiesChanged++);
+    final bob = await backend.addUser('Bob');
+    addTearDown(bob.dispose);
+    await alice.sync.idle;
+    backend.addFamilyRole(alice.d.userId, const FamilyRoleDto(id: 2, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: true));
+    backend.familyEvent([alice.d.userId], 2);
+    await until(() async => familiesChanged == 1, reason: 'families callback');
+    await alice.sync.idle;
+    expect(jsonDecode((await alice.d.db.userById(bob.userId))!.familyIds), [1, 2]);
   });
 
   test('deleting a message whose ack was lost still deletes it for everyone', () async {

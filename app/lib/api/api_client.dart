@@ -100,6 +100,91 @@ class ApiClient {
   Future<void> promoteInFamily(int familyId, String userId, {required String sig}) => _authed((t) => _send(
       'POST', '/families/$familyId/admins/${Uri.encodeComponent(userId)}', bearer: t, body: {'sig': sig}));
 
+  // --- families (docs/protocol.md "Families") ---
+
+  static Family _family(Map<String, Object?> f) => Family(
+        id: f['id'] as int,
+        name: f['name'] as String,
+        status: f['status'] as String,
+        admin: f['role'] == 'admin',
+        owner: f['owner'] as bool,
+        memberCount: f['memberCount'] as int,
+      );
+
+  static Invite _invite(Map<String, Object?> j) => Invite(
+        inviteToken: j['inviteToken'] as String,
+        inviteUrl: j['inviteUrl'] as String,
+        expiresAt: DateTime.fromMillisecondsSinceEpoch(j['expiresAt'] as int),
+      );
+
+  /// This user's families, by id.
+  Future<List<Family>> families() => _authed((t) async {
+        final j = await _send('GET', '/families', bearer: t);
+        return _parse(200, () => [for (final f in (j!['families'] as List).cast<Map<String, Object?>>()) _family(f)]);
+      });
+
+  /// Requests a new family (it starts `pending`, with this user as its admin).
+  Future<Family> createFamily(String name) => _authed((t) async {
+        final j = await _send('POST', '/families', bearer: t, body: {'name': name});
+        return _parse(201, () => _family(j!['family'] as Map<String, Object?>));
+      });
+
+  Future<void> renameFamily(int id, String name) =>
+      _authed((t) => _send('PUT', '/families/$id', bearer: t, body: {'name': name}));
+
+  /// Admin of approved family [id]: a member invite for [name].
+  Future<Invite> createFamilyInvite(int id, String name) => _authed((t) async {
+        final j = await _send('POST', '/families/$id/invites', bearer: t, body: {'name': name});
+        return _parse(201, () => _invite(j!));
+      });
+
+  /// Which family [token] invites to. Throws [ApiException] `invite_invalid` for an unusable invite.
+  Future<InviteLookup> lookupInvite(String token) => _authed((t) async {
+        final j = await _send('POST', '/families/invite-lookup', bearer: t, body: {'inviteToken': token});
+        return _parse(200, () => InviteLookup(
+              familyId: j!['familyId'] as int,
+              familyName: j['familyName'] as String,
+              invitedName: j['invitedName'] as String,
+              alreadyMember: j['alreadyMember'] as bool,
+            ));
+      });
+
+  /// Joins family [id] with this account, using up [token]. Throws [ApiException] `invite_invalid`,
+  /// or `conflict` when already a member.
+  Future<Family> joinFamily(int id, String token) => _authed((t) async {
+        final j = await _send('POST', '/families/$id/join', bearer: t, body: {'inviteToken': token});
+        return _parse(200, () => _family(j!['family'] as Map<String, Object?>));
+      });
+
+  /// Takes [userId] out of family [id]: leaving when it's this user, else removing (admin only).
+  /// Throws [ApiException] `last_admin` (with [ApiException.familyName]) for the last admin leaving.
+  Future<void> leaveOrRemove(int id, String userId) =>
+      _authed((t) => _send('DELETE', '/families/$id/members/${Uri.encodeComponent(userId)}', bearer: t));
+
+  /// Owner of family [id]: makes admin [userId] a member again.
+  Future<void> demote(int id, String userId) =>
+      _authed((t) => _send('DELETE', '/families/$id/admins/${Uri.encodeComponent(userId)}', bearer: t));
+
+  /// Operator: family requests with [status] (`pending`, `approved` or `declined`), newest first.
+  Future<List<FamilyRequest>> operatorFamilies({String status = 'pending'}) => _authed((t) async {
+        final j = await _send('GET', '/operator/families', bearer: t, query: {'status': status});
+        return _parse(200, () => [
+              for (final f in (j!['families'] as List).cast<Map<String, Object?>>())
+                FamilyRequest(
+                  id: f['id'] as int,
+                  name: f['name'] as String,
+                  status: f['status'] as String,
+                  createdAt: DateTime.fromMillisecondsSinceEpoch(f['createdAt'] as int),
+                  creatorName: (f['creator'] as Map<String, Object?>?)?['name'] as String?,
+                  memberCount: f['memberCount'] as int,
+                ),
+            ]);
+      });
+
+  Future<void> approveFamily(int id) => _authed((t) => _send('POST', '/operator/families/$id/approve', bearer: t));
+
+  Future<void> declineFamily(int id) => _authed((t) => _send('POST', '/operator/families/$id/decline', bearer: t));
+
   /// Deletes this user's account for good (docs/protocol.md "Deleting an account"). Throws
   /// [ApiException] `last_admin` if this is the family's only admin and others are left.
   Future<void> deleteAccount() =>
@@ -152,11 +237,7 @@ class ApiClient {
 
   Future<Invite> createInvite(String name) => _authed((t) async {
         final j = await _send('POST', '/admin/invites', body: {'name': name}, bearer: t);
-        return _parse(201, () => Invite(
-              inviteToken: j!['inviteToken'] as String,
-              inviteUrl: j['inviteUrl'] as String,
-              expiresAt: DateTime.fromMillisecondsSinceEpoch(j['expiresAt'] as int),
-            ));
+        return _parse(201, () => _invite(j!));
       });
 
   // --- reviewer accounts (docs/protocol.md "Reviewer accounts") ---
@@ -457,7 +538,12 @@ class ApiClient {
     }
     if (res.statusCode >= 400) {
       final code = json is Map && json['error'] is String ? json['error'] as String : 'unknown';
-      throw ApiException(res.statusCode, code);
+      throw ApiException(
+        res.statusCode,
+        code,
+        familyId: json is Map && json['familyId'] is int ? json['familyId'] as int : null,
+        familyName: json is Map && json['familyName'] is String ? json['familyName'] as String : null,
+      );
     }
     if (json == null) return null;
     if (json is! Map<String, Object?>) throw ApiException(res.statusCode, 'bad_response');

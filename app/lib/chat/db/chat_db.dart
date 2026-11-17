@@ -28,6 +28,9 @@ class LocalChats extends Table {
   /// Text typed here and not sent yet (this device only), or null.
   TextColumn get draft => text().nullable()();
 
+  /// A group's family (see [ChatDto.familyId]); null for direct chats.
+  IntColumn get familyId => integer().nullable()();
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   IntColumn get syncedSeq => integer().withDefault(const Constant(0))();
 
@@ -115,6 +118,9 @@ class LocalUsers extends Table {
 
   /// Their profile photo's key (see [UserDto.avatarKey]), or null.
   TextColumn get avatarKey => text().nullable()();
+
+  /// JSON list of the ids of the families they share with this user, ascending; empty for former users.
+  TextColumn get familyIds => text().withDefault(const Constant('[]'))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -228,7 +234,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -254,6 +260,11 @@ class ChatDb extends _$ChatDb {
               await customStatement(
                   'INSERT OR IGNORE INTO local_family_admins (family_id, user_id) SELECT 1, id FROM local_users WHERE pinned_admin = 1');
             }
+          }
+          if (from < 9) {
+            // Filled in by the next chat sync and directory refresh.
+            await m.addColumn(localChats, localChats.familyId);
+            await m.addColumn(localUsers, localUsers.familyIds);
           }
         },
       );
@@ -302,6 +313,7 @@ class ChatDb extends _$ChatDb {
             lastMessageAt: Value(c.lastMessageAt),
             createdAt: c.createdAt,
             mutedUntil: Value(c.mutedUntil),
+            familyId: Value(c.familyId),
           ),
           onConflict: DoUpdate((_) => LocalChatsCompanion(
                 kind: Value(c.kind),
@@ -312,6 +324,7 @@ class ChatDb extends _$ChatDb {
                 lastSeq: Value(c.lastSeq),
                 lastMessageAt: Value(c.lastMessageAt),
                 mutedUntil: Value(c.mutedUntil),
+                familyId: Value(c.familyId),
               )),
         );
         await (delete(localMembers)..where((m) => m.chatId.equals(c.id))).go();

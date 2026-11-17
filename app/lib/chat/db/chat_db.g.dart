@@ -137,6 +137,17 @@ class $LocalChatsTable extends LocalChats
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _familyIdMeta = const VerificationMeta(
+    'familyId',
+  );
+  @override
+  late final GeneratedColumn<int> familyId = GeneratedColumn<int>(
+    'family_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _syncedSeqMeta = const VerificationMeta(
     'syncedSeq',
   );
@@ -163,6 +174,7 @@ class $LocalChatsTable extends LocalChats
     myLastReadSeq,
     mutedUntil,
     draft,
+    familyId,
     syncedSeq,
   ];
   @override
@@ -269,6 +281,12 @@ class $LocalChatsTable extends LocalChats
         draft.isAcceptableOrUnknown(data['draft']!, _draftMeta),
       );
     }
+    if (data.containsKey('family_id')) {
+      context.handle(
+        _familyIdMeta,
+        familyId.isAcceptableOrUnknown(data['family_id']!, _familyIdMeta),
+      );
+    }
     if (data.containsKey('synced_seq')) {
       context.handle(
         _syncedSeqMeta,
@@ -332,6 +350,10 @@ class $LocalChatsTable extends LocalChats
         DriftSqlType.string,
         data['${effectivePrefix}draft'],
       ),
+      familyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}family_id'],
+      ),
       syncedSeq: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}synced_seq'],
@@ -363,6 +385,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
   /// Text typed here and not sent yet (this device only), or null.
   final String? draft;
 
+  /// A group's family (see [ChatDto.familyId]); null for direct chats.
+  final int? familyId;
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   final int syncedSeq;
   const ChatRow({
@@ -378,6 +403,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     required this.myLastReadSeq,
     this.mutedUntil,
     this.draft,
+    this.familyId,
     required this.syncedSeq,
   });
   @override
@@ -402,6 +428,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     }
     if (!nullToAbsent || draft != null) {
       map['draft'] = Variable<String>(draft);
+    }
+    if (!nullToAbsent || familyId != null) {
+      map['family_id'] = Variable<int>(familyId);
     }
     map['synced_seq'] = Variable<int>(syncedSeq);
     return map;
@@ -429,6 +458,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       draft: draft == null && nullToAbsent
           ? const Value.absent()
           : Value(draft),
+      familyId: familyId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(familyId),
       syncedSeq: Value(syncedSeq),
     );
   }
@@ -451,6 +483,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       myLastReadSeq: serializer.fromJson<int>(json['myLastReadSeq']),
       mutedUntil: serializer.fromJson<int?>(json['mutedUntil']),
       draft: serializer.fromJson<String?>(json['draft']),
+      familyId: serializer.fromJson<int?>(json['familyId']),
       syncedSeq: serializer.fromJson<int>(json['syncedSeq']),
     );
   }
@@ -470,6 +503,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       'myLastReadSeq': serializer.toJson<int>(myLastReadSeq),
       'mutedUntil': serializer.toJson<int?>(mutedUntil),
       'draft': serializer.toJson<String?>(draft),
+      'familyId': serializer.toJson<int?>(familyId),
       'syncedSeq': serializer.toJson<int>(syncedSeq),
     };
   }
@@ -487,6 +521,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     int? myLastReadSeq,
     Value<int?> mutedUntil = const Value.absent(),
     Value<String?> draft = const Value.absent(),
+    Value<int?> familyId = const Value.absent(),
     int? syncedSeq,
   }) => ChatRow(
     id: id ?? this.id,
@@ -503,6 +538,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     myLastReadSeq: myLastReadSeq ?? this.myLastReadSeq,
     mutedUntil: mutedUntil.present ? mutedUntil.value : this.mutedUntil,
     draft: draft.present ? draft.value : this.draft,
+    familyId: familyId.present ? familyId.value : this.familyId,
     syncedSeq: syncedSeq ?? this.syncedSeq,
   );
   ChatRow copyWithCompanion(LocalChatsCompanion data) {
@@ -529,6 +565,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ? data.mutedUntil.value
           : this.mutedUntil,
       draft: data.draft.present ? data.draft.value : this.draft,
+      familyId: data.familyId.present ? data.familyId.value : this.familyId,
       syncedSeq: data.syncedSeq.present ? data.syncedSeq.value : this.syncedSeq,
     );
   }
@@ -548,6 +585,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ..write('myLastReadSeq: $myLastReadSeq, ')
           ..write('mutedUntil: $mutedUntil, ')
           ..write('draft: $draft, ')
+          ..write('familyId: $familyId, ')
           ..write('syncedSeq: $syncedSeq')
           ..write(')'))
         .toString();
@@ -567,6 +605,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     myLastReadSeq,
     mutedUntil,
     draft,
+    familyId,
     syncedSeq,
   );
   @override
@@ -585,6 +624,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           other.myLastReadSeq == this.myLastReadSeq &&
           other.mutedUntil == this.mutedUntil &&
           other.draft == this.draft &&
+          other.familyId == this.familyId &&
           other.syncedSeq == this.syncedSeq);
 }
 
@@ -601,6 +641,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
   final Value<int> myLastReadSeq;
   final Value<int?> mutedUntil;
   final Value<String?> draft;
+  final Value<int?> familyId;
   final Value<int> syncedSeq;
   final Value<int> rowid;
   const LocalChatsCompanion({
@@ -616,6 +657,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.myLastReadSeq = const Value.absent(),
     this.mutedUntil = const Value.absent(),
     this.draft = const Value.absent(),
+    this.familyId = const Value.absent(),
     this.syncedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -632,6 +674,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.myLastReadSeq = const Value.absent(),
     this.mutedUntil = const Value.absent(),
     this.draft = const Value.absent(),
+    this.familyId = const Value.absent(),
     this.syncedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -654,6 +697,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Expression<int>? myLastReadSeq,
     Expression<int>? mutedUntil,
     Expression<String>? draft,
+    Expression<int>? familyId,
     Expression<int>? syncedSeq,
     Expression<int>? rowid,
   }) {
@@ -670,6 +714,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       if (myLastReadSeq != null) 'my_last_read_seq': myLastReadSeq,
       if (mutedUntil != null) 'muted_until': mutedUntil,
       if (draft != null) 'draft': draft,
+      if (familyId != null) 'family_id': familyId,
       if (syncedSeq != null) 'synced_seq': syncedSeq,
       if (rowid != null) 'rowid': rowid,
     });
@@ -688,6 +733,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Value<int>? myLastReadSeq,
     Value<int?>? mutedUntil,
     Value<String?>? draft,
+    Value<int?>? familyId,
     Value<int>? syncedSeq,
     Value<int>? rowid,
   }) {
@@ -704,6 +750,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       myLastReadSeq: myLastReadSeq ?? this.myLastReadSeq,
       mutedUntil: mutedUntil ?? this.mutedUntil,
       draft: draft ?? this.draft,
+      familyId: familyId ?? this.familyId,
       syncedSeq: syncedSeq ?? this.syncedSeq,
       rowid: rowid ?? this.rowid,
     );
@@ -748,6 +795,9 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     if (draft.present) {
       map['draft'] = Variable<String>(draft.value);
     }
+    if (familyId.present) {
+      map['family_id'] = Variable<int>(familyId.value);
+    }
     if (syncedSeq.present) {
       map['synced_seq'] = Variable<int>(syncedSeq.value);
     }
@@ -772,6 +822,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
           ..write('myLastReadSeq: $myLastReadSeq, ')
           ..write('mutedUntil: $mutedUntil, ')
           ..write('draft: $draft, ')
+          ..write('familyId: $familyId, ')
           ..write('syncedSeq: $syncedSeq, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2146,6 +2197,18 @@ class $LocalUsersTable extends LocalUsers
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _familyIdsMeta = const VerificationMeta(
+    'familyIds',
+  );
+  @override
+  late final GeneratedColumn<String> familyIds = GeneratedColumn<String>(
+    'family_ids',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2158,6 +2221,7 @@ class $LocalUsersTable extends LocalUsers
     deleted,
     former,
     avatarKey,
+    familyIds,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2250,6 +2314,12 @@ class $LocalUsersTable extends LocalUsers
         avatarKey.isAcceptableOrUnknown(data['avatar_key']!, _avatarKeyMeta),
       );
     }
+    if (data.containsKey('family_ids')) {
+      context.handle(
+        _familyIdsMeta,
+        familyIds.isAcceptableOrUnknown(data['family_ids']!, _familyIdsMeta),
+      );
+    }
     return context;
   }
 
@@ -2299,6 +2369,10 @@ class $LocalUsersTable extends LocalUsers
         DriftSqlType.string,
         data['${effectivePrefix}avatar_key'],
       ),
+      familyIds: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}family_ids'],
+      )!,
     );
   }
 
@@ -2336,6 +2410,9 @@ class UserRow extends DataClass implements Insertable<UserRow> {
 
   /// Their profile photo's key (see [UserDto.avatarKey]), or null.
   final String? avatarKey;
+
+  /// JSON list of the ids of the families they share with this user, ascending; empty for former users.
+  final String familyIds;
   const UserRow({
     required this.id,
     required this.name,
@@ -2347,6 +2424,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     this.deleted,
     this.former,
     this.avatarKey,
+    required this.familyIds,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2367,6 +2445,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     if (!nullToAbsent || avatarKey != null) {
       map['avatar_key'] = Variable<String>(avatarKey);
     }
+    map['family_ids'] = Variable<String>(familyIds);
     return map;
   }
 
@@ -2388,6 +2467,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       avatarKey: avatarKey == null && nullToAbsent
           ? const Value.absent()
           : Value(avatarKey),
+      familyIds: Value(familyIds),
     );
   }
 
@@ -2409,6 +2489,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       deleted: serializer.fromJson<bool?>(json['deleted']),
       former: serializer.fromJson<bool?>(json['former']),
       avatarKey: serializer.fromJson<String?>(json['avatarKey']),
+      familyIds: serializer.fromJson<String>(json['familyIds']),
     );
   }
   @override
@@ -2425,6 +2506,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       'deleted': serializer.toJson<bool?>(deleted),
       'former': serializer.toJson<bool?>(former),
       'avatarKey': serializer.toJson<String?>(avatarKey),
+      'familyIds': serializer.toJson<String>(familyIds),
     };
   }
 
@@ -2439,6 +2521,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     Value<bool?> deleted = const Value.absent(),
     Value<bool?> former = const Value.absent(),
     Value<String?> avatarKey = const Value.absent(),
+    String? familyIds,
   }) => UserRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -2450,6 +2533,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     deleted: deleted.present ? deleted.value : this.deleted,
     former: former.present ? former.value : this.former,
     avatarKey: avatarKey.present ? avatarKey.value : this.avatarKey,
+    familyIds: familyIds ?? this.familyIds,
   );
   UserRow copyWithCompanion(LocalUsersCompanion data) {
     return UserRow(
@@ -2471,6 +2555,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
       deleted: data.deleted.present ? data.deleted.value : this.deleted,
       former: data.former.present ? data.former.value : this.former,
       avatarKey: data.avatarKey.present ? data.avatarKey.value : this.avatarKey,
+      familyIds: data.familyIds.present ? data.familyIds.value : this.familyIds,
     );
   }
 
@@ -2486,7 +2571,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           ..write('pinnedAdmin: $pinnedAdmin, ')
           ..write('deleted: $deleted, ')
           ..write('former: $former, ')
-          ..write('avatarKey: $avatarKey')
+          ..write('avatarKey: $avatarKey, ')
+          ..write('familyIds: $familyIds')
           ..write(')'))
         .toString();
   }
@@ -2503,6 +2589,7 @@ class UserRow extends DataClass implements Insertable<UserRow> {
     deleted,
     former,
     avatarKey,
+    familyIds,
   );
   @override
   bool operator ==(Object other) =>
@@ -2517,7 +2604,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
           other.pinnedAdmin == this.pinnedAdmin &&
           other.deleted == this.deleted &&
           other.former == this.former &&
-          other.avatarKey == this.avatarKey);
+          other.avatarKey == this.avatarKey &&
+          other.familyIds == this.familyIds);
 }
 
 class LocalUsersCompanion extends UpdateCompanion<UserRow> {
@@ -2531,6 +2619,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
   final Value<bool?> deleted;
   final Value<bool?> former;
   final Value<String?> avatarKey;
+  final Value<String> familyIds;
   final Value<int> rowid;
   const LocalUsersCompanion({
     this.id = const Value.absent(),
@@ -2543,6 +2632,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.deleted = const Value.absent(),
     this.former = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.familyIds = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalUsersCompanion.insert({
@@ -2556,6 +2646,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     this.deleted = const Value.absent(),
     this.former = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.familyIds = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2573,6 +2664,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Expression<bool>? deleted,
     Expression<bool>? former,
     Expression<String>? avatarKey,
+    Expression<String>? familyIds,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2587,6 +2679,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       if (deleted != null) 'deleted': deleted,
       if (former != null) 'former': former,
       if (avatarKey != null) 'avatar_key': avatarKey,
+      if (familyIds != null) 'family_ids': familyIds,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2602,6 +2695,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     Value<bool?>? deleted,
     Value<bool?>? former,
     Value<String?>? avatarKey,
+    Value<String>? familyIds,
     Value<int>? rowid,
   }) {
     return LocalUsersCompanion(
@@ -2615,6 +2709,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
       deleted: deleted ?? this.deleted,
       former: former ?? this.former,
       avatarKey: avatarKey ?? this.avatarKey,
+      familyIds: familyIds ?? this.familyIds,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2652,6 +2747,9 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
     if (avatarKey.present) {
       map['avatar_key'] = Variable<String>(avatarKey.value);
     }
+    if (familyIds.present) {
+      map['family_ids'] = Variable<String>(familyIds.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2671,6 +2769,7 @@ class LocalUsersCompanion extends UpdateCompanion<UserRow> {
           ..write('deleted: $deleted, ')
           ..write('former: $former, ')
           ..write('avatarKey: $avatarKey, ')
+          ..write('familyIds: $familyIds, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4272,6 +4371,7 @@ typedef $$LocalChatsTableCreateCompanionBuilder = LocalChatsCompanion Function({
   Value<int> myLastReadSeq,
   Value<int?> mutedUntil,
   Value<String?> draft,
+  Value<int?> familyId,
   Value<int> syncedSeq,
   Value<int> rowid,
 });
@@ -4288,6 +4388,7 @@ typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
   Value<int> myLastReadSeq,
   Value<int?> mutedUntil,
   Value<String?> draft,
+  Value<int?> familyId,
   Value<int> syncedSeq,
   Value<int> rowid,
 });
@@ -4358,6 +4459,11 @@ class $$LocalChatsTableFilterComposer
 
   ColumnFilters<String> get draft => $composableBuilder(
     column: $table.draft,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get familyId => $composableBuilder(
+    column: $table.familyId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4436,6 +4542,11 @@ class $$LocalChatsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get syncedSeq => $composableBuilder(
     column: $table.syncedSeq,
     builder: (column) => ColumnOrderings(column),
@@ -4497,6 +4608,9 @@ class $$LocalChatsTableAnnotationComposer
   GeneratedColumn<String> get draft =>
       $composableBuilder(column: $table.draft, builder: (column) => column);
 
+  GeneratedColumn<int> get familyId =>
+      $composableBuilder(column: $table.familyId, builder: (column) => column);
+
   GeneratedColumn<int> get syncedSeq =>
       $composableBuilder(column: $table.syncedSeq, builder: (column) => column);
 }
@@ -4541,6 +4655,7 @@ class $$LocalChatsTableTableManager
                 Value<int> myLastReadSeq = const Value.absent(),
                 Value<int?> mutedUntil = const Value.absent(),
                 Value<String?> draft = const Value.absent(),
+                Value<int?> familyId = const Value.absent(),
                 Value<int> syncedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion(
@@ -4556,6 +4671,7 @@ class $$LocalChatsTableTableManager
                 myLastReadSeq: myLastReadSeq,
                 mutedUntil: mutedUntil,
                 draft: draft,
+                familyId: familyId,
                 syncedSeq: syncedSeq,
                 rowid: rowid,
               ),
@@ -4573,6 +4689,7 @@ class $$LocalChatsTableTableManager
                 Value<int> myLastReadSeq = const Value.absent(),
                 Value<int?> mutedUntil = const Value.absent(),
                 Value<String?> draft = const Value.absent(),
+                Value<int?> familyId = const Value.absent(),
                 Value<int> syncedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion.insert(
@@ -4588,6 +4705,7 @@ class $$LocalChatsTableTableManager
                 myLastReadSeq: myLastReadSeq,
                 mutedUntil: mutedUntil,
                 draft: draft,
+                familyId: familyId,
                 syncedSeq: syncedSeq,
                 rowid: rowid,
               ),
@@ -5306,6 +5424,7 @@ typedef $$LocalUsersTableCreateCompanionBuilder = LocalUsersCompanion Function({
   Value<bool?> deleted,
   Value<bool?> former,
   Value<String?> avatarKey,
+  Value<String> familyIds,
   Value<int> rowid,
 });
 typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
@@ -5319,6 +5438,7 @@ typedef $$LocalUsersTableUpdateCompanionBuilder = LocalUsersCompanion Function({
   Value<bool?> deleted,
   Value<bool?> former,
   Value<String?> avatarKey,
+  Value<String> familyIds,
   Value<int> rowid,
 });
 
@@ -5378,6 +5498,11 @@ class $$LocalUsersTableFilterComposer
 
   ColumnFilters<String> get avatarKey => $composableBuilder(
     column: $table.avatarKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get familyIds => $composableBuilder(
+    column: $table.familyIds,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5440,6 +5565,11 @@ class $$LocalUsersTableOrderingComposer
     column: $table.avatarKey,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get familyIds => $composableBuilder(
+    column: $table.familyIds,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalUsersTableAnnotationComposer
@@ -5488,6 +5618,9 @@ class $$LocalUsersTableAnnotationComposer
 
   GeneratedColumn<String> get avatarKey =>
       $composableBuilder(column: $table.avatarKey, builder: (column) => column);
+
+  GeneratedColumn<String> get familyIds =>
+      $composableBuilder(column: $table.familyIds, builder: (column) => column);
 }
 
 class $$LocalUsersTableTableManager
@@ -5528,6 +5661,7 @@ class $$LocalUsersTableTableManager
                 Value<bool?> deleted = const Value.absent(),
                 Value<bool?> former = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<String> familyIds = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion(
                 id: id,
@@ -5540,6 +5674,7 @@ class $$LocalUsersTableTableManager
                 deleted: deleted,
                 former: former,
                 avatarKey: avatarKey,
+                familyIds: familyIds,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5554,6 +5689,7 @@ class $$LocalUsersTableTableManager
                 Value<bool?> deleted = const Value.absent(),
                 Value<bool?> former = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<String> familyIds = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalUsersCompanion.insert(
                 id: id,
@@ -5566,6 +5702,7 @@ class $$LocalUsersTableTableManager
                 deleted: deleted,
                 former: former,
                 avatarKey: avatarKey,
+                familyIds: familyIds,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

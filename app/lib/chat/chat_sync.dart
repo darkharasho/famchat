@@ -32,6 +32,7 @@ class ChatSync {
     this.typingTtl = const Duration(seconds: 5),
     this.typingThrottle = const Duration(seconds: 3),
     this.syncRetryDelays = const [Duration(seconds: 2), Duration(seconds: 10), Duration(seconds: 30), Duration(minutes: 1)],
+    this.onFamiliesChanged,
     DateTime Function()? now,
   })  : directory = directory ?? Directory(db, api, me),
         _now = now ?? DateTime.now,
@@ -46,6 +47,10 @@ class ChatSync {
   final Directory directory;
   late final ChatKeys keys;
   final Duration typingTtl, typingThrottle;
+
+  /// Called after a `family` event (and the directory refresh it brings): the families list
+  /// (`GET /families`) is stale.
+  final void Function()? onFamiliesChanged;
 
   /// After a failed connect-sync, while still connected: wait these (the last repeats) and retry.
   final List<Duration> syncRetryDelays;
@@ -414,6 +419,11 @@ class ChatSync {
       case 'profile':
         // Someone changed their profile photo: the directory has the new key.
         await directory.refresh();
+      case 'family':
+        // A family I'm in was renamed, approved, joined or left: who shares a family with whom may
+        // have changed, and so has the families list.
+        await directory.refresh();
+        onFamiliesChanged?.call();
       case 'account_deleted':
         // Someone's account was deleted: they're renamed and their devices revoked. The `chat`
         // events that come with it move each shared chat to a new epoch.

@@ -191,9 +191,13 @@ class ChatDto {
     required this.createdAt,
     required this.members,
     this.mutedUntil,
+    this.familyId,
   });
 
   final String id, kind, createdBy;
+
+  /// A group's family; null for direct chats.
+  final int? familyId;
 
   /// This user's mute: no notifications from the chat until then (Unix ms), or null.
   final int? mutedUntil;
@@ -217,6 +221,7 @@ class ChatDto {
         createdAt: _f(j, 'createdAt'),
         members: [for (final m in _list(j, 'members')) MemberDto.fromJson(m)],
         mutedUntil: _f<int?>(j, 'mutedUntil'),
+        familyId: _f<int?>(j, 'familyId'),
       );
 }
 

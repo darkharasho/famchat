@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:famchat/chat/directory.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +41,22 @@ void main() {
     expect(row.isAdmin, isFalse);
     expect(row.pinnedAdmin, isFalse);
     expect((await alice.db.userById(alice.userId))!.former, isNot(isTrue));
+  });
+
+  test("each user's shared family ids are stored, and cleared once they're former", () async {
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 3, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 3, admin: true));
+    await dir.refresh();
+    expect(jsonDecode((await alice.db.userById(alice.userId))!.familyIds), [1, 3]);
+    expect(jsonDecode((await alice.db.userById(bob.userId))!.familyIds), [1, 3]);
+
+    backend.removeFamilyRole(bob.userId, 3);
+    await dir.refresh();
+    expect(jsonDecode((await alice.db.userById(bob.userId))!.familyIds), [1]);
+
+    backend.markFormer(bob.userId);
+    await dir.refresh();
+    expect(jsonDecode((await alice.db.userById(bob.userId))!.familyIds), isEmpty);
   });
 
   test("after first sight, a family-2 admin the server lists with no proof can't make a reset count", () async {

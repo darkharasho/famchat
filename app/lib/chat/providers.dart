@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/models.dart';
 import '../session/session_controller.dart';
 import 'chat_sync.dart';
 import 'db/chat_db.dart';
@@ -50,11 +51,40 @@ final chatSyncProvider = Provider<ChatSync?>((ref) {
   });
   final me = ref.watch(localIdentityProvider).value;
   if (me == null) return null;
-  final sync = ChatSync(db: ref.watch(chatDbProvider), api: ref.watch(chatApiProvider), hub: ref.watch(hubLinkProvider), me: me);
+  final sync = ChatSync(
+    db: ref.watch(chatDbProvider),
+    api: ref.watch(chatApiProvider),
+    hub: ref.watch(hubLinkProvider),
+    me: me,
+    onFamiliesChanged: () => ref.invalidate(familiesProvider),
+  );
   unawaited(sync.start());
   ref.onDispose(() => unawaited(sync.stop()));
   return sync;
 });
+
+/// This user's families (`GET /families`), any status; empty when signed out. A `family` event
+/// invalidates it.
+final familiesProvider = AsyncNotifierProvider<Families, List<Family>>(Families.new);
+
+class Families extends AsyncNotifier<List<Family>> {
+  @override
+  Future<List<Family>> build() async {
+    if (ref.watch(myUserIdProvider) == null) return const [];
+    return ref.watch(apiClientProvider).families();
+  }
+
+  /// Fetches the list again (after creating, joining, renaming or leaving a family).
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+/// The approved families: the ones a chat or an invite can be for (pickers).
+final myFamiliesProvider = FutureProvider<List<Family>>(
+  (ref) async => [for (final f in await ref.watch(familiesProvider.future)) if (f.status == 'approved') f],
+);
 
 final chatListProvider = StreamProvider<List<ChatListItem>>((ref) {
   final me = ref.watch(myUserIdProvider);

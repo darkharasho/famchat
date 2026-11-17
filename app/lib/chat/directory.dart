@@ -89,6 +89,7 @@ class Directory {
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,
+        familyIds: jsonEncode(u.former ? const <int>[] : ({for (final f in u.families) f.id}.toList()..sort())),
       ));
       for (final d in u.devices) {
         // Which trusted keys certify it: if only keys a verified reset retired, the server signed
