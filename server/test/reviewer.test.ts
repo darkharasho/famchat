@@ -95,6 +95,14 @@ describe("the reviewer invite", () => {
     expect((await reviewers(alice)).invite).toEqual({ inviteUrl: inv.inviteUrl, createdAt: inv.createdAt });
   });
 
+  it("a reviewer redeem joins the hidden family", async () => {
+    const { r1, invite } = await setup();
+    expect(await env.DB.prepare("SELECT role FROM family_members WHERE family_id = 2 AND user_id = ?").bind(r1.userId).first<string>("role")).toBe("member");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM family_members WHERE family_id = 1 AND user_id = ?").bind(r1.userId).first<number>("n")).toBe(0);
+    expect(await env.DB.prepare("SELECT family_id FROM invites WHERE reviewer = 1").first<number>("family_id")).toBe(2);
+    expect(invite.inviteToken).toBeTruthy();
+  });
+
   it("is reusable and never expires", async () => {
     const { alice, invite, r1, r2 } = await setup();
     const r3 = await joinAsReviewer(invite.inviteToken, "Third");

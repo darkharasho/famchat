@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
-import { FAMILY_ONE } from "../lib/family";
+import { FAMILY_ONE, REVIEWER_FAMILY } from "../lib/family";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
 import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { deleteAccount } from "../lib/delete-account";
@@ -37,17 +37,19 @@ export function reviewerInviteUrl(env: Env, token: string): string {
 export const NEVER = 253_402_300_799_999;
 
 /**
- * Bootstrap invites (createdBy = null) are only inserted while no family member exists (or every
- * one has deleted their account), in the same statement. Reviewer accounts don't count.
+ * Bootstrap invites (createdBy = null) are only inserted while family #1 has no live member and no
+ * live operator exists, in the same statement. Reviewer accounts don't count. Invites are for family #1.
  */
 async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
   const res = await env.DB.prepare(
-    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at)
-     SELECT ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL
-       OR NOT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL AND reviewer = 0)`,
+    `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id)
+     SELECT ?, ?, ?, ?, ?, ?, ${FAMILY_ONE} WHERE ? IS NOT NULL
+       OR (NOT EXISTS (SELECT 1 FROM family_members m JOIN users u ON u.id = m.user_id
+                       WHERE m.family_id = ${FAMILY_ONE} AND u.deleted_at IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM users WHERE operator = 1 AND deleted_at IS NULL))`,
   )
     .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
     .run();
@@ -85,8 +87,8 @@ admin.post("/reviewer-invite", requireAuth, requireAdmin, async (c) => {
   await db.batch([
     db.prepare(`UPDATE invites SET revoked_at = ? WHERE ${ACTIVE_REVIEWER_INVITE}`).bind(now, now),
     db.prepare(
-      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, reviewer, token)
-       VALUES (?, 'Reviewer', 0, ?, ?, ?, 1, ?)`,
+      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, reviewer, token, family_id)
+       VALUES (?, 'Reviewer', 0, ?, ?, ?, 1, ?, ${REVIEWER_FAMILY})`,
     ).bind(await sha256Hex(token), c.get("userId"), now, NEVER, token),
   ]);
   return c.json({ inviteToken: token, inviteUrl: reviewerInviteUrl(c.env, token), createdAt: now }, 201);
@@ -190,14 +192,19 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   const sig = signature((await readJson(c)).sig);
   const signer = await db.prepare("SELECT identity_pub FROM users WHERE id = ?").bind(by).first<string>("identity_pub");
   if (!signer || !(await verifyEd25519(signer, sig, promotionMessage(userId, by)))) throw new ApiError("invalid_request");
-  const res = await db.prepare(
-    "UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ? AND deleted_at IS NULL AND reviewer = 0",
-  )
-    .bind(by, signer, sig, userId).run();
-  if (res.meta.changes !== 1) throw new ApiError("not_found");
-  await db.prepare(
-    "UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE family_id = ? AND user_id = ?",
-  ).bind(by, signer, sig, FAMILY_ONE, userId).run();
+  // The target must be a live member of family #1; checked first so nothing is half-written.
+  const member = await db.prepare(
+    `SELECT 1 AS ok FROM family_members m JOIN users u ON u.id = m.user_id
+     WHERE m.family_id = ? AND m.user_id = ? AND u.deleted_at IS NULL AND u.reviewer = 0`,
+  ).bind(FAMILY_ONE, userId).first();
+  if (!member) throw new ApiError("not_found");
+  await db.batch([
+    db.prepare(
+      "UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE family_id = ? AND user_id = ?",
+    ).bind(by, signer, sig, FAMILY_ONE, userId),
+    db.prepare("UPDATE users SET is_admin = 1, admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE id = ?")
+      .bind(by, signer, sig, userId),
+  ]);
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
   return c.body(null, 204);
 });

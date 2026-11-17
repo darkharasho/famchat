@@ -1,7 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex, verifyAccessToken } from "../src/lib/tokens";
-import { BASE, insertInvite, jsonReq, makeKeys, redeemBody, resetDb } from "./helpers";
+import { BASE, insertInvite, insertUserWithDevice, jsonReq, makeKeys, redeemBody, resetDb } from "./helpers";
 
 const redeem = (body: unknown) => SELF.fetch(`${BASE}/api/auth/invite/redeem`, jsonReq("POST", body));
 const count = (table: string) => env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<number>("n");
@@ -36,6 +36,20 @@ describe("POST /api/auth/invite/redeem", () => {
     expect(body.isAdmin).toBe(true);
     const adm = await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(body.userId).first<number>("is_admin");
     expect(adm).toBe(1);
+  });
+
+  it("a normal invite joins its family as member, or admin when make_admin", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const make = async (name: string) =>
+      (await (await SELF.fetch(`${BASE}/api/admin/invites`, jsonReq("POST", { name }, { authorization: `Bearer ${admin.accessToken}` }))).json<{ inviteToken: string }>()).inviteToken;
+    const role = (id: string) => env.DB.prepare("SELECT role FROM family_members WHERE family_id = 1 AND user_id = ?").bind(id).first<string>("role");
+    const t = await make("Kid");
+    const { userId } = await (await redeem(await redeemBody(t))).json<{ userId: string }>();
+    expect(await role(userId)).toBe("member");
+    expect(await env.DB.prepare("SELECT family_id FROM invites WHERE token_hash = ?").bind(await sha256Hex(t)).first<number>("family_id")).toBe(1);
+    const t2 = await insertInvite({ admin: true });
+    const b2 = await (await redeem(await redeemBody(t2))).json<{ userId: string }>();
+    expect(await role(b2.userId)).toBe("admin");
   });
 
   it("redeem twice -> 410 and one user", async () => {

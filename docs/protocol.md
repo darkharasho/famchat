@@ -139,8 +139,17 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - `GET /me` → `{userId, deviceId, name, isAdmin, recoveryCodeSet, reviewer}`; `recoveryCodeSet` says an
   admin recovery key is registered; `reviewer` marks a reviewer account ("Reviewer accounts").
   Redeeming answers `{userId, deviceId, isAdmin, reviewer, accessToken, refreshToken}`.
-- Admin routes check `users.is_admin` in the database, so a promotion counts at once. Reviewer
-  accounts get 403 from every admin route.
+- Admin routes check admin of family #1 in `family_members` (not `users.is_admin`, which is only a
+  mirror), so a promotion counts at once. `POST /admin/users/:id/admin` writes the proof into family
+  #1's row and mirrors `users` in one batch; the target must be a live member of family #1, else 404.
+  Reviewer accounts get 403 from every admin route.
+- Redeeming an invite joins the invite's family (`invites.family_id`: family #1 for admin and
+  bootstrap invites, the hidden reviewer family for reviewer invites), as admin when `make_admin`.
+  The recovery redeem accepts an admin of any non-hidden family.
+- Bootstrap and the operator: `POST /admin/bootstrap` gives 409 `already_bootstrapped` while family
+  #1 has a live member or a live operator exists. Redeeming a bootstrap invite (no creator) sets
+  `users.operator = 1` and fills family #1's `created_by`. Deleting the operator's account clears
+  the flag; no successor is chosen automatically (set `operator` by hand in D1).
 - `DELETE /devices/:id` → 204 (your own live device, else 404). Closes that device's WebSocket (code
   4001) and, in the same transaction, moves **every chat of your user** to `currentEpoch + 1` with
   `epochReady: false`; members get `chat {chatId}` per chat and `device {userId, deviceId, revoked: true}`.

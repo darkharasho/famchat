@@ -1,7 +1,10 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex } from "../src/lib/tokens";
-import { BASE, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
+import { BASE, jsonReq, makeKeys, redeemBody, insertUserWithDevice, resetDb } from "./helpers";
+import { api } from "./chat-helpers";
+import { promotionMessage } from "../src/lib/reset";
+import { sign } from "./reset-helpers";
 
 const DAY = 24 * 60 * 60 * 1000;
 const bootstrap = (body: unknown, secret = "test-bootstrap-secret") =>
@@ -43,6 +46,24 @@ describe("POST /api/admin/bootstrap", () => {
     expect(await res.json()).toEqual({ error: "already_bootstrapped" });
     const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM invites").first<number>("n");
     expect(n).toBe(0);
+  });
+
+  it("redeeming the bootstrap invite makes the operator and owner of family #1", async () => {
+    const { inviteToken } = await (await bootstrap({ name: "Michael" })).json<{ inviteToken: string }>();
+    const res = await SELF.fetch(`${BASE}/api/auth/invite/redeem`, jsonReq("POST", await redeemBody(inviteToken, await makeKeys())));
+    expect(res.status).toBe(201);
+    const { userId } = await res.json<{ userId: string }>();
+    expect(await env.DB.prepare("SELECT operator FROM users WHERE id = ?").bind(userId).first<number>("operator")).toBe(1);
+    expect(await env.DB.prepare("SELECT role FROM family_members WHERE family_id = 1 AND user_id = ?").bind(userId).first<string>("role")).toBe("admin");
+    expect(await env.DB.prepare("SELECT created_by FROM families WHERE id = 1").first<string>("created_by")).toBe(userId);
+    expect(await env.DB.prepare("SELECT family_id FROM invites").first<number>("family_id")).toBe(1);
+  });
+
+  it("is refused while family #1 has a live member or an operator exists", async () => {
+    await insertUserWithDevice({ operator: true, families: [] });
+    const res = await bootstrap({ name: "Michael" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "already_bootstrapped" });
   });
 
   it("blank or too-long name -> 400", async () => {
@@ -88,5 +109,31 @@ describe("POST /api/admin/invites", () => {
 
   it("garbage token -> 401", async () => {
     expect((await invite({ name: "Mom" }, "abc.def.ghi")).status).toBe(401);
+  });
+});
+
+describe("promotion and family membership", () => {
+  const promote = async (by: { accessToken: string; userId: string; keys: { identityPriv: CryptoKey } }, userId: string) =>
+    api(by.accessToken, "POST", `/admin/users/${userId}/admin`, { sig: await sign(by.keys.identityPriv, promotionMessage(userId, by.userId)) });
+
+  it("promotion writes the proof into family #1", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const dad = await insertUserWithDevice({ name: "Dad" });
+    expect((await promote(admin, dad.userId)).status).toBe(204);
+    const fm = await env.DB.prepare("SELECT role, admin_by, admin_signer_pub, admin_sig FROM family_members WHERE family_id = 1 AND user_id = ?")
+      .bind(dad.userId).first<Record<string, unknown>>();
+    const u = await env.DB.prepare("SELECT is_admin, admin_by, admin_signer_pub, admin_sig FROM users WHERE id = ?")
+      .bind(dad.userId).first<Record<string, unknown>>();
+    expect(fm?.role).toBe("admin");
+    expect(fm?.admin_by).toBe(admin.userId);
+    expect(fm?.admin_sig).toBeTruthy();
+    expect(u).toEqual({ is_admin: 1, admin_by: fm?.admin_by, admin_signer_pub: fm?.admin_signer_pub, admin_sig: fm?.admin_sig });
+  });
+
+  it("promoting a user who is not in family #1 -> 404 and nothing written", async () => {
+    const admin = await insertUserWithDevice({ admin: true });
+    const outsider = await insertUserWithDevice({ families: [] });
+    expect((await promote(admin, outsider.userId)).status).toBe(404);
+    expect(await env.DB.prepare("SELECT is_admin FROM users WHERE id = ?").bind(outsider.userId).first<number>("is_admin")).toBe(0);
   });
 });
