@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../theme/motion.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
+import 'build_info.dart';
 import 'update_controller.dart';
 
 /// The "new version" popup, floating in the corner over every screen (mounted in main.dart's
@@ -143,16 +144,24 @@ class AppVersionGroup extends ConsumerWidget {
       ]);
     }
     if (ref.watch(updateConfigProvider) == null) {
+      // The web app, phones (the stores update those) and local builds: just which build this is.
       final open = ref.watch(appDownloadsProvider);
-      if (open == null) return const SizedBox.shrink();
+      final info = ref.watch(buildInfoProvider);
       return SettingsGroup(title: 'App', children: [
         ListTile(
-          key: const Key('settings-get-apps'),
-          leading: const TileIcon(Icons.download_rounded),
-          title: const Text('Get the apps'),
-          subtitle: const Text('FamChat for Windows, Mac, Linux, iPhone and Android.'),
-          onTap: () => open(Uri.base.resolve('/download.html')),
+          key: const Key('settings-version'),
+          leading: const TileIcon(Icons.info_outline_rounded),
+          title: Text(versionLine(info)),
+          subtitle: info.web ? const Text('Reload the page to get the newest version.') : null,
         ),
+        if (open != null)
+          ListTile(
+            key: const Key('settings-get-apps'),
+            leading: const TileIcon(Icons.download_rounded),
+            title: const Text('Get the apps'),
+            subtitle: const Text('FamChat for Windows, Mac, Linux, iPhone and Android.'),
+            onTap: () => open(Uri.base.resolve('/download.html')),
+          ),
       ]);
     }
     final state = ref.watch(updateProvider);

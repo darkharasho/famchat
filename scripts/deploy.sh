@@ -17,7 +17,10 @@ if [ "${SKIP_WEB_BUILD:-}" != 1 ]; then
   echo "==> flutter build web"
   # Self-host CanvasKit instead of loading it from Google's CDN: fewer third parties for a
   # private app, and the site works without gstatic.com.
-  (cd "$root/app" && flutter build web --release --no-web-resources-cdn)
+  # The version line in settings: when this was deployed, and from which commit.
+  commit="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+  (cd "$root/app" && flutter build web --release --no-web-resources-cdn \
+    --dart-define=FAMCHAT_COMMIT="$commit" --dart-define=FAMCHAT_BUILT="$(date -u +%F)")
 fi
 [ -f "$root/app/build/web/index.html" ] || { echo "app/build/web has no index.html" >&2; exit 1; }
 
