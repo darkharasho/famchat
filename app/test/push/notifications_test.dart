@@ -253,6 +253,23 @@ void main() {
       await n.stop();
       await events.close();
     });
+    test('silent messages and muted chats do not notify; an expired mute does', () async {
+      final events = StreamController<Map<String, Object?>>.broadcast();
+      final notifier = FakeNotifier();
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+        ..start();
+      events.add({...msg(chatB, 'dad'), 'silent': true});
+      await db.setMutedUntil(chatA, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+      events.add(msg(chatA, 'mom'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(notifier.shown, isEmpty);
+      await db.setMutedUntil(chatA, DateTime.now().subtract(const Duration(minutes: 1)).millisecondsSinceEpoch);
+      events.add(msg(chatA, 'mom'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(notifier.shown.map((s) => s.$2), ['Mom']);
+      await n.stop();
+      await events.close();
+    });
   });
 
   test('pushTestSummary', () {

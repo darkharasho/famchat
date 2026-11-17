@@ -66,6 +66,7 @@ class _Member {
   _Member(this.joinedSeq, this.joinedAt);
   final int joinedSeq, joinedAt;
   int lastReadSeq = 0;
+  int? mutedUntil;
 }
 
 class _Chat {
@@ -79,7 +80,7 @@ class _Chat {
   final epochs = <int>{};
   final messages = <MessageDto>[];
 
-  ChatDto dto() => ChatDto(
+  ChatDto dto([String? viewer]) => ChatDto(
         id: id,
         kind: kind,
         title: title,
@@ -89,6 +90,7 @@ class _Chat {
         lastSeq: lastSeq,
         lastMessageAt: lastMessageAt,
         createdAt: createdAt,
+        mutedUntil: members[viewer]?.mutedUntil,
         members: [
           for (final e in members.entries)
             MemberDto(userId: e.key, joinedSeq: e.value.joinedSeq, lastReadSeq: e.value.lastReadSeq),
@@ -131,6 +133,9 @@ class FakeChatBackend {
   final _users = <String, _User>{};
   final _devices = <String, _Device>{};
   final _chats = <String, _Chat>{};
+
+  /// Ids of messages that were sent with `silent: true`.
+  final silentIds = <String>{};
   final _wraps = <String, ChatKeyWrap>{};
   final _hubs = <String, FakeHubLink>{};
 
@@ -447,6 +452,7 @@ class FakeChatBackend {
         );
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
+        if (m['silent'] == true) silentIds.add(id);
         if (h.dropNextAck) {
           h.dropNextAck = false;
           h.drop();
@@ -525,11 +531,11 @@ class FakeChatApi implements ChatApi {
   @override
   Future<List<ChatDto>> chats() => _run('GET /chats', () => [
         for (final c in b._chats.values)
-          if (c.members.containsKey(userId)) c.dto(),
+          if (c.members.containsKey(userId)) c.dto(userId),
       ]);
 
   @override
-  Future<ChatDto> chat(String id) => _run('GET /chats/$id', () => b._memberChat(id, userId).dto());
+  Future<ChatDto> chat(String id) => _run('GET /chats/$id', () => b._memberChat(id, userId).dto(userId));
 
   @override
   Future<({ChatDto chat, bool created})> createChat({
@@ -598,6 +604,12 @@ class FakeChatApi implements ChatApi {
         c.currentEpoch++;
         b._notify([target], {'type': 'removed', 'chatId': chatId});
         b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+      });
+
+  @override
+  Future<void> muteChat(String chatId, int? until) => _run('PUT /chats/$chatId/mute', () {
+        b._memberChat(chatId, userId).members[userId]!.mutedUntil = until;
+        b._notify([userId], {'type': 'chat', 'chatId': chatId});
       });
 
   @override

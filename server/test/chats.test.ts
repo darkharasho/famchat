@@ -157,3 +157,33 @@ describe("GET /api/chats", () => {
     expect((await api(c.accessToken, "GET", `/chats/${ab.id}`)).status).toBe(404);
   });
 });
+
+describe("PUT /api/chats/:id/mute", () => {
+  it("mutes for the caller only, until a time or for good, and unmutes", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    const until = Date.now() + 3_600_000;
+    expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/mute`, { until })).status).toBe(204);
+    const mine = await (await api(a.accessToken, "GET", `/chats/${chat.id}`)).json<{ chat: ChatOut }>();
+    expect(mine.chat.mutedUntil).toBe(until);
+    const list = await (await api(a.accessToken, "GET", "/chats")).json<{ chats: ChatOut[] }>();
+    expect(list.chats[0].mutedUntil).toBe(until);
+    const theirs = await (await api(b.accessToken, "GET", `/chats/${chat.id}`)).json<{ chat: ChatOut }>();
+    expect(theirs.chat.mutedUntil).toBeNull();
+    expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: null })).status).toBe(204);
+    const after = await (await api(a.accessToken, "GET", `/chats/${chat.id}`)).json<{ chat: ChatOut }>();
+    expect(after.chat.mutedUntil).toBeNull();
+  });
+
+  it("rejects bad values and non-members", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    for (const body of [{}, { until: "soon" }, { until: 1.5 }, { until: -1 }, { until: 1e17 }]) {
+      expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/mute`, body)).status).toBe(400);
+    }
+    expect((await api(c.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: null })).status).toBe(404);
+  });
+});

@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../media/photo.dart';
@@ -23,6 +24,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
 import '../../widgets/typing_dots.dart';
+import 'chat_list.dart' show messageSnippet;
 import 'emoji_input.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
@@ -67,6 +69,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Where a query closed with Esc started: it stays closed until the user moves on.
   int? _dismissedAt;
+
+  /// The message the next send replies to, or the one being edited (at most one of the two).
+  MessageRow? _replyTo, _editing;
+
+  /// A message just jumped to, tinted for a moment.
+  String? _highlight;
+  final _scroll = ScrollController();
+  final _bubbleKeys = <String, GlobalKey>{};
+
+  GlobalKey _keyFor(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
 
   @override
   void initState() {
@@ -156,6 +168,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }));
     _text.dispose();
     _focus.dispose();
+    _scroll.dispose();
     _emojiPopover.dispose();
     super.dispose();
   }
@@ -211,15 +224,103 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final sync = ref.read(chatSyncProvider);
     final text = replaceTrailingEmoticon(_text.text);
     if (sync == null || text.trim().isEmpty) return;
+    final editing = _editing, replyTo = _replyTo;
+    if (editing != null && _changes.isDeleted(editing.id)) {
+      _cancelCompose();
+      _snack('That message was deleted.');
+      return;
+    }
     try {
-      await sync.sendText(widget.chatId, text);
+      if (editing != null) {
+        if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
+      } else {
+        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id);
+      }
       _text.clear();
+      if (mounted) setState(() => _editing = _replyTo = null);
     } on ArgumentError {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That message is too long.')));
       }
     }
     if (!_pickerOpen) _focus.requestFocus();
+  }
+
+  /// The latest changes over this chat's messages (set in build).
+  MessageChanges _changes = messageChanges(const []);
+
+  String? _currentText(MessageRow m) => _changes.textOf(m);
+
+  void _startReply(MessageRow m) {
+    setState(() {
+      _replyTo = m;
+      if (_editing != null) _text.clear();
+      _editing = null;
+    });
+    _focus.requestFocus();
+  }
+
+  void _startEdit(MessageRow m) {
+    final text = _currentText(m);
+    if (text == null) return;
+    setState(() {
+      _editing = m;
+      _replyTo = null;
+    });
+    _text.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+    _focus.requestFocus();
+  }
+
+  void _cancelCompose() {
+    final wasEditing = _editing != null;
+    setState(() => _editing = _replyTo = null);
+    if (wasEditing) _text.clear();
+  }
+
+  Future<void> _delete(MessageRow m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete for everyone?'),
+        content: const Text('It will show as deleted in this chat. Anyone who already saw it may remember it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (_editing?.id == m.id || _replyTo?.id == m.id) _cancelCompose();
+    await ref.read(chatSyncProvider)?.deleteMessage(widget.chatId, m.id);
+  }
+
+  /// Scrolls until [id]'s bubble is built, centers it and tints it for a moment.
+  Future<void> _jumpTo(String id) async {
+    for (var i = 0; i < 60; i++) {
+      final ctx = _bubbleKeys[id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(ctx, alignment: 0.5, duration: const Duration(milliseconds: 250));
+        if (!mounted) return;
+        setState(() => _highlight = id);
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        if (mounted && _highlight == id) setState(() => _highlight = null);
+        return;
+      }
+      if (!_scroll.hasClients) return;
+      final pos = _scroll.position;
+      if (pos.pixels >= pos.maxScrollExtent) break;
+      // The list runs bottom-up: older messages are further along.
+      _scroll.jumpTo(math.min(pos.pixels + pos.viewportDimension * 0.8, pos.maxScrollExtent));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    _snack("That message isn't available.");
   }
 
   /// Photos being compressed and encrypted (before they appear in the list).
@@ -303,12 +404,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 }
               : {
                   if (_enterSends) const SingleActivator(LogicalKeyboardKey.enter): _send,
-                  // With a draft, Esc only leaves the field; a second Esc (the shell's) closes the chat.
+                  // Esc cancels a reply or edit; with a draft, it only leaves the field; a second
+                  // Esc (the shell's) closes the chat.
                   const SingleActivator(LogicalKeyboardKey.escape): () => _emojiPopover.isShowing
                       ? _emojiPopover.hide()
-                      : _text.text.isEmpty
-                          ? context.go('/')
-                          : _focus.unfocus(),
+                      : _editing != null || _replyTo != null
+                          ? _cancelCompose()
+                          : _text.text.isEmpty
+                              ? context.go('/')
+                              : _focus.unfocus(),
                 },
           child: TextField(
             key: const Key('composer'),
@@ -352,7 +456,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         ),
       ),
       const SizedBox(width: Space.sm),
-      if (_empty && canRecord)
+      if (_editing != null)
+        IconButton.filled(
+          tooltip: 'Save edit',
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          icon: const Icon(Icons.check_rounded),
+          onPressed: _send,
+        )
+      else if (_empty && canRecord)
         IconButton.filled(
           tooltip: 'Record voice message',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
@@ -418,8 +529,22 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           users[m.userId]!,
     ];
 
+    final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
-    final visible = messages.where((m) => m.kind != 'reaction').toList();
+    final visible = messages.where((m) => !changeKinds.contains(m.kind)).toList();
+    final byId = {for (final m in visible) m.id: m};
+    String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
+    QuotedMessage? quoteFor(MessageRow m) {
+      final target = replyTargetOf(m);
+      if (target == null) return null;
+      final t = byId[target];
+      return QuotedMessage(
+        id: target,
+        sender: t == null ? 'Someone' : nameOf(t.senderUserId),
+        snippet: t == null ? 'Message not available' : messageSnippet(t, changes),
+      );
+    }
+
     final others = members.where((m) => m.userId != me).toList();
     final lastMineSent = visible.lastWhere((m) => m.senderUserId == me && m.seq != null, orElse: () => _none).id;
     String? seenFooter(MessageRow m) {
@@ -442,7 +567,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
               child: MessageBubble(
+                key: _keyFor(m.id),
                 message: m,
+                shownText: changes.textOf(m),
+                edited: changes.edited.contains(m.id),
+                deleted: changes.isDeleted(m.id),
+                quote: quoteFor(m),
+                onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
+                highlighted: _highlight == m.id,
+                onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
+                onEdit: m.senderUserId == me && m.kind == 'text' && !changes.isDeleted(m.id) ? () => _startEdit(m) : null,
+                onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
                 mine: m.senderUserId == me,
                 senderName: group && m.senderUserId != me && firstInGroup ? users[m.senderUserId]?.name ?? 'Someone' : null,
                 reactions: reactions[m.id] ?? const {},
@@ -478,7 +613,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             const SizedBox(width: Space.md),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text(title, overflow: TextOverflow.ellipsis, maxLines: 1, style: theme.textTheme.titleMedium),
+                Row(children: [
+                  Flexible(child: Text(title, overflow: TextOverflow.ellipsis, maxLines: 1, style: theme.textTheme.titleMedium)),
+                  if ((chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.notifications_off_outlined,
+                      size: 16,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      semanticLabel: 'Muted',
+                    ),
+                  ],
+                ]),
                 if (subtitle != null)
                   Text(
                     subtitle,
@@ -541,6 +687,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       body: group ? 'Messages here go to everyone in $title.' : 'Only you and $title can read this chat.',
                     )
                   : ListView.builder(
+                      controller: _scroll,
                       reverse: true,
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, Space.sm),
                       itemCount: entries.length,
@@ -601,6 +748,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               child: SafeArea(
                 top: false,
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if ((_replyTo != null || _editing != null) && !_recording.active)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
+                      child: _ComposeBanner(
+                        icon: _editing != null ? Icons.edit_outlined : Icons.reply_rounded,
+                        title: _editing != null ? 'Editing message' : 'Replying to ${nameOf(_replyTo!.senderUserId)}',
+                        snippet: messageSnippet((_editing ?? _replyTo)!, changes),
+                        cancelTooltip: _editing != null ? 'Cancel edit' : 'Cancel reply',
+                        onCancel: _cancelCompose,
+                      ),
+                    ),
                   Padding(
                     padding: EdgeInsets.fromLTRB(math.max(Space.xs, side - Space.md), Space.sm, math.max(Space.sm, side - Space.xs), Space.sm),
                     child: _recording.active
@@ -628,6 +786,48 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           ]);
         }),
       ),
+    );
+  }
+}
+
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice'}.contains(m.kind);
+
+/// Above the composer while replying or editing: what, a snippet, and a close button.
+class _ComposeBanner extends StatelessWidget {
+  const _ComposeBanner({
+    required this.icon,
+    required this.title,
+    required this.snippet,
+    required this.cancelTooltip,
+    required this.onCancel,
+  });
+
+  final IconData icon;
+  final String title, snippet, cancelTooltip;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.xs, Space.xs, Space.xs),
+      decoration: BoxDecoration(
+        color: s.surfaceContainer,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border(left: BorderSide(color: s.tertiary, width: 3)),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 20, color: s.tertiary),
+        const SizedBox(width: Space.md),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text(title, style: theme.textTheme.labelLarge?.copyWith(color: s.tertiary, fontWeight: FontWeight.w700)),
+            Text(snippet, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
+          ]),
+        ),
+        IconButton(tooltip: cancelTooltip, icon: const Icon(Icons.close_rounded), onPressed: onCancel),
+      ]),
     );
   }
 }

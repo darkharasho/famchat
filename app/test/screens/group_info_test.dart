@@ -1,6 +1,7 @@
 import 'package:famchat/chat/providers.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:famchat/screens/chats/group_info_screen.dart';
 import 'package:famchat/screens/chats/new_chat_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,6 +45,35 @@ void main() {
     expect(backend.chatDto(id).members.map((m) => m.userId), isNot(contains(carol.userId)));
     expect(backend.chatDto(id).currentEpoch, 2);
     expect(find.text('Carol'), findsNothing);
+  });
+
+  test('muteLabel', () {
+    final now = DateTime(2026, 11, 16, 9, 30);
+    expect(muteLabel(null, now), 'Off');
+    expect(muteLabel(DateTime(2026, 11, 16, 9).millisecondsSinceEpoch, now), 'Off', reason: 'expired');
+    expect(muteLabel(DateTime(2026, 11, 16, 10, 30).millisecondsSinceEpoch, now), 'Until 10:30');
+    expect(muteLabel(DateTime(2026, 11, 17, 8, 5).millisecondsSinceEpoch, now), 'Until tomorrow, 08:05');
+    expect(muteLabel(DateTime(2026, 11, 23, 9, 30).millisecondsSinceEpoch, now), 'Until 11/23');
+    expect(muteLabel(muteForever, now), 'Until you turn them back on');
+  });
+
+  chatTestWidgets('muting a chat for a while, then unmuting', (tester) async {
+    final id = await openInfo(tester, (c) => c.read(chatSyncProvider)!.openDirect(bob.userId));
+    expect(find.text('Mute notifications'), findsOneWidget);
+    await tester.tap(find.text('Mute notifications'));
+    await settle(tester);
+    await tester.tap(find.text('For 8 hours'));
+    await settle(tester);
+    final until = (await inApp(tester, () => alice.db.chatById(id)))!.mutedUntil!;
+    expect(until, greaterThan(DateTime.now().add(const Duration(hours: 7)).millisecondsSinceEpoch));
+    expect(backend.chatDto(id).members, isNotEmpty);
+    expect(find.textContaining('Until'), findsOneWidget);
+    await tester.tap(find.text('Mute notifications'));
+    await settle(tester);
+    await tester.tap(find.text('Unmute'));
+    await settle(tester);
+    expect((await inApp(tester, () => alice.db.chatById(id)))!.mutedUntil, isNull);
+    expect(find.text('Off'), findsOneWidget);
   });
 
   chatTestWidgets('leaving returns to the chat list', (tester) async {

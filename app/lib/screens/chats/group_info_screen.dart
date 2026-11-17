@@ -5,11 +5,27 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../sign_out.dart' show apiErrorMessage;
+import 'chat_list.dart' show clockTime;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
 
-/// Members, add people, leave, and (for the creator) remove.
+/// "Until I turn it back on": the server's latest accepted mute time (year 9999).
+const muteForever = 253402300799000;
+
+/// How long notifications from a chat stay off.
+String muteLabel(int? until, DateTime now) {
+  if (until == null || until <= now.millisecondsSinceEpoch) return 'Off';
+  if (until >= muteForever) return 'Until you turn them back on';
+  final t = DateTime.fromMillisecondsSinceEpoch(until);
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(t.year, t.month, t.day);
+  if (day == today) return 'Until ${clockTime(t)}';
+  if (day == DateTime(today.year, today.month, today.day + 1)) return 'Until tomorrow, ${clockTime(t)}';
+  return 'Until ${t.month}/${t.day}';
+}
+
+/// Members, add people, notifications, leave, and (for the creator) remove.
 class GroupInfoScreen extends ConsumerStatefulWidget {
   const GroupInfoScreen({super.key, required this.chatId});
 
@@ -37,6 +53,45 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
       true;
 
   void _goHome() => context.go('/');
+
+  /// Muted: unmute. Otherwise asks for how long, then mutes.
+  Future<void> _mute(ChatRow chat) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final muted = (chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch;
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (muted)
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Unmute'),
+              onTap: () => Navigator.pop(context, 0),
+            )
+          else ...[
+            for (final (label, d) in const [
+              ('For 1 hour', Duration(hours: 1)),
+              ('For 8 hours', Duration(hours: 8)),
+              ('For 1 week', Duration(days: 7)),
+            ])
+              ListTile(
+                leading: const Icon(Icons.schedule_rounded),
+                title: Text(label),
+                onTap: () => Navigator.pop(context, DateTime.now().add(d).millisecondsSinceEpoch),
+              ),
+            ListTile(
+              leading: const Icon(Icons.notifications_off_outlined),
+              title: const Text('Until I turn it back on'),
+              onTap: () => Navigator.pop(context, muteForever),
+            ),
+          ],
+        ]),
+      ),
+    );
+    if (picked == null) return;
+    await _run(() => sync.mute(chat.id, picked == 0 ? null : picked));
+  }
 
   /// Runs [f]; shows the error and returns false if it throws.
   Future<bool> _run(Future<void> Function() f) async {
@@ -102,6 +157,20 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                 onTap: () => group
                     ? context.go('/chats/$chatId/add')
                     : context.go('/new?with=${otherMember(chat, members, me) ?? ''}'),
+              ),
+            ]),
+            SettingsGroup(children: [
+              ListTile(
+                key: const Key('mute-chat'),
+                leading: TileIcon(
+                  (chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch
+                      ? Icons.notifications_off_outlined
+                      : Icons.notifications_none_rounded,
+                ),
+                title: const Text('Mute notifications'),
+                subtitle: Text(muteLabel(chat.mutedUntil, DateTime.now())),
+                enabled: !_busy && sync != null,
+                onTap: () => _mute(chat),
               ),
             ]),
             SettingsGroup(title: membersLabel(members.length), children: [

@@ -246,8 +246,13 @@ export class FamilyHub extends DurableObject<Env> {
     if (env.epoch !== chat.current_epoch || chat.ready !== 1) return send(ws, { type: "error", id, error: "stale_epoch" });
 
     const now = Date.now();
+    // Silent sends (reactions, edits, deletes) reach sockets marked as such, push no one and don't
+    // count as chat activity.
+    const silent = m.silent === true;
     const [, inserted] = await db.batch([
-      db.prepare("UPDATE chats SET last_seq = last_seq + 1, last_message_at = ? WHERE id = ?").bind(now, chatId),
+      db.prepare(
+        "UPDATE chats SET last_seq = last_seq + 1, last_message_at = CASE WHEN ? THEN last_message_at ELSE ? END WHERE id = ?",
+      ).bind(silent ? 1 : 0, now, chatId),
       db.prepare(
         `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at)
          SELECT id, last_seq, ?, ?, ?, ?, ? FROM chats WHERE id = ? RETURNING seq`,
@@ -258,6 +263,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const msg = JSON.stringify({
       type: "msg",
+      ...(silent ? { silent: true } : {}),
       message: messageOut({
         chat_id: chatId, seq, id, sender_user_id: att.userId, sender_device_id: att.deviceId,
         envelope: JSON.stringify(env), created_at: now,
@@ -268,6 +274,7 @@ export class FamilyHub extends DurableObject<Env> {
       for (const s of this.sockets(u, ws)) trySend(s, msg);
       if (u !== att.userId) others.push(u);
     }
+    if (silent) return;
     // Not awaited: the next send shouldn't wait for the push lookup and the queue.
     this.pushOffline({ chatId, senderUserId: att.userId, messageId: id }, others).catch((e) =>
       console.error("push hook failed", e),
@@ -280,10 +287,12 @@ export class FamilyHub extends DurableObject<Env> {
    */
   private async pushOffline(msg: Omit<PushJob, "userIds">, userIds: string[]): Promise<void> {
     if (userIds.length === 0) return;
+    // Members who muted the chat until later get no push.
     const { results } = await this.env.DB.prepare(
       `SELECT id, user_id FROM devices WHERE user_id IN (${userIds.map(() => "?").join(",")})
-       AND revoked_at IS NULL AND push_token IS NOT NULL ORDER BY id`,
-    ).bind(...userIds).all<{ id: string; user_id: string }>();
+       AND revoked_at IS NULL AND push_token IS NOT NULL
+       AND user_id NOT IN (SELECT user_id FROM chat_members WHERE chat_id = ? AND muted_until > ?) ORDER BY id`,
+    ).bind(...userIds, msg.chatId, Date.now()).all<{ id: string; user_id: string }>();
     const targets = results.filter((d) =>
       this.ctx.getWebSockets(`d:${d.id}`).every((s) => s.readyState !== WebSocket.READY_STATE_OPEN),
     );

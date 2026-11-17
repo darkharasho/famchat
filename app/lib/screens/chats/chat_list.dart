@@ -1,10 +1,9 @@
-import 'dart:convert';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../session/session_controller.dart';
 import '../../theme/app_theme.dart';
@@ -77,6 +76,7 @@ class _ChatTile extends StatelessWidget {
       final u = users[m.userId];
       return m.userId != me && u != null && u.identityPub != u.trustedIdentityPub;
     });
+    final muted = (item.chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch;
     final tileColor = selected ? theme.listTileTheme.selectedTileColor : null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
@@ -118,6 +118,10 @@ class _ChatTile extends StatelessWidget {
                             const SizedBox(width: 4),
                             Icon(Icons.gpp_maybe_outlined, size: 16, color: s.error, semanticLabel: 'Security key changed'),
                           ],
+                          if (muted) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.notifications_off_outlined, size: 16, color: s.onSurfaceVariant, semanticLabel: 'Muted'),
+                          ],
                         ]),
                       ),
                       const SizedBox(width: Space.sm),
@@ -135,7 +139,7 @@ class _ChatTile extends StatelessWidget {
                     Row(children: [
                       Expanded(
                         child: Text(
-                          preview(item.last, users, me),
+                          preview(item.last, users, me, changes: item.lastChanges),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
@@ -149,14 +153,17 @@ class _ChatTile extends StatelessWidget {
                         Container(
                           constraints: const BoxConstraints(minWidth: 22),
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(color: t.badge, borderRadius: BorderRadius.circular(99)),
+                          decoration: BoxDecoration(color: muted ? s.outline : t.badge, borderRadius: BorderRadius.circular(99)),
                           child: Semantics(
                             label: '${item.unread} unread',
                             excludeSemantics: true,
                             child: Text(
                               '${item.unread}',
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.labelSmall?.copyWith(color: t.onBadge, fontWeight: FontWeight.w700),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: muted ? s.surface : t.onBadge,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ),
@@ -173,17 +180,28 @@ class _ChatTile extends StatelessWidget {
   }
 }
 
-/// One line about a message for the chat list.
-String preview(MessageRow? m, Map<String, UserRow> users, String? me) {
+/// One line about a message for the chat list; [changes] are the edits and deletes over it.
+String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<MessageRow> changes = const []}) {
   if (m == null) return 'No messages yet';
   final who = m.senderUserId == me ? 'You: ' : '';
+  final c = messageChanges([m, ...changes]);
+  if (c.isDeleted(m.id)) return '${who}Deleted a message';
   return switch (m.kind) {
-    'text' => '$who${(jsonDecode(m.body!) as Map)['text']}',
-    'photo' => '$who📷 Photo',
-    'voice' => '$who🎤 Voice message',
+    'text' || 'photo' || 'voice' => '$who${messageSnippet(m, c)}',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
+  };
+}
+
+/// A message in a few words (replies, the composer banner, the chat list).
+String messageSnippet(MessageRow m, MessageChanges changes) {
+  if (changes.isDeleted(m.id)) return 'Deleted message';
+  return switch (m.kind) {
+    'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
+    'photo' => '📷 Photo',
+    'voice' => '🎤 Voice message',
+    _ => 'Message',
   };
 }
 

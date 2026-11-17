@@ -22,6 +22,9 @@ class LocalChats extends Table {
   IntColumn get createdAt => integer()();
   IntColumn get myLastReadSeq => integer().withDefault(const Constant(0))();
 
+  /// This user's mute (Unix ms; see [ChatDto.mutedUntil]), or null.
+  IntColumn get mutedUntil => integer().nullable()();
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   IntColumn get syncedSeq => integer().withDefault(const Constant(0))();
 
@@ -50,13 +53,13 @@ class LocalMessages extends Table {
   TextColumn get senderUserId => text()();
   TextColumn get senderDeviceId => text()();
 
-  /// text | reaction | unknown | undecryptable
+  /// text | photo | voice | reaction | edit | delete | unknown | undecryptable | invalid
   TextColumn get kind => text()();
 
   /// The plaintext JSON (null while undecryptable).
   TextColumn get body => text().nullable()();
 
-  /// For reactions: the message reacted to.
+  /// For reactions, edits and deletes: the message they change.
   TextColumn get targetId => text().nullable()();
 
   /// The envelope JSON, kept only while the message can't be decrypted yet.
@@ -159,12 +162,21 @@ class Meta extends Table {
 }
 
 class ChatListItem {
-  const ChatListItem({required this.chat, required this.members, required this.last, required this.unread});
+  const ChatListItem({
+    required this.chat,
+    required this.members,
+    required this.last,
+    required this.unread,
+    this.lastChanges = const [],
+  });
   final ChatRow chat;
   final List<MemberRow> members;
 
-  /// The newest message that isn't a reaction.
+  /// The newest message that isn't a change to another (a reaction, edit or delete).
   final MessageRow? last;
+
+  /// The edits and deletes of [last] (and its reactions), in order.
+  final List<MessageRow> lastChanges;
   final int unread;
 
   int get activity => [chat.createdAt, chat.lastMessageAt ?? 0, last?.createdAt ?? 0].reduce((a, b) => a > b ? a : b);
@@ -175,7 +187,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -188,6 +200,7 @@ class ChatDb extends _$ChatDb {
             await into(meta).insertOnConflictUpdate(const MetaRow(key: adminsPinnedKey, value: '1'));
           }
           if (from < 3) await m.addColumn(localUsers, localUsers.deleted);
+          if (from < 4) await m.addColumn(localChats, localChats.mutedUntil);
         },
       );
 
@@ -233,6 +246,7 @@ class ChatDb extends _$ChatDb {
             lastSeq: c.lastSeq,
             lastMessageAt: Value(c.lastMessageAt),
             createdAt: c.createdAt,
+            mutedUntil: Value(c.mutedUntil),
           ),
           onConflict: DoUpdate((_) => LocalChatsCompanion(
                 kind: Value(c.kind),
@@ -242,6 +256,7 @@ class ChatDb extends _$ChatDb {
                 epochReady: Value(c.epochReady),
                 lastSeq: Value(c.lastSeq),
                 lastMessageAt: Value(c.lastMessageAt),
+                mutedUntil: Value(c.mutedUntil),
               )),
         );
         await (delete(localMembers)..where((m) => m.chatId.equals(c.id))).go();
@@ -302,6 +317,8 @@ class ChatDb extends _$ChatDb {
         return true;
       });
 
+  Future<void> deleteMessages(List<String> ids) => (delete(localMessages)..where((m) => m.id.isIn(ids))).go();
+
   Future<MessageRow?> messageById(String id) =>
       (select(localMessages)..where((m) => m.id.equals(id))).getSingleOrNull();
 
@@ -352,7 +369,22 @@ class ChatDb extends _$ChatDb {
   Stream<List<MemberRow>> watchMembers(String chatId) =>
       (select(localMembers)..where((m) => m.chatId.equals(chatId))).watch();
 
-  /// Chats with members, last message and unread count (others' non-reaction messages above my read
+  static const _changeKinds = ['reaction', 'edit', 'delete'];
+
+  Future<void> setMutedUntil(String chatId, int? until) =>
+      (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(mutedUntil: Value(until)));
+
+  /// Every row in [chatId] that changes [targetId] (its reactions, edits and deletes), in order.
+  Future<List<MessageRow>> changesTo(String chatId, String targetId) => (select(localMessages)
+        ..where((m) => m.chatId.equals(chatId) & m.targetId.equals(targetId))
+        ..orderBy([
+          (m) => OrderingTerm(expression: m.seq.isNull()),
+          (m) => OrderingTerm(expression: m.seq),
+          (m) => OrderingTerm(expression: m.id),
+        ]))
+      .get();
+
+  /// Chats with members, last message and unread count (others' messages, not changes, above my read
   /// position and my join point), newest activity first.
   Stream<List<ChatListItem>> watchChatList(String myUserId) => customSelect(
         'SELECT 1',
@@ -365,7 +397,7 @@ class ChatDb extends _$ChatDb {
     final items = <ChatListItem>[];
     for (final c in chats) {
       final last = await (select(localMessages)
-            ..where((m) => m.chatId.equals(c.id) & m.kind.equals('reaction').not())
+            ..where((m) => m.chatId.equals(c.id) & m.kind.isIn(_changeKinds).not())
             ..orderBy([
               (m) => OrderingTerm(expression: m.seq.isNull(), mode: OrderingMode.desc),
               (m) => OrderingTerm(expression: m.seq, mode: OrderingMode.desc),
@@ -375,7 +407,11 @@ class ChatDb extends _$ChatDb {
           .getSingleOrNull();
       final unread = await customSelect(
         // Counted from where I joined: history from before is shown, not unread.
-        "SELECT COUNT(*) AS n FROM local_messages WHERE chat_id = ? AND sender_user_id != ? AND kind != 'reaction' "
+        "SELECT COUNT(*) AS n FROM local_messages m WHERE chat_id = ? AND sender_user_id != ? "
+        "AND kind NOT IN ('reaction', 'edit', 'delete') "
+        // Messages their sender deleted aren't unread either.
+        "AND NOT EXISTS (SELECT 1 FROM local_messages d WHERE d.chat_id = m.chat_id AND d.kind = 'delete' "
+        'AND d.target_id = m.id AND d.sender_user_id = m.sender_user_id) '
         'AND seq > MAX(?, COALESCE((SELECT joined_seq FROM local_members WHERE chat_id = ? AND user_id = ?), 0))',
         variables: [
           Variable.withString(c.id),
@@ -390,6 +426,7 @@ class ChatDb extends _$ChatDb {
         chat: c,
         members: members.where((m) => m.chatId == c.id).toList(),
         last: last,
+        lastChanges: last == null ? const [] : await changesTo(c.id, last.id),
         unread: unread.read<int>('n'),
       ));
     }

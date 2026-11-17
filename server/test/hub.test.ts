@@ -329,6 +329,62 @@ describe("send", () => {
     expect(jobs).toEqual([]);
   });
 
+  it("a silent send fans out marked silent and pushes no one", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    await setPushToken(c.deviceId, "c");
+    const chat = await createGroup(a, [b, c]);
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const cb = await connect(b);
+    const before = await env.DB.prepare("SELECT last_message_at FROM chats WHERE id = ?").bind(chat.id).first<number>("last_message_at");
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope(), silent: true });
+    await ca.next("ack");
+    expect((await cb.next("msg")).silent).toBe(true);
+    // A silent change doesn't count as chat activity (the list order stays put).
+    expect(await env.DB.prepare("SELECT last_message_at FROM chats WHERE id = ?").bind(chat.id).first<number>("last_message_at"))
+      .toBe(before);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
+    expect((await cb.next("msg")).silent).toBeUndefined();
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs.length).toBe(1); // only the second, normal message
+  });
+
+  it("members who muted the chat aren't pushed until the mute ends", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    await setPushToken(b.deviceId, "b");
+    await setPushToken(c.deviceId, "c");
+    const chat = await createGroup(a, [b, c]);
+    expect((await api(b.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: Date.now() + 3_600_000 })).status).toBe(204);
+    expect((await api(c.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: Date.now() - 1000 })).status).toBe(204);
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
+    await ca.next("ack");
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs.map((j) => j.userIds)).toEqual([[c.userId]]);
+  });
+
+  it("muting tells the user's own sockets the chat changed", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    const ca = await connect(a);
+    const cb = await connect(b);
+    expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: null })).status).toBe(204);
+    expect((await ca.next("chat")).chatId).toBe(chat.id);
+    await cb.none("chat");
+  });
+
   it("a socket silent for over a minute is pruned and its user pushed", async () => {
     const a = await insertUserWithDevice();
     const b = await insertUserWithDevice();

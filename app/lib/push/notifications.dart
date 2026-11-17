@@ -108,8 +108,11 @@ class PushController {
   }
 }
 
+/// Whether [chat]'s notifications are muted at [now].
+bool isMuted(ChatRow? chat, DateTime now) => (chat?.mutedUntil ?? 0) > now.millisecondsSinceEpoch;
+
 /// Desktop apps and web tabs: a notification for every `msg` from someone else that arrives over
-/// the socket while the app isn't in front.
+/// the socket while the app isn't in front (unless silent, or the chat is muted).
 class MessageNotifier {
   MessageNotifier({
     required this.events,
@@ -136,10 +139,12 @@ class MessageNotifier {
     final m = e['message'];
     if (m is! Map) return;
     final chatId = m['chatId'], sender = m['senderUserId'];
-    if (chatId is! String || sender is! String || sender == myUserId || inFront()) return;
+    // Silent: a reaction, edit or delete (docs/protocol.md "send").
+    if (chatId is! String || sender is! String || sender == myUserId || e['silent'] == true || inFront()) return;
     final route = chatRoute(chatId);
     if (route == null) return;
     try {
+      if (isMuted(await db.chatById(chatId), DateTime.now())) return;
       final (title, body) = await notificationText(db, chatId, sender);
       await notifier.show(id: chatId.hashCode & 0x7fffffff, title: title, body: body, route: route);
     } catch (_) {

@@ -43,7 +43,7 @@ Reset     = {id, signerUserId, signerKind: "admin"|"recovery", signerPub, recove
              claimSig: string|null, completedAt: number|null}            ("Account resets")
 Device    = {id, name, platform, encPub, signPub, certSig, revoked}
 Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
-             lastSeq, lastMessageAt: number|null, createdAt, members: Member[]}
+             lastSeq, lastMessageAt: number|null, createdAt, mutedUntil: number|null, members: Member[]}
 Member    = {userId, joinedSeq, lastReadSeq}
 Message   = {chatId, seq, id, senderUserId, senderDeviceId, envelope: Envelope, createdAt}
 Envelope  = {v: 1, epoch, nonce, ct, sig}                                  (spec "Messages")
@@ -73,6 +73,21 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
  "waveform",                                  b64url of 0–128 peak bytes (0–255), oldest first; senders send 64
  "bytes", "mime":"audio/mp4"}                 size of the .m4a
 ```
+
+A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"<messageId>"}`
+(clients that don't know `replyTo` just show the text).
+
+Edits and deletes are messages too, and count only when their sender is the target's sender:
+
+```
+{"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages; the latest edit wins
+{"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
+```
+
+A deleted message shows as "This message was deleted" and loses its reactions; replies quote it as
+"Deleted message". Neither changes nor deleted messages count as unread, and changes don't move the
+chat's `lastMessageAt`.
+Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 Clients keep unknown kinds (whole body) and show them as unsupported.
 
@@ -109,7 +124,8 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
   name, body "New message". Group: title = group title, body "New message from <sender>". Never message
   content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
-- Who gets one: every device of the other members that has a token and **no open socket** when the
+- Who gets one: every device of the other members (except those who muted the chat, and none at all for
+  a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
   answered no ping for 90 s are closed first (code 4002).
   Mobile apps close their socket when sent to the background.
@@ -333,6 +349,9 @@ writes an `events` row (audit log; not exposed by the API yet).
   Adding someone to a **direct** chat isn't allowed: clients create a new group instead.
 - `DELETE /chats/:id/members/:userId` → 204. Groups only. Yourself = leave; someone else = remove
   (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`.
+- `PUT /chats/:id/mute {until: number|null}` → 204. Your own mute: no pushes from this chat until
+  `until` (Unix ms, 0 to 253402300799000; "until I turn it back on" is a far-off time), or `null` to
+  unmute. Shown only to you as the chat's `mutedUntil`; your own sockets get a `chat` event.
 - `POST /chats/:id/epochs {epoch, wraps}` → `201 {chat}`. Creates the current epoch's key: `epoch` must
   equal `currentEpoch` and wraps must cover exactly the live devices of current members. The first
   member device wins; the rest get `epoch_exists` and fetch the wraps instead.
@@ -384,7 +403,7 @@ Frames are JSON text. One socket per device carries every chat.
 ### Client → hub
 | frame | effect |
 |---|---|
-| `{type:"send", id, chatId, envelope}` | store and fan out a message (below) |
+| `{type:"send", id, chatId, envelope, silent?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames |
 | `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
@@ -396,7 +415,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
-| `{type:"msg", message: Message}` | a new message in one of your chats (not echoed to the sending socket) |
+| `{type:"msg", message: Message, silent?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify |
 | `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
