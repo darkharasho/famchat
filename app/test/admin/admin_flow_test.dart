@@ -2,6 +2,7 @@
 // the fake server, which checks every signature like server/src/routes/{admin,auth}.ts.
 import 'package:famchat/admin/admin_service.dart';
 import 'package:famchat/api/models.dart';
+import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/reset.dart';
 import 'package:famchat/session/invite_link.dart';
 import 'package:famchat/session/secure_kv.dart';
@@ -74,11 +75,35 @@ void main() {
     );
   });
 
-  test('make admin', () async {
+  test('make admin signs v2 and posts to /families/1/admins/:id', () async {
     final admin = await member('Michael', admin: true);
     final dad = await member('Dad');
-    await adminOf(admin).makeAdmin(userIdOf(dad));
-    expect(server.users[userIdOf(dad)]!.isAdmin, isTrue);
+    final adminId = userIdOf(admin), dadId = userIdOf(dad);
+    await adminOf(admin).makeAdmin(dadId);
+    expect(server.log, contains('POST /api/families/1/admins/$dadId -> 204'));
+    final d = server.users[dadId]!;
+    expect(d.isAdmin, isTrue);
+    expect(d.adminProof!['byUserId'], adminId);
+    expect(
+      await verifyPromotionV2(
+        signerPub: b64urlDecode(server.users[adminId]!.identityPub),
+        familyId: 1,
+        userId: dadId,
+        byUserId: adminId,
+        sig: b64urlDecode(d.adminProof!['sig']! as String),
+      ),
+      isTrue,
+    );
+  });
+
+  test('make admin in a family the server has no such family for is refused', () async {
+    final admin = await member('Michael', admin: true);
+    final dad = await member('Dad');
+    await expectLater(
+      adminOf(admin).makeAdmin(userIdOf(dad), familyId: 2),
+      throwsA(isA<ApiException>()),
+    );
+    expect(server.users[userIdOf(dad)]!.isAdmin, isFalse);
   });
 
   test('recovery code: saved, then recovers the admin account on a new device once', () async {

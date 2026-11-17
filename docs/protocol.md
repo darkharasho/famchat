@@ -146,8 +146,9 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
 - The operator (`users.operator = 1`, set by hand or by redeeming a bootstrap invite) holds the
   account-wide powers: `DELETE /admin/users/:id` and the three reviewer endpoints are operator-only
   (403 for anyone else, family admins included). `POST /admin/recovery-key` takes an admin of any
-  non-hidden family. `POST /admin/users/:id/reset` still checks admin of family #1 and needs the
-  target to have a `family_members` row in family #1 (else 404).
+  non-hidden family. `POST /admin/users/:id/reset` takes an admin of any family (403
+  otherwise) and needs a family that is `approved`, where the caller is admin and the target a member
+  (else 404); the lowest such family id authorizes the reset.
 - Redeeming an invite joins the invite's family (`invites.family_id`: family #1 for admin and
   bootstrap invites, the hidden reviewer family for reviewer invites), as admin when `make_admin`.
   The recovery redeem accepts an admin of any non-hidden family.
@@ -240,7 +241,13 @@ a `keysMac` that E accepts, and can't open or forge the bundle, as in the forwar
 Bundle: `sealed = ephPubE(32) ‖ nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 with key
 `HKDF-SHA256(ikm = X25519(ephE, ephPubN) ‖ UTF-8(S), salt = ephPubE ‖ ephPubN, info = "famchat-pair-bundle-v1")`.
 Plaintext is UTF-8 JSON:
-`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub], admin?}]}` (`admin`: E trusts the user as an admin, plan 10).
+`{v: 1, userId, deviceId, identitySeed, certSig, keys: [{chatId, epoch, key}], trust: [{userId, trustedIdentityPub, known: [identityPub], admin?}], familyAdmins?: {"<familyId>": [userId]}}`.
+`familyAdmins` holds E's admin pins: for each family E has seen, the users E trusts as its admins
+("Account resets"). `admin` is for receivers that predate `familyAdmins`: true if E has pinned the
+user in family 1, false if not, and absent (null) if E has never seen family 1. N takes its pins
+from `familyAdmins` if it is present. Otherwise, if any `admin` is set, family 1's pins are the users
+with `admin: true`. With neither, N pins nothing and sees each family for the first time at its
+first directory refresh.
 N accepts it only if it opens, `certSig` verifies over N's own keys with the identity key derived from
 `identitySeed`, and `userId`/`deviceId` equal the claim's. `keys` are every chat key E holds, so N reads
 the history at once; `trust` is E's trust-on-first-use state for other users, so N starts with it instead
@@ -360,7 +367,7 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
 1. The admin's device makes `resetId` (ULID), a one-time Ed25519 **claim key**, and signs the statement
    (kind `admin`, `oldIdentityPub` = the user's identity key from `/users`) with its identity key.
    `POST /admin/users/:id/reset {resetId, oldIdentityPub, claimPub, createdAt, sig}` (admin) →
-   `201 {resetId, inviteToken, inviteUrl, expiresAt}`. The server checks the signature against the
+   `201 {resetId, familyId, inviteToken, inviteUrl, expiresAt}`; `familyId` is the family whose admin authorized the reset (also in the `reset` audit event payload). The server checks the signature against the
    caller's identity key (400), `|createdAt − now| ≤ 10 min` (400), that `oldIdentityPub` is the
    user's key now (409 `conflict`: refresh `/users`), and that the target isn't the caller (400). In
    one transaction it records the reset, revokes every device of the user (sockets closed with 4001),
@@ -376,12 +383,22 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
    users get `device {userId, deviceId}`; everyone gets `reset` again. A lost response is retried
    with the same keys like any redeem.
 4. Other members' devices verify (client rule, `app/lib/chat/resets.dart`):
-   - **Trusted admins:** the server's `isAdmin` alone carries no authority. A device pins the admins
-     the server lists when it first sees the family (trust on first use; a paired device takes the
-     approving device's list from the handover bundle), then adds only users whose `adminProof` is a
-     valid promotion signed by a trusted admin's current key. Its own user always counts.
-   - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin other
-     than the user. Kind `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`,
+   - **Trusted admins** are kept per family, only for the families the device's own user is in. The
+     server's `isAdmin` and `families[].role` alone carry no authority. When a device first sees a
+     family (one it has no pins for), it pins the admins the server lists for that family (trust on
+     first use). A paired device takes the approving device's pins from the handover bundle. After
+     that, the device adds an admin to a family only if their `families[].adminProof` is a valid
+     promotion for that family: a v2 proof, or a v1 proof in family 1 only. The proof must be signed
+     with the current key of a trusted admin of that family. An admin the server stops listing for a
+     family is unpinned there, and needs a fresh proof to be trusted again. A family the device has
+     seen keeps its pins frozen when the server stops listing it (the user left, or the server
+     omits it or the user's whole entry): they don't count meanwhile, and if the family is listed
+     again they are the starting point, so only never-seen families are trusted on first sight.
+     The device's own user always counts. A device upgraded from one-family pinning keeps its
+     pinned admins as family 1's.
+   - The statement must verify under `signerPub`. Kind `admin`: the signer is a trusted admin, other
+     than the user, of a family that the user and this device's user are both in. For history only,
+     a former user (no shared family) also accepts a trusted admin of any of this device's families. Kind `recovery`: `recoverySig` verifies the recovery key under `oldIdentityPub`,
      a key this device trusts.
    - If `oldIdentityPub` is the trusted key and `signerPub` is the admin's **current** trusted key:
      show "Mom's account was reset by Michael" in every chat shared with the user (a newer reset of
@@ -395,6 +412,17 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
 Second admin: `POST /admin/users/:id/admin {sig}` (admin) → 204 (400 bad signature, 404 unknown
 user). `sig` is the caller's identity key over `"famchat-admin-v1" ‖ str(userId) ‖ str(callerId)`;
 `/users` shows it as `adminProof: {byUserId, signerPub, sig}` (null for the bootstrapped admin).
+
+Per-family promotion: `POST /families/:id/admins/:userId {sig}` (caller an admin of approved family
+`:id`) → 204 (400 `invalid_request` bad signature, 403 `forbidden` caller not an admin of `:id` or
+`:id` not approved, 404 `not_found` target not a live member of `:id`). It writes the proof on the
+target's `family_members` row (`role`, `admin_by`, `admin_signer_pub`, `admin_sig`); for family 1 it
+also mirrors it into the `users` columns. Logs `admin_promoted` with `payload {familyId}`. `sig` is the
+caller's identity key over the **v2** proof `"famchat-admin-v2" ‖ str(String(familyId)) ‖ str(userId) ‖
+str(callerId)` (`str` = u16 big-endian length + UTF-8; the family id is its decimal string). v2
+binds the family so a proof can't be replayed into another family; a v1 proof is rejected here, and
+the compat route above (family 1 only) keeps accepting v1. Shared test vector:
+`server/test/reset-vector.test.ts` (`v2Vector`).
 
 Admin recovery code: the admin's device makes a 25-character Crockford base32 code (125 bits, shown
 as `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), derives an Ed25519 **recovery key** from seed
@@ -554,4 +582,4 @@ Every signature, MAC and key derivation starts with its own domain string, and n
 prefix of another: `famchat-device-cert-v1`, `famchat-wrap-v1`, `famchat-envelope-v1`,
 `famchat-sealed-box-v1` (HKDF info), `famchat-pair-keys-v1` (HMAC), `famchat-pair-bundle-v1` (HKDF info),
 `famchat-media-v1` (media AEAD associated data), `famchat-reset-v1`, `famchat-reset-claim-v1`,
-`famchat-recovery-key-v1`, `famchat-admin-v1` (signatures), `famchat-recovery-seed-v1` (HKDF info).
+`famchat-recovery-key-v1`, `famchat-admin-v1`, `famchat-admin-v2` (signatures), `famchat-recovery-seed-v1` (HKDF info).

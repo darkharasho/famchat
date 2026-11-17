@@ -26,7 +26,8 @@ class TrustedIdentity {
   /// Every identity key trusted for the user so far (base64url).
   final List<String> known;
 
-  /// The approving device trusts the user as an admin (null from a bundle that doesn't say).
+  /// The approving device trusts the user as an admin of family 1 (null from a bundle that doesn't
+  /// say). Read only by receivers older than [PairBundle.familyAdmins].
   final bool? admin;
 }
 
@@ -38,12 +39,17 @@ class PairBundle {
     required this.certSig,
     required this.keys,
     required this.trust,
+    this.familyAdmins,
   });
 
   final String userId, deviceId;
   final Uint8List identitySeed, certSig;
   final List<HandoverKey> keys;
   final List<TrustedIdentity> trust;
+
+  /// Per family the approving device has seen, the admins it trusts there (null from an older
+  /// device, which says only [TrustedIdentity.admin]).
+  final Map<int, List<String>>? familyAdmins;
 
   static const version = 1;
 
@@ -60,6 +66,7 @@ class PairBundle {
           for (final t in trust)
             {'userId': t.userId, 'trustedIdentityPub': t.trustedIdentityPub, 'known': t.known, 'admin': ?t.admin},
         ],
+        if (familyAdmins case final fa?) 'familyAdmins': {for (final e in fa.entries) '${e.key}': e.value},
       }));
 
   /// Throws [CryptoFailure] for anything but a well-formed version-1 bundle.
@@ -103,8 +110,23 @@ class PairBundle {
             },
           ),
       ],
+      familyAdmins: _familyAdmins(j['familyAdmins']),
     );
   }
+}
+
+Map<int, List<String>>? _familyAdmins(Object? v) {
+  if (v == null) return null;
+  if (v is! Map<String, Object?>) throw const CryptoFailure('bad familyAdmins');
+  final out = <int, List<String>>{};
+  for (final e in v.entries) {
+    final id = int.tryParse(e.key), admins = e.value;
+    if (id == null || id < 1 || admins is! List || admins.any((x) => x is! String)) {
+      throw const CryptoFailure('bad familyAdmins');
+    }
+    out[id] = admins.cast<String>();
+  }
+  return out;
 }
 
 /// On the approving device: everything the new device ([deviceId], with [encPub]/[signPub]) needs.
@@ -115,19 +137,27 @@ Future<PairBundle> buildHandover({
   required SimpleKeyPair identity,
   required List<int> encPub,
   required List<int> signPub,
-}) async =>
-    PairBundle(
-      userId: userId,
-      deviceId: deviceId,
-      identitySeed: await seedOf(identity),
-      certSig: await signCertFor(identity: identity, encPub: encPub, signPub: signPub),
-      keys: [for (final k in await db.allKeys()) HandoverKey(chatId: k.chatId, epoch: k.epoch, key: k.key)],
-      trust: [
-        for (final u in await db.allUsers())
-          if (u.id != userId)
-            TrustedIdentity(userId: u.id, trustedIdentityPub: u.trustedIdentityPub, known: _known(u), admin: u.pinnedAdmin),
-      ],
-    );
+}) async {
+  final pins = await db.familyPins();
+  return PairBundle(
+    userId: userId,
+    deviceId: deviceId,
+    identitySeed: await seedOf(identity),
+    certSig: await signCertFor(identity: identity, encPub: encPub, signPub: signPub),
+    keys: [for (final k in await db.allKeys()) HandoverKey(chatId: k.chatId, epoch: k.epoch, key: k.key)],
+    trust: [
+      for (final u in await db.allUsers())
+        if (u.id != userId)
+          TrustedIdentity(
+            userId: u.id,
+            trustedIdentityPub: u.trustedIdentityPub,
+            known: _known(u),
+            admin: pins[1]?.contains(u.id),
+          ),
+    ],
+    familyAdmins: {for (final e in pins.entries) e.key: e.value.toList()},
+  );
+}
 
 List<String> _known(UserRow u) {
   try {
@@ -163,8 +193,17 @@ Future<VerifiedHandover> verifyHandover(
 }
 
 /// On the new device, before its session is saved: binds the database to the device, stores the
-/// chat keys and seeds trust for other users (a later directory refresh keeps it).
+/// chat keys and seeds trust for other users (a later directory refresh keeps it). The approving
+/// device's admin pins replace this device's first-sight pinning, when the bundle has them.
 Future<void> installHandover(ChatDb db, PairBundle b) async {
+  final pins = switch (b.familyAdmins) {
+    final fa? => {for (final e in fa.entries) e.key: e.value.toSet()},
+    // An older approving device: its admins are family 1's.
+    null when b.trust.any((t) => t.admin != null) => {
+        1: {for (final t in b.trust) if (t.admin ?? false) t.userId},
+      },
+    null => null,
+  };
   await db.bindDevice(b.deviceId);
   await db.transaction(() async {
     for (final k in b.keys) {
@@ -173,7 +212,7 @@ Future<void> installHandover(ChatDb db, PairBundle b) async {
     for (final t in b.trust) {
       final existing = await db.userById(t.userId);
       final known = {...t.known, t.trustedIdentityPub}.toList();
-      final admin = t.admin ?? false;
+      final admin = pins?.values.any((a) => a.contains(t.userId)) ?? false;
       await db.putUser(existing?.copyWith(
             trustedIdentityPub: t.trustedIdentityPub,
             knownIdentityPubs: jsonEncode(known),
@@ -189,7 +228,6 @@ Future<void> installHandover(ChatDb db, PairBundle b) async {
             pinnedAdmin: admin,
           ));
     }
-    // The approving device's admins replace this device's first-sight pinning (when it said).
-    if (b.trust.any((t) => t.admin != null)) await db.setMeta(ChatDb.adminsPinnedKey, '1');
+    if (pins != null) await db.replaceFamilyPins(pins);
   });
 }

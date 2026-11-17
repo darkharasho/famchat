@@ -18,9 +18,11 @@ const domainResetClaim = 'famchat-reset-claim-v1';
 const domainRecoveryKey = 'famchat-recovery-key-v1';
 const domainRecoverySeed = 'famchat-recovery-seed-v1';
 const domainAdmin = 'famchat-admin-v1';
+const domainAdminV2 = 'famchat-admin-v2';
 
 const famchatDomains = [
   domainAdmin,
+  domainAdminV2,
   domainReset,
   domainResetClaim,
   domainRecoveryKey,

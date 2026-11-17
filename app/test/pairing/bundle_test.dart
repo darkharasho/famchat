@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:famchat/chat/directory.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/device_cert.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/keys.dart';
@@ -48,8 +49,38 @@ void main() {
     expect(jsonDecode(utf8.decode(sample().encode()))['v'], 1);
   });
 
+  test('bundle JSON round-trips per-family admins', () {
+    final b = PairBundle(
+      userId: 'U1',
+      deviceId: 'D1',
+      identitySeed: Uint8List(32),
+      certSig: Uint8List(64),
+      keys: const [],
+      trust: const [],
+      familyAdmins: const {
+        1: ['U2'],
+        7: [],
+      },
+    );
+    expect(jsonDecode(utf8.decode(b.encode()))['familyAdmins'], {
+      '1': ['U2'],
+      '7': <String>[],
+    });
+    expect(PairBundle.decode(b.encode()).familyAdmins, {
+      1: ['U2'],
+      7: <String>[],
+    });
+    expect(PairBundle.decode(sample().encode()).familyAdmins, isNull);
+  });
+
   test('bad bundle json -> CryptoFailure', () {
-    for (final s in ['', '[]', '{"v":2}', '{"v":1,"userId":"U"}', '{"v":1,"userId":"U","deviceId":"D","identitySeed":"AA","certSig":"AA","keys":[],"trust":[]}']) {
+    for (final s in [
+      '', '[]', '{"v":2}', '{"v":1,"userId":"U"}', '{"v":1,"userId":"U","deviceId":"D","identitySeed":"AA","certSig":"AA","keys":[],"trust":[]}',
+      _withFamilyAdmins('[]'),
+      _withFamilyAdmins('{"x":["U2"]}'),
+      _withFamilyAdmins('{"1":"U2"}'),
+      _withFamilyAdmins('{"1":[2]}'),
+    ]) {
       expect(() => PairBundle.decode(utf8.encode(s)), throwsA(isA<CryptoFailure>()), reason: s);
     }
   });
@@ -120,6 +151,65 @@ void main() {
     await laptop.dispose();
   });
 
+  test('a new bundle hands over every family\'s pins and still sets admin for family-1 admins', () async {
+    final carol = await b.addUser('Carol');
+    addTearDown(carol.dispose);
+    b.setAdmin(bob.userId);
+    b.addFamilyRole(phone.userId, const FamilyRoleDto(id: 2, admin: false));
+    b.addFamilyRole(carol.userId, const FamilyRoleDto(id: 2, admin: true));
+    await phone.db.bindDevice(phone.deviceId);
+    await Directory(phone.db, phone.api, phone.me).refresh();
+    final newKeys = await DeviceKeys.generate();
+    final bundle = PairBundle.decode((await buildHandover(
+      db: phone.db,
+      userId: phone.userId,
+      deviceId: 'NEWDEVICE',
+      identity: b.identityOf(phone.userId),
+      encPub: await newKeys.encPub(),
+      signPub: await newKeys.signPub(),
+    ))
+        .encode());
+    expect(bundle.familyAdmins, {
+      1: [bob.userId],
+      2: [carol.userId],
+    });
+    // For a receiver that only knows one family: admin means pinned in family 1.
+    expect(bundle.trust.firstWhere((t) => t.userId == bob.userId).admin, isTrue);
+    expect(bundle.trust.firstWhere((t) => t.userId == carol.userId).admin, isFalse);
+    final laptop = await b.addDevice(phone.userId);
+    addTearDown(laptop.dispose);
+    await installHandover(laptop.db, bundle);
+    expect(await laptop.db.familyPins(), {
+      1: {bob.userId},
+      2: {carol.userId},
+    });
+    expect((await laptop.db.userById(carol.userId))!.pinnedAdmin, isTrue);
+  });
+
+  test("an old bundle's admin flags pin family 1", () async {
+    final old = PairBundle(
+      userId: 'U1',
+      deviceId: 'D1',
+      identitySeed: Uint8List(32),
+      certSig: Uint8List(64),
+      keys: const [],
+      trust: const [
+        TrustedIdentity(userId: 'U2', trustedIdentityPub: 'p2', known: ['p2'], admin: true),
+        TrustedIdentity(userId: 'U3', trustedIdentityPub: 'p3', known: ['p3'], admin: false),
+      ],
+    );
+    await installHandover(phone.db, PairBundle.decode(old.encode()));
+    expect(await phone.db.familyPins(), {
+      1: {'U2'},
+    });
+    expect((await phone.db.userById('U2'))!.pinnedAdmin, isTrue);
+  });
+
+  test('a bundle that says nothing about admins leaves pinning to first sight', () async {
+    await installHandover(phone.db, sample());
+    expect(await phone.db.familyPins(), isEmpty);
+  });
+
   test('install binds the database to the new device first', () async {
     await phone.db.bindDevice('OLD');
     await phone.db.putKey('X', 1, Uint8List(32));
@@ -159,3 +249,7 @@ void main() {
     expect(back.userId, 'U1');
   });
 }
+
+String _withFamilyAdmins(String json) =>
+    '{"v":1,"userId":"U","deviceId":"D","identitySeed":"${'A' * 43}","certSig":"${'A' * 86}","keys":[],"trust":[],'
+    '"familyAdmins":$json}';

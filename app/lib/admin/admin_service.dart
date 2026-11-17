@@ -50,10 +50,11 @@ class AdminService {
     return ResetLink(resetId: r.resetId, url: '${r.inviteUrl}.${b64url(await seedOf(claim))}', expiresAt: r.expiresAt);
   }
 
-  /// Makes [userId] an admin, signed with this admin's identity key so the family's devices trust it.
-  Future<void> makeAdmin(String userId) async {
-    final sig = await signPromotion(await _identity(), userId: userId, byUserId: _userId);
-    await _api.makeAdmin(userId, sig: b64url(sig));
+  /// Makes [userId] an admin of [familyId], signed with this admin's identity key (a v2 promotion,
+  /// bound to the family) so the family's devices trust it.
+  Future<void> makeAdmin(String userId, {int familyId = 1}) async {
+    final sig = await signPromotionV2(await _identity(), familyId: familyId, userId: userId, byUserId: _userId);
+    await _api.promoteInFamily(familyId, userId, sig: b64url(sig));
   }
 
   /// Makes a new recovery code and registers its key (replacing any earlier code). Show the code
