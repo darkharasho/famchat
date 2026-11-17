@@ -28,6 +28,15 @@ class _User {
   bool deleted = false;
   bool former = false;
   AdminProofDto? adminProof;
+
+  /// In family 1 (as everyone non-former is, unless removed from it); its role is [isAdmin].
+  bool inFamily1 = true;
+
+  /// Left out of `GET /users` altogether (a lie, or a glitch).
+  bool omitted = false;
+
+  /// Roles in families other than family 1.
+  final otherFamilies = <FamilyRoleDto>[];
   final resets = <_Reset>[];
   String? avatarKey;
   Uint8List? avatar;
@@ -233,6 +242,22 @@ class FakeChatBackend {
 
   /// The server marks [userId] admin (or not) with no signed promotion (the bootstrap admin, or a lie).
   void setAdmin(String userId, [bool admin = true]) => _users[userId]!.isAdmin = admin;
+
+  /// The server lists [userId] in another family (a real one, or a lie).
+  void addFamilyRole(String userId, FamilyRoleDto role) => _users[userId]!.otherFamilies.add(role);
+
+  /// The server stops listing [userId] in [familyId] (they left, or were removed).
+  void removeFamilyRole(String userId, int familyId) {
+    final u = _users[userId]!;
+    if (familyId == 1) u.inFamily1 = false;
+    u.otherFamilies.removeWhere((f) => f.id == familyId);
+  }
+
+  /// The server lists [userId] in family 1 again.
+  void addToFamily1(String userId) => _users[userId]!.inFamily1 = true;
+
+  /// `GET /users` leaves [userId] out (or lists them again).
+  void omitFromUsers(String userId, [bool omit = true]) => _users[userId]!.omitted = omit;
 
   /// `POST /admin/users/:id/admin` signed by [by]'s identity key.
   Future<void> promote(String userId, {required String by}) async {
@@ -559,13 +584,17 @@ class FakeChatApi implements ChatApi {
   @override
   Future<List<UserDto>> users() => _run('GET /users', () => [
         for (final u in b._users.values)
+          if (!u.omitted)
           UserDto(
             id: u.id,
             name: u.name,
-            isAdmin: u.isAdmin && !u.former,
+            isAdmin: u.isAdmin && !u.former && u.inFamily1,
             former: u.former,
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.former ? null : u.adminProof,
+            families: u.former
+                ? const []
+                : [if (u.inFamily1) FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof), ...u.otherFamilies],
             deleted: u.deleted,
             avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),

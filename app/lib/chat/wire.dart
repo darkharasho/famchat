@@ -55,6 +55,7 @@ class UserDto {
     required this.devices,
     this.resets = const [],
     this.adminProof,
+    this.families = const [],
     this.deleted = false,
     this.former = false,
     this.avatarKey,
@@ -77,6 +78,9 @@ class UserDto {
   /// Who made this user an admin, signed; null for the bootstrapped first admin (and non-admins).
   final AdminProofDto? adminProof;
 
+  /// The user's role in each family they belong to, with the signed promotion for admins.
+  final List<FamilyRoleDto> families;
+
   /// The user's signed account resets, oldest first: their identity key history.
   final List<ResetDto> resets;
 
@@ -94,11 +98,30 @@ class UserDto {
         null => null,
         _ => throw const FormatException('bad adminProof'),
       },
+      families: j['families'] == null ? const [] : [for (final f in _list(j, 'families')) FamilyRoleDto.fromJson(f)],
       deleted: j['deleted'] == true,
       former: j['former'] == true,
       avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
     );
   }
+}
+
+/// A user's standing in one family: admin or member, with the v2 promotion proof when admin.
+class FamilyRoleDto {
+  const FamilyRoleDto({required this.id, required this.admin, this.adminProof});
+  final int id;
+  final bool admin;
+  final AdminProofDto? adminProof;
+
+  factory FamilyRoleDto.fromJson(Map<String, Object?> j) => FamilyRoleDto(
+        id: _f(j, 'id'),
+        admin: _f<String>(j, 'role') == 'admin',
+        adminProof: switch (j['adminProof']) {
+          final Map<String, Object?> p => AdminProofDto(byUserId: _f(p, 'byUserId'), signerPub: _f(p, 'signerPub'), sig: _f(p, 'sig')),
+          null => null,
+          _ => throw const FormatException('bad adminProof'),
+        },
+      );
 }
 
 /// `"famchat-admin-v1" ‖ str(userId) ‖ str(byUserId)` signed by [signerPub], the promoter's identity key then.

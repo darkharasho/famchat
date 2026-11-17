@@ -181,6 +181,10 @@ end-to-end encryption would protect nothing.
     current at that time.
   - After that, it adds only admins whose v2 proof (or v1 proof, in family #1) verifies under an
     admin it already trusts in that family.
+  - A family the device has seen keeps its pins frozen when the server stops listing it (the user
+    left, or the server omits it). Frozen pins don't count, and they are the starting point if the
+    family is listed again. Only never-seen families are trusted on first sight, so the server
+    can't force a fresh first sight.
   - A paired device takes its pins from the approving device's handover bundle.
   - On upgrade, a device converts its existing pinned-admin list into family #1's pins, so no new
     warnings appear.

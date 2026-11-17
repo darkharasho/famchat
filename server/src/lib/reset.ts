@@ -81,6 +81,15 @@ export function promotionMessage(userId: string, byUserId: string): Uint8Array {
   return new Writer("famchat-admin-v1").str(userId).str(byUserId).finish();
 }
 
+/**
+ * `"famchat-admin-v2" ‖ str(String(familyId)) ‖ str(userId) ‖ str(byUserId)`: [byUserId] made [userId]
+ * an admin of family [familyId]. The family id is in the signed bytes so a proof can't be replayed
+ * into another family.
+ */
+export function promotionMessageV2(familyId: number, userId: string, byUserId: string): Uint8Array {
+  return new Writer("famchat-admin-v2").str(String(familyId)).str(userId).str(byUserId).finish();
+}
+
 function key32(b64: string): Uint8Array {
   const b = b64urlDecode(b64);
   if (b.length !== 32) throw new ApiError("invalid_request");

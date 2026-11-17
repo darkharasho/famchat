@@ -149,4 +149,86 @@ void main() {
     await db.putUser((await db.userById('A'))!.copyWith(former: const Value(true)));
     expect((await db.userById('A'))!.former, isTrue);
   });
+
+  /// A schema-7 database (no family pin tables), set up by [seed], opened as the current schema.
+  Future<ChatDb> fromSchema7(void Function(dynamic raw) seed) async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('DROP TABLE local_families')
+        ..execute('DROP TABLE local_family_admins');
+      seed(raw);
+      raw.execute('PRAGMA user_version = 7');
+    }));
+    addTearDown(db.close);
+    return db;
+  }
+
+  test("schema 7 to 8: a device that pinned admins keeps them as family 1's", () async {
+    final db = await fromSchema7((raw) => raw
+      ..execute("INSERT INTO meta (key, value) VALUES ('adminsPinned', '1')")
+      ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub, pinned_admin) VALUES ('A', 'Ann', 1, 'k', 'k', 1)")
+      ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub, pinned_admin) VALUES ('B', 'Bo', 1, 'k2', 'k2', 0)")
+      ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub, pinned_admin) VALUES ('C', 'Cy', 0, 'k3', 'k3', 1)"));
+    expect(await db.familyPins(), {
+      1: {'A', 'C'},
+    });
+  });
+
+  test('schema 7 to 8: a device that never pinned has seen no family', () async {
+    final db = await fromSchema7((raw) => raw.execute(
+        "INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub, pinned_admin) VALUES ('A', 'Ann', 1, 'k', 'k', 1)"));
+    expect(await db.familyPins(), isEmpty);
+  });
+
+  test('family pins: replaced as a whole, families absent from the map are dropped', () async {
+    final db = ChatDb(NativeDatabase.memory());
+    addTearDown(db.close);
+    expect(await db.familyPins(), isEmpty);
+    await db.replaceFamilyPins({
+      1: {'A'},
+      2: {},
+      3: {'B', 'C'},
+    });
+    expect(await db.familyPins(), {
+      1: {'A'},
+      2: <String>{},
+      3: {'B', 'C'},
+    });
+    await db.replaceFamilyPins({
+      2: {'D'},
+    });
+    expect(await db.familyPins(), {
+      2: {'D'},
+    });
+  });
+
+  test('family pins: an update overwrites only the families it names, the rest stay seen and frozen', () async {
+    final db = ChatDb(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.updateFamilyPins({
+      1: {'A'},
+      2: {'B', 'C'},
+    });
+    await db.updateFamilyPins({
+      2: {'C'},
+      3: {},
+    });
+    expect(await db.familyPins(), {
+      1: {'A'},
+      2: {'C'},
+      3: <String>{},
+    });
+    await db.updateFamilyPins({});
+    expect(await db.familyPins(), {
+      1: {'A'},
+      2: {'C'},
+      3: <String>{},
+    });
+  });
 }

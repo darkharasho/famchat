@@ -56,9 +56,6 @@ class Directory {
   Future<Set<String>> _refresh() async {
     final users = await _api.users();
     final myPub = b64url(_me.identityPub);
-    // The first time this device sees the family, it pins the admins the server lists (trust on
-    // first use, like identity keys); after that only signed promotions add admins.
-    final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
     final inputs = <TrustInput>[];
     for (final u in users) {
       final old = await _db.userById(u.id);
@@ -68,16 +65,16 @@ class Directory {
       final trusted = mine ? myPub : (old?.trustedIdentityPub ?? u.identityPub);
       inputs.add(TrustInput(
         userId: u.id,
-        isAdmin: u.isAdmin && !u.former,
-        pinnedAdmin: (old?.pinnedAdmin ?? false) || (firstSight && u.isAdmin && !u.former),
-        adminProof: u.adminProof,
+        families: u.former ? const [] : u.families,
         serverKey: u.identityPub,
         trustedKey: trusted,
         known: mine ? {myPub, ..._known(old)} : {..._known(old), trusted},
         resets: u.resets,
       ));
     }
-    final t = await resolveTrust(inputs, myUserId: _me.userId);
+    // The first time this device sees a family, it pins the admins the server lists for it (trust
+    // on first use, like identity keys); after that only signed promotions add admins there.
+    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: await _db.familyPins());
     for (final u in users) {
       final mine = u.id == _me.userId;
       final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
@@ -88,7 +85,7 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
-        pinnedAdmin: t.admins.contains(u.id),
+        pinnedAdmin: t.admins.values.any((a) => a.contains(u.id)),
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,
@@ -115,7 +112,10 @@ class Directory {
         ));
       }
     }
-    if (firstSight) await _db.setMeta(ChatDb.adminsPinnedKey, '1');
+    // Only the families on my entry are updated. One the server stops listing (or my whole entry,
+    // missing or former) keeps its pins frozen and stays seen: the server can't force a new first
+    // sight, which would trust whoever it lists then.
+    await _db.updateFamilyPins(t.admins);
     for (final w in t.witnessed) {
       await _db.recordReset(
         id: w.reset.id,

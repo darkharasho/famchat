@@ -140,6 +140,25 @@ Future<bool> verifyPromotion({
 }) =>
     _verify(signerPub, sig, _promotionMessage(userId, byUserId));
 
+Uint8List _promotionMessageV2(int familyId, String userId, String byUserId) => (ByteWriter(domainAdminV2)
+      ..str(familyId.toString())
+      ..str(userId)
+      ..str(byUserId))
+    .finish();
+
+/// `"famchat-admin-v2" ‖ str(familyId) ‖ str(userId) ‖ str(byUserId)`: a promotion scoped to one family.
+Future<Uint8List> signPromotionV2(SimpleKeyPair identity, {required int familyId, required String userId, required String byUserId}) =>
+    _sign(identity, _promotionMessageV2(familyId, userId, byUserId));
+
+Future<bool> verifyPromotionV2({
+  required List<int> signerPub,
+  required int familyId,
+  required String userId,
+  required String byUserId,
+  required List<int> sig,
+}) =>
+    _verify(signerPub, sig, _promotionMessageV2(familyId, userId, byUserId));
+
 // --- the printed admin recovery code ---
 
 const _alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

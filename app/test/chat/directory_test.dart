@@ -1,4 +1,5 @@
 import 'package:famchat/chat/directory.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_chat_backend.dart';
@@ -38,6 +39,187 @@ void main() {
     expect(row.isAdmin, isFalse);
     expect(row.pinnedAdmin, isFalse);
     expect((await alice.db.userById(alice.userId))!.former, isNot(isTrue));
+  });
+
+  test("after first sight, a family-2 admin the server lists with no proof can't make a reset count", () async {
+    // Family 2 (Alice and Bob, no admins yet) is seen once.
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: false));
+    await dir.refresh();
+    expect((await alice.db.familyPins())[2], isEmpty);
+    final x = await backend.addUser('X');
+    addTearDown(x.dispose);
+    // A hostile server: X joins family 2 as its (unproven) admin, and resets Bob.
+    backend.addFamilyRole(x.userId, const FamilyRoleDto(id: 2, admin: true));
+    final resetId = await backend.adminReset(bob.userId, by: x.userId);
+    final bob2 = await backend.claimReset(bob.userId, resetId);
+    addTearDown(bob2.dispose);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue, reason: 'manual banner, not silently accepted');
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+    expect(await alice.db.allResets(), isEmpty);
+    // Listing X as a family-1 admin too (no proof) doesn't help.
+    backend.setAdmin(x.userId);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue);
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+    // A family Alice sees for the first time is trusted on first use, but only for itself: its
+    // admin X gets no say in families 1 and 2, where Bob is.
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 3, admin: false));
+    backend.addFamilyRole(x.userId, const FamilyRoleDto(id: 3, admin: true));
+    expect(await dir.refresh(), isEmpty);
+    expect(await alice.db.familyPins(), {
+      1: <String>{},
+      2: <String>{},
+      3: {x.userId},
+    });
+    expect(await dir.identityChanged(bob.userId), isTrue);
+    expect(await alice.db.allResets(), isEmpty);
+  });
+
+  test('two families: pins stay separate and an admin resets only their own family', () async {
+    final carol = await backend.addUser('Carol'), dave = await backend.addUser('Dave'), erin = await backend.addUser('Erin');
+    addTearDown(carol.dispose);
+    addTearDown(dave.dispose);
+    addTearDown(erin.dispose);
+    // Family 1: Alice, Bob (admin), Dave, Erin. Family 2: Alice, Carol (admin), Dave.
+    backend.setAdmin(bob.userId);
+    backend.removeFamilyRole(carol.userId, 1);
+    for (final u in [alice, dave]) {
+      backend.addFamilyRole(u.userId, const FamilyRoleDto(id: 2, admin: false));
+    }
+    backend.addFamilyRole(carol.userId, const FamilyRoleDto(id: 2, admin: true));
+    await dir.refresh();
+    expect(await alice.db.familyPins(), {
+      1: {bob.userId},
+      2: {carol.userId},
+    });
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+    expect((await alice.db.userById(carol.userId))!.pinnedAdmin, isTrue);
+
+    // Carol resets Dave (family 2) and Erin (family 1 only).
+    final daveReset = await backend.adminReset(dave.userId, by: carol.userId);
+    final erinReset = await backend.adminReset(erin.userId, by: carol.userId);
+    final dave2 = await backend.claimReset(dave.userId, daveReset);
+    final erin2 = await backend.claimReset(erin.userId, erinReset);
+    addTearDown(dave2.dispose);
+    addTearDown(erin2.dispose);
+    expect(await dir.refresh(), {dave.userId});
+    expect(await dir.identityChanged(dave.userId), isFalse);
+    expect(await dir.identityChanged(erin.userId), isTrue, reason: "Carol isn't an admin of Erin's family");
+    expect((await alice.db.allResets()).map((r) => r.userId), [dave.userId]);
+    expect(await alice.db.familyPins(), {
+      1: {bob.userId},
+      2: {carol.userId},
+    });
+  });
+
+  test('upgraded device keeps its admins and shows no new banner', () async {
+    final carol = await backend.addUser('Carol'), x = await backend.addUser('X');
+    addTearDown(carol.dispose);
+    addTearDown(x.dispose);
+    backend.setAdmin(bob.userId);
+    final witnessed = await backend.adminReset(carol.userId, by: bob.userId);
+    // What a schema-7 device that had pinned Bob and seen his reset of Carol holds after the
+    // upgrade (the conversion itself: chat_db_migration_test.dart).
+    await alice.db.replaceFamilyPins({
+      1: {bob.userId},
+    });
+    await alice.db.recordReset(id: witnessed, userId: carol.userId, signerUserId: bob.userId, signerKind: 'admin', createdAt: 1);
+    // The server now also lists X as an admin, with no proof, and X resets Bob.
+    backend.setAdmin(x.userId);
+    await backend.adminReset(bob.userId, by: x.userId);
+    await dir.refresh();
+    expect((await alice.db.allResets()).map((r) => r.id), [witnessed]);
+    expect(await alice.db.familyPins(), {
+      1: {bob.userId},
+    });
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+  });
+
+  test('leaving a family freezes its pins: they no longer count, and are kept for a rejoin', () async {
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 2, admin: true));
+    await dir.refresh();
+    expect((await alice.db.familyPins())[2], {bob.userId});
+    backend.removeFamilyRole(alice.userId, 2);
+    await dir.refresh();
+    expect(await alice.db.familyPins(), {
+      1: <String>{},
+      2: {bob.userId},
+    });
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isFalse);
+    // Back in family 2: Bob is still listed as its admin, so he is trusted again.
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 2, admin: false));
+    await dir.refresh();
+    expect((await alice.db.familyPins())[2], {bob.userId});
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isTrue);
+  });
+
+  /// After [gap] hides family 1 from Alice for one refresh, the server lists it again with a new,
+  /// unproven admin X who resets Bob: family 1 was seen, so X gains nothing.
+  Future<void> expectNoFreshFirstSight(Future<void> Function() gap, Future<void> Function() ungap) async {
+    final carol = await backend.addUser('Carol');
+    addTearDown(carol.dispose);
+    backend.setAdmin(carol.userId);
+    await dir.refresh();
+    expect(await alice.db.familyPins(), {
+      1: {carol.userId},
+    });
+    await gap();
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {carol.userId}, reason: 'pins freeze, the seen mark stays');
+    await ungap();
+    final x = await backend.addUser('X');
+    addTearDown(x.dispose);
+    backend.setAdmin(x.userId);
+    final resetId = await backend.adminReset(bob.userId, by: x.userId);
+    final bob2 = await backend.claimReset(bob.userId, resetId);
+    addTearDown(bob2.dispose);
+    expect(await dir.refresh(), isEmpty);
+    expect(await dir.identityChanged(bob.userId), isTrue, reason: 'manual banner, not silently accepted');
+    expect((await alice.db.userById(x.userId))!.pinnedAdmin, isFalse);
+    expect((await alice.db.userById(carol.userId))!.pinnedAdmin, isTrue);
+    expect(await alice.db.allResets(), isEmpty);
+    expect(await alice.db.familyPins(), {
+      1: {carol.userId},
+    });
+  }
+
+  test("a server that drops family 1 from my entry for one refresh can't re-pin it", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.removeFamilyRole(alice.userId, 1),
+      () async => backend.addToFamily1(alice.userId),
+    );
+  });
+
+  test("a server that omits my entry for one refresh can't re-pin my families", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.omitFromUsers(alice.userId),
+      () async => backend.omitFromUsers(alice.userId, false),
+    );
+  });
+
+  test("a server that marks me former for one refresh can't re-pin my families", () async {
+    await expectNoFreshFirstSight(
+      () async => backend.markFormer(alice.userId),
+      () async => backend.markFormer(alice.userId, false),
+    );
+  });
+
+  test('a demoted admin is unpinned', () async {
+    backend.setAdmin(bob.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], {bob.userId});
+    backend.setAdmin(bob.userId, false);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], isEmpty);
+    expect((await alice.db.userById(bob.userId))!.pinnedAdmin, isFalse);
+    // Listed again with no proof: still not trusted.
+    backend.setAdmin(bob.userId);
+    await dir.refresh();
+    expect((await alice.db.familyPins())[1], isEmpty);
   });
 
   test('changed identity is flagged until acknowledged', () async {

@@ -89,6 +89,23 @@ void main() {
       expect(UserDto.fromJson({...base, 'former': true}).former, isTrue);
     });
 
+    test('families parse with and without a proof, default to empty, and reject bad shapes', () {
+      final base = {'id': 'U2', 'name': 'Cy', 'isAdmin': false, 'identityPub': 'bb', 'devices': []};
+      expect(UserDto.fromJson(base).families, isEmpty);
+      final u = UserDto.fromJson({
+        ...base,
+        'families': [
+          {'id': 1, 'role': 'admin', 'adminProof': {'byUserId': 'A', 'signerPub': 'p', 'sig': 's'}},
+          {'id': 2, 'role': 'member', 'adminProof': null},
+        ],
+      });
+      expect(u.families.map((f) => (f.id, f.admin)), [(1, true), (2, false)]);
+      expect(u.families[0].adminProof!.byUserId, 'A');
+      expect(u.families[1].adminProof, isNull);
+      expect(() => UserDto.fromJson({...base, 'families': 'x'}), throwsFormatException);
+      expect(() => UserDto.fromJson({...base, 'families': [{'id': 1}]}), throwsFormatException);
+    });
+
     test('message keeps the envelope map', () {
       final m = MessageDto.fromJson({
         'chatId': 'C1', 'seq': 3, 'id': 'M1', 'senderUserId': 'U1', 'senderDeviceId': 'D1',
