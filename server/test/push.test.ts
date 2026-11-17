@@ -8,8 +8,11 @@ import { BASE, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
 import { fakeGoogle, fcmError, testServiceAccount } from "./push-helpers";
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
-const setToken = (t: string, token: unknown) =>
-  SELF.fetch(`${BASE}/api/devices/me/push`, jsonReq("PUT", { token }, auth(t)));
+const setToken = (t: string, token: unknown, previews?: unknown) =>
+  SELF.fetch(`${BASE}/api/devices/me/push`, jsonReq("PUT", previews === undefined ? { token } : { token, previews }, auth(t)));
+const previewsOf = async (deviceId: string) =>
+  (await env.DB.prepare("SELECT push_previews FROM devices WHERE id = ?").bind(deviceId).first<{ push_previews: number }>())
+    ?.push_previews;
 const tokenOf = async (deviceId: string) =>
   (await env.DB.prepare("SELECT push_token FROM devices WHERE id = ?").bind(deviceId).first<{ push_token: string | null }>())
     ?.push_token ?? null;
@@ -34,6 +37,39 @@ describe("PUT /api/devices/me/push", () => {
     await setToken(b.accessToken, "shared");
     expect(await tokenOf(a.deviceId)).toBeNull();
     expect(await tokenOf(b.deviceId)).toBe("shared");
+  });
+
+  it("stores previews with the token", async () => {
+    const a = await insertUserWithDevice();
+    expect((await setToken(a.accessToken, "t", true)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(1);
+    expect((await setToken(a.accessToken, "t")).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(1);
+    expect((await setToken(a.accessToken, "t", false)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("clearing the token clears previews", async () => {
+    const a = await insertUserWithDevice();
+    await setToken(a.accessToken, "t", true);
+    expect((await setToken(a.accessToken, null)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("a token taken by another device clears that row's previews", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setToken(a.accessToken, "shared", true);
+    await setToken(b.accessToken, "shared");
+    expect(await tokenOf(a.deviceId)).toBeNull();
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("rejects a non-boolean previews", async () => {
+    const a = await insertUserWithDevice();
+    const res = await setToken(a.accessToken, "t", "yes");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_request");
   });
 
   it("rejects bad bodies", async () => {

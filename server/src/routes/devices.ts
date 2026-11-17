@@ -34,19 +34,26 @@ devices.get("/", async (c) => {
 });
 
 /**
- * Sets (or with null, clears) this device's FCM token. A token belongs to one app install, so it
+ * Sets (or with null, clears) this device's FCM token and, optionally, whether its pushes carry the
+ * envelope for an on-device preview (kept when omitted, reset to off when the token is cleared). A token belongs to one app install, so it
  * is taken away from any other device row that still had it (an app signed in again).
  */
 devices.put("/me/push", async (c) => {
-  const token = (await readJson(c)).token;
+  const body = await readJson(c);
+  const token = body.token;
   if (token !== null && (typeof token !== "string" || token.length < 1 || token.length > 4096)) {
     throw new ApiError("invalid_request");
   }
+  const previews = body.previews;
+  if (previews !== undefined && typeof previews !== "boolean") throw new ApiError("invalid_request");
+  const previewsBind = previews === undefined ? null : previews ? 1 : 0;
   const db = c.env.DB;
   const deviceId = c.get("deviceId");
   await db.batch([
-    db.prepare("UPDATE devices SET push_token = NULL WHERE push_token = ? AND id != ?").bind(token, deviceId),
-    db.prepare("UPDATE devices SET push_token = ? WHERE id = ?").bind(token, deviceId),
+    db.prepare("UPDATE devices SET push_token = NULL, push_previews = 0 WHERE push_token = ? AND id != ?").bind(token, deviceId),
+    db.prepare(
+      "UPDATE devices SET push_token = ?, push_previews = CASE WHEN ? IS NULL THEN 0 ELSE COALESCE(?, push_previews) END WHERE id = ?",
+    ).bind(token, token, previewsBind, deviceId),
   ]);
   return c.body(null, 204);
 });
