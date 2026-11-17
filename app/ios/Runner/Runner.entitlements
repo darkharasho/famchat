@@ -5,5 +5,10 @@
 	<!-- Push notifications (FCM forwards to APNs). App Store export signs this as production. -->
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- famchat.dev/join invite links open the app (server: /.well-known/apple-app-site-association). -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:famchat.dev</string>
+	</array>
 </dict>
 </plist>

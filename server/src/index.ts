@@ -13,6 +13,7 @@ import { me } from "./routes/me";
 import { pairing } from "./routes/pairing";
 import { preview } from "./routes/preview";
 import { users } from "./routes/users";
+import { wellKnown } from "./routes/well-known";
 import { ws } from "./routes/ws";
 
 export const app = new Hono<AppEnv>().basePath("/api");
@@ -41,6 +42,7 @@ app.onError((err) => {
 export { FamilyHub } from "./hub";
 
 export default {
-  fetch: app.fetch,
+  fetch: (req: Request, env: Env, ctx: ExecutionContext) =>
+    new URL(req.url).pathname.startsWith("/.well-known/") ? wellKnown.fetch(req, env, ctx) : app.fetch(req, env, ctx),
   queue: (batch, env) => handlePushBatch(batch, env),
 } satisfies ExportedHandler<Env, PushJob>;

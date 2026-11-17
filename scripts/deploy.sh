@@ -32,7 +32,12 @@ echo "==> D1 migrations (remote)"
 npx wrangler d1 migrations apply famchat --remote
 
 echo "==> wrangler deploy"
-npx wrangler deploy
+# iOS app links (/.well-known/apple-app-site-association) need the Apple team id, a CI secret.
+if [ -n "${APPLE_TEAM_ID:-}" ]; then
+  npx wrangler deploy --var "APPLE_APP_ID:$APPLE_TEAM_ID.dev.famchat.app"
+else
+  npx wrangler deploy
+fi
 
 if [ "${SKIP_SMOKE:-}" != 1 ]; then
   echo "==> smoke test $site"

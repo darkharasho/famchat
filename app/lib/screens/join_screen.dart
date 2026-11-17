@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -8,9 +9,14 @@ import '../session/invite_link.dart';
 import '../session/session_controller.dart';
 import '../dev_tools.dart';
 import '../theme/tokens.dart';
+import '../widgets/link_text.dart' show openLink;
 import '../widgets/onboarding_frame.dart';
 
 /// First launch: redeem an invite link, creating this user's keys and first device.
+/// The web app on a phone: Join points to the app, which opens invite links by itself.
+final offerAppProvider = Provider<bool>((ref) =>
+    kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android));
+
 class JoinScreen extends ConsumerStatefulWidget {
   const JoinScreen({super.key});
 
@@ -22,14 +28,12 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
   final _invite = TextEditingController();
   final _deviceName = TextEditingController(text: defaultDeviceName());
   final _displayName = TextEditingController();
-  String? _linkToken;
   bool _busy = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _linkToken = ref.read(initialInviteTokenProvider);
     // A pasted reviewer link shows the name field.
     _invite.addListener(() => setState(() {}));
   }
@@ -41,6 +45,9 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
     _displayName.dispose();
     super.dispose();
   }
+
+  /// The invite from a link (the web's address, or one tapped on a phone).
+  String? get _linkToken => ref.read(pendingInviteProvider);
 
   String? get _token => _linkToken ?? parseInviteToken(_invite.text);
 
@@ -93,6 +100,7 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(pendingInviteProvider); // a link tapped while Join is open fills it in
     final theme = Theme.of(context);
     final session = ref.watch(sessionProvider);
     final notice = session is SignedOut ? session.message : null;
@@ -119,6 +127,24 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
               ),
             ),
           ],
+          if (ref.watch(offerAppProvider)) ...[
+            const SizedBox(height: Space.lg),
+            Card(
+              key: const Key('get-the-app'),
+              color: theme.colorScheme.tertiaryContainer,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+              child: ListTile(
+                leading: Icon(Icons.install_mobile_rounded, color: theme.colorScheme.onTertiaryContainer),
+                title: Text('FamChat works best as an app', style: TextStyle(color: theme.colorScheme.onTertiaryContainer)),
+                subtitle: Text('With the app installed, invite links open it by themselves.',
+                    style: TextStyle(color: theme.colorScheme.onTertiaryContainer)),
+                trailing: TextButton(
+                  onPressed: () => openLink(Uri.parse('https://famchat.dev/download.html')),
+                  child: const Text('Get the app'),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: Space.xl),
           if (_linkToken == null)
             TextField(
@@ -138,7 +164,7 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: _busy ? null : () => setState(() => _linkToken = null),
+                onPressed: _busy ? null : () => ref.read(pendingInviteProvider.notifier).set(null),
                 child: const Text('Use a different link'),
               ),
             ),

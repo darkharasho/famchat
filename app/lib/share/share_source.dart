@@ -5,6 +5,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../media/photo_picker.dart';
 import '../media/send_media.dart';
+import '../session/app_links.dart' show inviteFromLink;
 import 'share.dart';
 
 ShareSource platformShareSource() =>
@@ -49,7 +50,10 @@ Future<IncomingShare> sharedToIncoming(List<SharedMediaFile> files) async {
   for (final f in files) {
     switch (f.type) {
       case SharedMediaType.text || SharedMediaType.url:
-        if (f.path.trim().isNotEmpty) texts.add(f.path.trim());
+        final t = f.path.trim();
+        // A tapped invite link reaches the app as a "view" too: the invite listener handles it.
+        final uri = Uri.tryParse(t);
+        if (t.isNotEmpty && (uri == null || inviteFromLink(uri) == null)) texts.add(t);
       case SharedMediaType.image:
         media.add(PickedPhoto(await XFile(f.path).readAsBytes()));
       case SharedMediaType.video:

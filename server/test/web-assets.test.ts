@@ -17,8 +17,8 @@ describe("web app hosting", () => {
     expect(config.assets?.not_found_handling).toBe("single-page-application");
   });
 
-  it("runs the Worker first for every /api path, so the SPA fallback never answers an API call", () => {
-    expect(config.assets?.run_worker_first).toEqual(["/api/*"]);
+  it("runs the Worker first for /api and the app link files, so the SPA fallback never answers them", () => {
+    expect(config.assets?.run_worker_first).toEqual(["/api/*", "/.well-known/*"]);
   });
 
   it("keeps unknown /api routes a JSON 404, even for a browser navigation", async () => {

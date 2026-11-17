@@ -12,6 +12,7 @@ import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
 import 'package:famchat/media/video.dart';
+import 'package:famchat/session/app_links.dart';
 import 'package:famchat/share/share.dart';
 import 'package:video_player/video_player.dart';
 import 'package:famchat/session/secure_kv.dart';
@@ -117,6 +118,7 @@ Future<ScriptedHubLink> pumpChatApp(
       videoFilesProvider.overrideWithValue(videoFiles ?? fakeVideoFiles()),
       // Nothing shared from other apps unless a test brings a source.
       shareSourceProvider.overrideWithValue(shares ?? const NoShareSource()),
+      incomingLinksProvider.overrideWithValue(const NoIncomingLinks()),
       // No microphone or speaker in tests: fakes, unless a test brings its own.
       voiceRecorderFactoryProvider.overrideWithValue((recorders ?? FakeRecorders()).call),
       voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),
