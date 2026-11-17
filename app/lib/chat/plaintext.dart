@@ -6,6 +6,9 @@ import '../crypto/encoding.dart';
 
 const maxTextLength = 4000;
 
+/// At most this many @mentions in one text (the server's limit too).
+const maxMentions = 50;
+
 final _ulid = RegExp(r'^[0-9A-HJKMNP-TV-Z]{26}$');
 
 /// The trimmed text if it can be sent (1–4000 characters), else null.
@@ -40,10 +43,13 @@ sealed class Plaintext {
     if (kind is! String) throw const FormatException('missing kind');
     switch (kind) {
       case 'text':
-        final text = j['text'], replyTo = j['replyTo'];
+        final text = j['text'], replyTo = j['replyTo'], mentions = j['mentions'];
         if (text is! String || text.isEmpty) throw const FormatException('bad text');
         if (replyTo != null && (replyTo is! String || replyTo.isEmpty)) throw const FormatException('bad replyTo');
-        return TextBody(text, replyTo: replyTo as String?);
+        if (mentions != null && (mentions is! List || mentions.length > maxMentions || mentions.any((m) => m is! String))) {
+          throw const FormatException('bad mentions');
+        }
+        return TextBody(text, replyTo: replyTo as String?, mentions: [...?(mentions as List?)?.cast<String>()]);
       case 'edit':
         final target = j['target'], text = j['text'];
         if (target is! String || target.isEmpty || text is! String || text.isEmpty) {
@@ -66,6 +72,8 @@ sealed class Plaintext {
         return VoiceBody._fromJson(j);
       case 'gif':
         return GifBody._fromJson(j);
+      case 'video':
+        return VideoBody._fromJson(j);
       default:
         return UnknownBody(kind, j);
     }
@@ -73,15 +81,23 @@ sealed class Plaintext {
 }
 
 class TextBody extends Plaintext {
-  const TextBody(this.text, {this.replyTo});
+  const TextBody(this.text, {this.replyTo, this.mentions = const []});
   final String text;
 
   /// The message this one replies to, if any.
   final String? replyTo;
+
+  /// Users @mentioned in [text] (docs/protocol.md "Messages").
+  final List<String> mentions;
   @override
   String get kind => 'text';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'text': text, if (replyTo != null) 'replyTo': replyTo};
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'text': text,
+        if (replyTo != null) 'replyTo': replyTo,
+        if (mentions.isNotEmpty) 'mentions': mentions,
+      };
 }
 
 /// New text for the sender's own text message [target]; the latest edit wins.
@@ -234,6 +250,72 @@ class VoiceBody extends Plaintext {
       sha256: _bytes32(j, 'sha256'),
       durationMs: _positive(j, 'durationMs', maxDurationMs),
       waveform: List.unmodifiable(wave),
+      bytes: _positive(j, 'bytes', 1 << 30),
+      mime: _mime(j),
+    );
+  }
+}
+
+/// A video: one encrypted MP4 blob in R2, and (when one could be made) an encrypted JPEG poster
+/// frame, both under one fresh media [key] and pinned by the SHA-256 of their ciphertext.
+class VideoBody extends Plaintext {
+  const VideoBody({
+    required this.mediaKey,
+    required this.key,
+    required this.sha256,
+    this.thumbKey,
+    this.thumbSha256,
+    required this.width,
+    required this.height,
+    required this.durationMs,
+    required this.bytes,
+    this.mime = 'video/mp4',
+  }) : assert((thumbKey == null) == (thumbSha256 == null));
+
+  /// Receivers accept videos up to this long.
+  static const maxDurationMs = 60 * 60 * 1000;
+
+  /// Media key (`/api/media/:key`) of the video, and of its poster frame if it has one.
+  final String mediaKey;
+  final String? thumbKey;
+
+  /// The 32-byte media key, and SHA-256 of each encrypted blob.
+  final Uint8List key, sha256;
+  final Uint8List? thumbSha256;
+
+  /// Display size in pixels, length, and file size in bytes.
+  final int width, height, durationMs, bytes;
+  final String mime;
+
+  @override
+  String get kind => 'video';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'mediaKey': mediaKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        if (thumbKey != null) 'thumbKey': thumbKey,
+        if (thumbSha256 != null) 'thumbSha256': b64url(thumbSha256!),
+        'width': width,
+        'height': height,
+        'durationMs': durationMs,
+        'bytes': bytes,
+        'mime': mime,
+      };
+
+  factory VideoBody._fromJson(Map<String, Object?> j) {
+    final hasThumb = j.containsKey('thumbKey') || j.containsKey('thumbSha256');
+    return VideoBody(
+      mediaKey: _mediaId(j, 'mediaKey'),
+      key: _bytes32(j, 'key'),
+      sha256: _bytes32(j, 'sha256'),
+      thumbKey: hasThumb ? _mediaId(j, 'thumbKey') : null,
+      thumbSha256: hasThumb ? _bytes32(j, 'thumbSha256') : null,
+      width: _positive(j, 'width', 100000),
+      height: _positive(j, 'height', 100000),
+      durationMs: _positive(j, 'durationMs', maxDurationMs),
       bytes: _positive(j, 'bytes', 1 << 30),
       mime: _mime(j),
     );

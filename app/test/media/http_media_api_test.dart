@@ -74,8 +74,8 @@ void main() {
     );
   });
 
-  test('download refuses a body over 16 MiB', () async {
-    const limit = 16 * 1024 * 1024;
+  test('download refuses a body over 64 MiB (the largest kind, video)', () async {
+    const limit = 64 * 1024 * 1024;
     final api = HttpMediaApi(client((r, _) async {
       if (r.url.path == '/api/media/DECLARED') {
         return http.StreamedResponse(Stream.value([1]), 200, contentLength: limit + 1);

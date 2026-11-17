@@ -72,10 +72,24 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
  "durationMs",                                1..900000 accepted (senders stop at 600000, 10 minutes)
  "waveform",                                  b64url of 0–128 peak bytes (0–255), oldest first; senders send 64
  "bytes", "mime":"audio/mp4"}                 size of the .m4a
+
+{"kind":"video", "mediaKey",                  media key of the MP4
+ "key", "sha256",                             b64url 32-byte media key; SHA-256 of the encrypted blob
+ "thumbKey"?, "thumbSha256"?,                 a JPEG poster frame (both or neither), under the same key
+ "width", "height",                           display size in pixels (after rotation)
+ "durationMs",                                1..3600000
+ "bytes", "mime":"video/mp4"}                 size of the file (phones compress to 720p first)
 ```
+
+A text, GIF, photo, voice or video message may say `"forwarded": true`: a copy of a message from another chat. Media blobs are
+uploaded again under a new media key (media access follows the chat), so the copy stands alone.
 
 A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"<messageId>"}`
 (clients that don't know `replyTo` just show the text).
+
+In a group, a text may @mention members: `{"kind":"text","text":"@Mom can you?","mentions":["<userId>"]}`.
+The text holds `@<name>`; `mentions` lists who that is. The `send` frame repeats the list (the server
+can't read the text) so mentioned members are pushed even when they muted the chat.
 
 Edits and deletes are messages too, and count only when their sender is the target's sender:
 
@@ -129,10 +143,10 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   `stale` (token cleared), `retry`, `auth` or `error`. `configured: false` means the Worker has no
   `FCM_SERVICE_ACCOUNT` secret, so push is off.
 - A push carries only `notification {title, body}` and `data {chatId}`. Direct chat: title = sender's
-  name, body "New message". Group: title = group title, body "New message from <sender>". Never message
-  content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
-- Who gets one: every device of the other members (except those who muted the chat, and none at all for
-  a `silent` send) that has a token and **no open socket** when the
+  name, body "New message". Group: title = group title, body "New message from <sender>" ("<sender>
+  mentioned you" for those @mentioned). Never message content. Tapping it opens `/chats/<chatId>` (web: `fcm_options.link`).
+- Who gets one: every device of the other members (except those who muted the chat and weren't
+  @mentioned, and none at all for a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
   answered no ping for 90 s are closed first (code 4002).
   Mobile apps close their socket when sent to the background.
@@ -211,6 +225,19 @@ of whatever the server shows. Member devices also add wraps for N on the `device
   `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
   accept only through resets they verify ("Account resets"). A deleted account stays listed with
   `deleted: true`, name `"Deleted user"` and every device revoked; don't offer it for new chats.
+  `avatarKey` names the user's profile photo, or is null.
+
+### Profile photos
+Not end-to-end encrypted, like names: the server and everyone on the user's side of the reviewer
+line can see them.
+
+- `PUT /me/avatar` with a JPEG as the raw body (`content-type: image/jpeg`, at most 256 KiB; the app
+  sends 512×512) → `{avatarKey}`. Each photo gets a new key; the previous one is deleted.
+- `DELETE /me/avatar` → 204.
+- `GET /users/:id/avatar?v=<avatarKey>` → the JPEG, cacheable for good (`immutable`); 404 once
+  replaced. Without `v`: the current one, not cached.
+- Either change sends `{type:"profile", userId}` to everyone on that side: `GET /users` again.
+  Deleting an account deletes its photo.
 
 ### Deleting an account
 Required by app stores for apps with accounts. Two ways in, one transaction:
@@ -368,8 +395,8 @@ writes an `events` row (audit log; not exposed by the API yet).
 ### Media
 - `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
   (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
-  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb` or `voice`
-  with caps 15 MiB, 1 MiB and 8 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
+  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb`, `voice` or `video`
+  with caps 15 MiB, 1 MiB, 8 MiB and 64 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
   Re-posting a key you already stored for the same chat and size returns `200` (safe retry); any
   other reuse is `conflict`. Upload the blobs first, then send the message that references them.
 - `GET /media/:key` → the blob (`application/octet-stream`) for members of its chat (`not_found`
@@ -410,7 +437,7 @@ Frames are JSON text. One socket per device carries every chat.
 ### Client → hub
 | frame | effect |
 |---|---|
-| `{type:"send", id, chatId, envelope, silent?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames |
+| `{type:"send", id, chatId, envelope, silent?, mentions?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute |
 | `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
@@ -422,7 +449,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
-| `{type:"msg", message: Message, silent?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify |
+| `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
 | `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
@@ -432,6 +459,7 @@ Frames are JSON text. One socket per device carries every chat.
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone on that side, see "Reviewer accounts"): `GET /users` and check it |
 | `{type:"account_deleted", userId}` | that account was deleted (to everyone on that side): `GET /users` ("Deleting an account") |
+| `{type:"profile", userId}` | that user changed their profile photo (to everyone on that side): `GET /users` ("Profile photos") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 

@@ -1,4 +1,9 @@
+import 'dart:typed_data';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
+
+import '../profile/avatar.dart';
 
 import '../theme/app_theme.dart';
 import '../theme/person_colors.dart';
@@ -22,7 +27,11 @@ class PersonAvatar extends StatelessWidget {
     this.online = false,
     this.radius = 20,
     this.ringColor,
+    this.userId,
   });
+
+  /// Whose profile photo to show over the initials, if they have one.
+  final String? userId;
 
   /// The name the initials come from.
   final String label;
@@ -34,6 +43,18 @@ class PersonAvatar extends StatelessWidget {
 
   /// Around the presence dot; defaults to the surface color.
   final Color? ringColor;
+
+  Widget initialsText(Color color, String initials) => Text(
+        initials,
+        textScaler: TextScaler.noScaling, // the circle doesn't grow, so neither does its label
+        style: TextStyle(
+          fontFamily: kDisplayFont,
+          fontWeight: FontWeight.w700,
+          fontSize: radius * (initials.length > 1 ? 0.72 : 0.86),
+          height: 1,
+          color: color,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -53,19 +74,14 @@ class PersonAvatar extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(color: c.bg, shape: BoxShape.circle),
             child: ExcludeSemantics(
-              child: group
+              child: userId != null && !group
+                  ? Consumer(builder: (context, ref, _) {
+                      final photo = ref.watch(userPhotoProvider(userId!));
+                      return photo == null ? initialsText(c.fg, initials) : _Photo(bytes: photo, diameter: d);
+                    })
+                  : group
                   ? Icon(Icons.groups_rounded, color: c.fg, size: radius * 1.1)
-                  : Text(
-                      initials,
-                      textScaler: TextScaler.noScaling, // the circle doesn't grow, so neither does its label
-                      style: TextStyle(
-                        fontFamily: kDisplayFont,
-                        fontWeight: FontWeight.w700,
-                        fontSize: radius * (initials.length > 1 ? 0.72 : 0.86),
-                        height: 1,
-                        color: c.fg,
-                      ),
-                    ),
+                  : initialsText(c.fg, initials),
             ),
           ),
           if (online)
@@ -87,4 +103,24 @@ class PersonAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+class _Photo extends StatelessWidget {
+  const _Photo({required this.bytes, required this.diameter});
+  final Uint8List bytes;
+  final double diameter;
+
+  @override
+  Widget build(BuildContext context) => ClipOval(
+        child: Image.memory(
+          bytes,
+          key: const Key('avatar-photo'),
+          width: diameter,
+          height: diameter,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          cacheWidth: (diameter * MediaQuery.devicePixelRatioOf(context)).ceil(),
+          errorBuilder: (_, _, _) => const SizedBox(),
+        ),
+      );
 }

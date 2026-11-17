@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/message_changes.dart';
+import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/reactions.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/pairing/bundle.dart';
@@ -223,6 +225,30 @@ void main() {
     final list = await carol.d.db.watchChatList(carol.d.userId).first;
     expect(list.single.unread, 1);
     expect(list.single.last?.id, reply);
+  });
+
+  test('a text with mentions carries them in the send frame and the plaintext', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    final id = await alice.sync.sendText(chatId, '@Bob look', mentions: [bob.d.userId]);
+    await until(() async => (await carol.rows(chatId)).isNotEmpty);
+    expect(backend.sentMentions[id], [bob.d.userId]);
+    final row = (await carol.d.db.messageById(id))!;
+    expect((Plaintext.decode(utf8.encode(row.body!)) as TextBody).mentions, [bob.d.userId]);
+    final plain = await alice.sync.sendText(chatId, 'no one');
+    await until(() async => (await carol.rows(chatId)).length == 2);
+    expect(backend.sentMentions.containsKey(plain), isFalse);
+  });
+
+  test("a profile event brings in someone's new photo key, and its removal", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    await alice.sync.openDirect(bob.d.userId);
+    await alice.sync.idle;
+    final key = backend.setAvatar(bob.d.userId, Uint8List.fromList([1, 2, 3]));
+    await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == key, reason: 'new key');
+    backend.setAvatar(bob.d.userId, null);
+    await until(() async => (await alice.d.db.userById(bob.d.userId))?.avatarKey == null, reason: 'removed');
   });
 
   test('deleting a message whose ack was lost still deletes it for everyone', () async {

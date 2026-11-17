@@ -77,6 +77,8 @@ class _ChatTile extends StatelessWidget {
       return m.userId != me && u != null && u.identityPub != u.trustedIdentityPub;
     });
     final muted = (item.chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch;
+    // Shown unless new messages came in since: those are what the person needs to see.
+    final draft = unread ? null : item.chat.draft?.replaceAll('\n', ' ');
     final tileColor = selected ? theme.listTileTheme.selectedTileColor : null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
@@ -95,6 +97,7 @@ class _ChatTile extends StatelessWidget {
                 PersonAvatar(
                   label: title,
                   colorKey: group ? item.chat.id : (other ?? item.chat.id),
+                  userId: group ? null : other,
                   group: group,
                   online: other != null && online.contains(other),
                   radius: 26,
@@ -138,15 +141,25 @@ class _ChatTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(children: [
                       Expanded(
-                        child: Text(
-                          preview(item.last, users, me, changes: item.lastChanges),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: unread ? s.onSurface : s.onSurfaceVariant,
-                            fontWeight: unread ? FontWeight.w500 : null,
-                          ),
-                        ),
+                        child: draft != null
+                            ? Text.rich(
+                                TextSpan(children: [
+                                  TextSpan(text: 'Draft: ', style: TextStyle(color: s.error, fontWeight: FontWeight.w600)),
+                                  TextSpan(text: draft),
+                                ]),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant),
+                              )
+                            : Text(
+                                preview(item.last, users, me, changes: item.lastChanges),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: unread ? s.onSurface : s.onSurfaceVariant,
+                                  fontWeight: unread ? FontWeight.w500 : null,
+                                ),
+                              ),
                       ),
                       if (unread) ...[
                         const SizedBox(width: Space.sm),
@@ -187,7 +200,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
   final c = messageChanges([m, ...changes]);
   if (c.isDeleted(m.id)) return '${who}Deleted a message';
   return switch (m.kind) {
-    'text' || 'photo' || 'voice' || 'gif' => '$who${messageSnippet(m, c)}',
+    'text' || 'photo' || 'voice' || 'gif' || 'video' => '$who${messageSnippet(m, c)}',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
@@ -201,6 +214,7 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
     'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
     'photo' => '📷 Photo',
     'voice' => '🎤 Voice message',
+    'video' => '🎥 Video',
     'gif' => 'GIF',
     _ => 'Message',
   };

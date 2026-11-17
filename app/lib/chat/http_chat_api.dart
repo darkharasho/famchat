@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../api/api_client.dart';
 import '../crypto/wrap.dart';
 import 'wire.dart';
@@ -21,6 +23,21 @@ class HttpChatApi implements ChatApi {
   }
 
   static String _seg(String s) => Uri.encodeComponent(s);
+
+  @override
+  Future<String> setAvatar(Uint8List jpeg) async {
+    final j = await _api.authedUpload('/me/avatar', bytes: jpeg, method: 'PUT', contentType: 'image/jpeg');
+    final key = j?['avatarKey'];
+    if (key is! String) throw const FormatException('bad avatarKey');
+    return key;
+  }
+
+  @override
+  Future<void> removeAvatar() => _call('DELETE', '/me/avatar');
+
+  @override
+  Future<Uint8List> avatar(String userId, String key) =>
+      _api.authedBytes('/users/${_seg(userId)}/avatar', query: {'v': key}, maxBytes: 512 * 1024);
 
   @override
   Future<List<UserDto>> users() async => [for (final u in _items(await _get('/users'), 'users')) UserDto.fromJson(u)];

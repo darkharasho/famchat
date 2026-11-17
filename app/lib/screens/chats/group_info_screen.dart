@@ -138,6 +138,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
               child: PersonAvatar(
                 label: title,
                 colorKey: group ? chat.id : (otherMember(chat, members, me) ?? chat.id),
+                userId: group ? null : otherMember(chat, members, me),
                 group: group,
                 radius: 44,
               ),
@@ -179,6 +180,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                   leading: PersonAvatar(
                     label: users[m.userId]?.name ?? '?',
                     colorKey: m.userId,
+                    userId: m.userId,
                     online: online.contains(m.userId),
                     ringColor: theme.cardTheme.color,
                   ),

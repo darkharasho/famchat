@@ -3,6 +3,7 @@
 // live events, sending through an outbox with idempotent ids, reactions, read receipts,
 // typing and presence. The UI only reads the database and the two ephemeral streams.
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
@@ -286,26 +287,38 @@ class ChatSync {
     }
     if (key == null) return waiting;
     final Plaintext p;
+    final List<int> raw;
     try {
-      p = Plaintext.decode(await decryptEnvelope(
+      raw = await decryptEnvelope(
         envelope: env,
         chatKey: key,
         chatId: m.chatId,
         messageId: m.id,
         senderDeviceId: m.senderDeviceId,
         senderSignPub: device.signPub,
-      ));
+      );
+      p = Plaintext.decode(raw);
     } on CryptoFailure {
       return base;
     } on FormatException {
       return base;
     }
-    return _classify(base, p);
+    return _classify(base, p, forwarded: _forwardedFlag(raw));
+  }
+
+  /// Whether a decoded plaintext says `"forwarded": true` (kept beside any kind).
+  static bool _forwardedFlag(List<int> raw) {
+    try {
+      final j = jsonDecode(utf8.decode(raw));
+      return j is Map && j['forwarded'] == true;
+    } on FormatException {
+      return false;
+    }
   }
 
   /// [base] stored as plaintext [p]'s kind.
-  static MessageRow _classify(MessageRow base, Plaintext p) {
-    final body = jsonEncode(p.toJson());
+  static MessageRow _classify(MessageRow base, Plaintext p, {bool forwarded = false}) {
+    final body = jsonEncode({...p.toJson(), if (forwarded && p is! UnknownBody) 'forwarded': true});
     return switch (p) {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
@@ -314,6 +327,7 @@ class ChatSync {
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
+      VideoBody() => base.copyWith(kind: 'video', body: Value(body)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
@@ -331,7 +345,7 @@ class ChatSync {
         await db.replaceMessage(r.copyWith(kind: 'invalid', body: const Value(null), targetId: const Value(null)));
         continue;
       }
-      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p));
+      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p, forwarded: _forwardedFlag(utf8.encode(body))));
     }
   }
 
@@ -397,6 +411,9 @@ class ChatSync {
         await directory.refresh();
         await _retryUndecryptable();
         await _repair();
+      case 'profile':
+        // Someone changed their profile photo: the directory has the new key.
+        await directory.refresh();
       case 'account_deleted':
         // Someone's account was deleted: they're renamed and their devices revoked. The `chat`
         // events that come with it move each shared chat to a new epoch.
@@ -538,9 +555,21 @@ class ChatSync {
       'envelope': env.toJson(),
       // Changes to other messages notify no one (docs/protocol.md "send").
       if (changeKinds.contains(row.kind)) 'silent': true,
+      // The server can't read the text: it needs these to push the people mentioned.
+      if (_mentionsOf(row) case final m when m.isNotEmpty) 'mentions': m,
     })) {
       _inflight.add(row.id);
       _handedToHub.add(row.id);
+    }
+  }
+
+  static List<String> _mentionsOf(MessageRow row) {
+    if (row.kind != 'text' || row.body == null) return const [];
+    try {
+      final p = Plaintext.decode(utf8.encode(row.body!));
+      return p is TextBody ? p.mentions : const [];
+    } on FormatException {
+      return const [];
     }
   }
 
@@ -549,15 +578,17 @@ class ChatSync {
   Future<bool> Function(MessageRow row)? beforeSend;
 
   /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
-  static const mediaKinds = {'photo', 'voice'};
+  static const mediaKinds = {'photo', 'voice', 'video'};
 
   /// Queues an outbox flush (after work queued before it).
   void flushSoon() => unawaited(_enqueue(_flushOutbox));
 
   /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
-  Future<String> enqueueMessage(String chatId, Plaintext p, {String? id}) => _enqueueMessage(chatId, p, id: id);
+  /// [forwarded] marks a copy of another message (`"forwarded": true`).
+  Future<String> enqueueMessage(String chatId, Plaintext p, {String? id, bool forwarded = false}) =>
+      _enqueueMessage(chatId, p, id: id, forwarded: forwarded);
 
-  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId, String? id}) async {
+  Future<String> _enqueueMessage(String chatId, Plaintext p, {String? targetId, String? id, bool forwarded = false}) async {
     id ??= newUlid(_now());
     await db.insertMessageIfAbsent(MessageRow(
       id: id,
@@ -566,7 +597,7 @@ class ChatSync {
       senderUserId: me.userId,
       senderDeviceId: me.deviceId,
       kind: p.kind,
-      body: jsonEncode(p.toJson()),
+      body: jsonEncode({...p.toJson(), if (forwarded) 'forwarded': true}),
       targetId: targetId,
       envelope: null,
       createdAt: _now().millisecondsSinceEpoch,
@@ -578,10 +609,11 @@ class ChatSync {
 
   /// Queues a text message (optionally a reply to [replyTo]) and returns its id. Throws
   /// [ArgumentError] for empty or too-long text.
-  Future<String> sendText(String chatId, String text, {String? replyTo}) {
+  /// [mentions]: users @mentioned in it (see `lib/chat/mentions.dart`).
+  Future<String> sendText(String chatId, String text, {String? replyTo, List<String> mentions = const []}) {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
-    return _enqueueMessage(chatId, TextBody(t, replyTo: replyTo));
+    return _enqueueMessage(chatId, TextBody(t, replyTo: replyTo, mentions: mentions.take(maxMentions).toList()));
   }
 
   /// Replaces the text of this user's text message [messageId]. Throws [ArgumentError] for empty or
@@ -621,6 +653,20 @@ class ChatSync {
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.
+  /// Sets this user's profile photo ([jpeg], see `lib/profile/avatar.dart`), or removes it when
+  /// null; returns the new photo's key. The directory is refreshed, so it shows at once.
+  Future<String?> setAvatar(Uint8List? jpeg) async {
+    final String? key;
+    if (jpeg == null) {
+      await api.removeAvatar();
+      key = null;
+    } else {
+      key = await api.setAvatar(jpeg);
+    }
+    await _enqueue(() => directory.refresh());
+    return key;
+  }
+
   Future<void> acknowledgeIdentity(String userId) async {
     await directory.acknowledgeIdentity(userId);
     await _enqueue(() async {

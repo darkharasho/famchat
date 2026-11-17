@@ -178,7 +178,7 @@ class _UserTile extends ConsumerWidget {
     ];
     return ListTile(
       key: Key('family-user-${user.id}'),
-      leading: PersonAvatar(label: user.name, colorKey: user.id),
+      leading: PersonAvatar(label: user.name, colorKey: user.id, userId: user.id),
       title: Text(user.name),
       subtitle: Text(details.join(', ')),
       trailing: mine
@@ -419,7 +419,7 @@ class _ReviewerTile extends ConsumerWidget {
     final n = user.devices;
     return ListTile(
       key: Key('reviewer-user-${user.id}'),
-      leading: PersonAvatar(label: user.name, colorKey: user.id),
+      leading: PersonAvatar(label: user.name, colorKey: user.id, userId: user.id),
       title: Text(user.name),
       subtitle: Text(n == 0 ? 'No devices' : '$n ${n == 1 ? 'device' : 'devices'}'),
       trailing: IconButton(

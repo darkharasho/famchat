@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
@@ -35,7 +36,7 @@ void main() {
   /// Pumps Alice's app with a direct chat to Bob that exists on the server, and opens it.
   Future<(ScriptedHubLink, String)> open(WidgetTester tester, {List<Uint8List> picks = const []}) async {
     setWindow(tester, const Size(400, 800));
-    final hub = await pumpChatApp(tester, alice, picker: ({required camera}) async => picks);
+    final hub = await pumpChatApp(tester, alice, picker: (source) async => [for (final p in picks) PickedPhoto(p)]);
     final chatId = await inApp(tester, () => ChatSync(db: alice.db, api: alice.api, hub: alice.hub, me: alice.me).openDirect(bob.userId));
     go(tester, '/chats/$chatId');
     await settle(tester);
@@ -82,10 +83,10 @@ void main() {
     alice.media.hold = Completer<void>();
     hub.setConnected(true);
     await settle(tester);
-    await tester.tap(find.byTooltip('Attach photo'));
+    await tester.tap(find.byTooltip('Attach photo or video'));
     await settle(tester);
-    if (find.text('Photo library').evaluate().isNotEmpty) {
-      await tester.tap(find.text('Photo library'));
+    if (find.text('Photos and videos').evaluate().isNotEmpty) {
+      await tester.tap(find.text('Photos and videos'));
       await settle(tester);
     }
     expect(find.byKey(const Key('photo-thumb')), findsOneWidget);

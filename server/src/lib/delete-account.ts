@@ -33,6 +33,9 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   // Who shares a chat with the user, before they leave them: they hear about the revoked devices.
   const sharing = (await sharingUserIds(db, userId)).filter((u) => u !== userId);
 
+  const avatar = await db.prepare("SELECT avatar_key FROM users WHERE id = ?").bind(userId)
+    .first<string | null>("avatar_key");
+
   // Everything after the first statement runs only if it marked the user deleted at [now].
   const guard = "EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ?)";
   const gb = [userId, now];
@@ -41,7 +44,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
     // admin. Reviewer accounts don't count (they can never be admins).
     db.prepare(
       `UPDATE users SET deleted_at = ?, name = ?, is_admin = 0, recovery_pub = NULL, recovery_sig = NULL,
-         admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL
+         admin_by = NULL, admin_signer_pub = NULL, admin_sig = NULL, avatar_key = NULL
        WHERE id = ? AND deleted_at IS NULL AND (
          is_admin = 0 OR reviewer = 1
          OR EXISTS (SELECT 1 FROM users o WHERE o.id != ? AND o.is_admin = 1 AND o.reviewer = 0 AND o.deleted_at IS NULL)
@@ -101,7 +104,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const chats = (results[chatIdx].results as { id: string }[]).map((r) => r.id);
   const media = results[mediaIdx].results as { key: string; chat_id: string; expired_at: number | null }[];
 
-  const keys = media.map((m) => m.key);
+  const keys = [...media.map((m) => m.key), ...(avatar ? [`avatars/${userId}/${avatar}`] : [])];
   for (let i = 0; i < keys.length; i += 1000) {
     try {
       await env.MEDIA.delete(keys.slice(i, i + 1000));

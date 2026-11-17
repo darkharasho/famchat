@@ -27,6 +27,8 @@ class _User {
   bool deleted = false;
   AdminProofDto? adminProof;
   final resets = <_Reset>[];
+  String? avatarKey;
+  Uint8List? avatar;
 }
 
 /// A signed reset (server/src/routes/admin.ts, auth.ts redeem).
@@ -136,6 +138,9 @@ class FakeChatBackend {
 
   /// Ids of messages that were sent with `silent: true`.
   final silentIds = <String>{};
+
+  /// The `mentions` of each send that had them, by message id.
+  final sentMentions = <String, List<Object?>>{};
   final _wraps = <String, ChatKeyWrap>{};
   final _hubs = <String, FakeHubLink>{};
 
@@ -148,6 +153,20 @@ class FakeChatBackend {
 
   /// Marks [userId]'s account deleted in the directory (docs/protocol.md "Deleting an account").
   void markDeleted(String userId) => _users[userId]!.deleted = true;
+
+  /// Sets [userId]'s profile photo as the server would, telling everyone.
+  String setAvatar(String userId, Uint8List? jpeg) {
+    final u = _users[userId]!;
+    u.avatar = jpeg;
+    u.avatarKey = jpeg == null ? null : _id('A');
+    _notify(_users.keys, {'type': 'profile', 'userId': userId});
+    return u.avatarKey ?? '';
+  }
+
+  Uint8List? avatarOf(String userId) => _users[userId]!.avatar;
+
+  /// Profile photo downloads, as "userId/key".
+  final avatarDownloads = <String>[];
 
   Future<TestDevice> addUser(String name) async {
     final identity = await newIdentityKey();
@@ -453,6 +472,7 @@ class FakeChatBackend {
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
         if (m['silent'] == true) silentIds.add(id);
+        if (m['mentions'] is List) sentMentions[id] = m['mentions'] as List<Object?>;
         if (h.dropNextAck) {
           h.dropNextAck = false;
           h.drop();
@@ -502,6 +522,20 @@ class FakeChatApi implements ChatApi {
   }
 
   @override
+  Future<String> setAvatar(Uint8List jpeg) => _run('PUT /me/avatar', () => b.setAvatar(userId, jpeg));
+
+  @override
+  Future<void> removeAvatar() => _run('DELETE /me/avatar', () => b.setAvatar(userId, null));
+
+  @override
+  Future<Uint8List> avatar(String userId, String key) => _run('GET /users/$userId/avatar', () {
+        final u = b._users[userId];
+        if (u == null || u.avatarKey != key || u.avatar == null) throw ApiException(404, 'not_found');
+        b.avatarDownloads.add('$userId/$key');
+        return u.avatar!;
+      });
+
+  @override
   Future<List<UserDto>> users() => _run('GET /users', () => [
         for (final u in b._users.values)
           UserDto(
@@ -511,6 +545,7 @@ class FakeChatApi implements ChatApi {
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.adminProof,
             deleted: u.deleted,
+            avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),
             devices: [
               for (final d in b._devices.values.where((d) => d.userId == u.id))

@@ -6,11 +6,14 @@ import 'dart:typed_data';
 import 'package:famchat/api/models.dart';
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/forward.dart';
+import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/media.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/media_service.dart';
+import 'package:famchat/media/video.dart';
 import 'package:famchat/voice/waveform.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -41,6 +44,10 @@ class Node {
   Future<List<VoiceBody>> voices(String chatId) async => [
         for (final r in await rows(chatId))
           if (r.kind == 'voice') Plaintext.decode(utf8.encode(r.body!)) as VoiceBody,
+      ];
+  Future<List<VideoBody>> videos(String chatId) async => [
+        for (final r in await rows(chatId))
+          if (r.kind == 'video') Plaintext.decode(utf8.encode(r.body!)) as VideoBody,
       ];
   Future<List<PhotoBody>> photos(String chatId) async => [
         for (final r in await rows(chatId))
@@ -114,6 +121,150 @@ void main() {
     // The sender shows it from its own cache without downloading.
     expect(await alice.media.load(p.fullRef), original);
     expect(alice.d.media.downloads, isEmpty);
+  });
+
+  group('video', () {
+    ProcessedVideo clip({bool thumb = true, int n = 5000}) => ProcessedVideo(
+          bytes: photoBytes(n, 5),
+          thumb: thumb ? photoBytes(40, 9) : null,
+          width: 1280,
+          height: 720,
+          duration: const Duration(seconds: 12),
+        );
+
+    test('a video and its poster frame go to Bob encrypted, sent after both upload', () async {
+      final (alice, bob, chatId) = await pair();
+      final v = clip();
+      final id = await alice.media.sendVideo(chatId, v);
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent');
+      await until(() async => (await bob.videos(chatId)).isNotEmpty, reason: 'bob gets it');
+      final b = (await bob.videos(chatId)).single;
+      expect((b.width, b.height, b.durationMs, b.bytes), (1280, 720, 12000, 5000));
+      expect(backend.mediaBlob(b.mediaKey), isNot(contains(v.bytes.sublist(0, 32))));
+      expect(await bob.media.load(b.ref), v.bytes);
+      expect(await bob.media.load(b.thumbRef!), v.thumb);
+    });
+
+    test('a real-sized video (20 MiB) sends and decrypts', () async {
+      final (alice, bob, chatId) = await pair();
+      final big = Uint8List(20 * 1024 * 1024)..fillRange(0, 1000, 7);
+      final id = await alice.media.sendVideo(
+          chatId, ProcessedVideo(bytes: big, width: 1280, height: 720, duration: const Duration(minutes: 2)));
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent');
+      await until(() async => (await bob.videos(chatId)).isNotEmpty);
+      expect((await bob.media.load((await bob.videos(chatId)).single.ref))!.length, big.length);
+    });
+
+    test('a video without a poster frame still sends', () async {
+      final (alice, bob, chatId) = await pair();
+      await alice.media.sendVideo(chatId, clip(thumb: false));
+      await until(() async => (await bob.videos(chatId)).isNotEmpty);
+      final b = (await bob.videos(chatId)).single;
+      expect(b.thumbRef, isNull);
+      expect(await bob.media.load(b.ref), photoBytes(5000, 5));
+    });
+
+    test('too long or too large is refused before anything is queued', () async {
+      final (alice, _, chatId) = await pair();
+      expect(() => alice.media.sendVideo(chatId, ProcessedVideo(bytes: photoBytes(10), width: 1, height: 1, duration: Duration.zero)),
+          throwsArgumentError);
+      expect(
+        () => alice.media.sendVideo(
+            chatId, ProcessedVideo(bytes: Uint8List(maxVideoBytes + 1), width: 1, height: 1, duration: const Duration(seconds: 1))),
+        throwsA(isA<VideoTooLargeException>()),
+      );
+      expect(await alice.rows(chatId), isEmpty);
+    });
+  });
+
+  group('forwarding', () {
+    Future<(Node, Node, Node, String, String)> trio() async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final carol = await start(await backend.addUser('Carol'));
+      final ab = await alice.sync.openDirect(bob.d.userId);
+      final ac = await alice.sync.openDirect(carol.d.userId);
+      for (final n in [alice, bob, carol]) {
+        await n.sync.idle;
+      }
+      return (alice, bob, carol, ab, ac);
+    }
+
+    Future<String> forward(Node n, String fromChat, String id, String to) async {
+      final rows = await n.rows(fromChat);
+      return forwardMessage(
+        message: rows.firstWhere((r) => r.id == id),
+        changes: messageChanges(rows),
+        toChatId: to,
+        sync: n.sync,
+        media: n.media,
+      );
+    }
+
+    test('a received photo goes to another chat as a new upload, marked forwarded', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final original = photoBytes(500);
+      final id = await sentPhoto(bob, ab, original);
+      await until(() async => (await alice.photos(ab)).isNotEmpty, reason: 'alice gets it');
+      final fwd = await forward(alice, ab, id, ac);
+      await until(() async => (await carol.photos(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final p = (await carol.photos(ac)).single;
+      final first = (await alice.photos(ab)).single;
+      expect(p.mediaKey, isNot(first.mediaKey), reason: "media access follows the chat: Carol can't read Bob's upload");
+      expect(b64url(p.key), isNot(b64url(first.key)));
+      expect(await carol.media.load(p.fullRef), original);
+      expect(isForwarded((await carol.row(fwd))!), isTrue);
+      expect(isForwarded((await alice.row(id))!), isFalse);
+    });
+
+    test('a voice clip forwards with its length and waveform', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final clip = RecordedVoice(bytes: photoBytes(800, 3), duration: const Duration(seconds: 4), waveform: [1, 2, 3]);
+      final id = await bob.media.sendVoice(ab, clip);
+      await until(() async => (await alice.voices(ab)).isNotEmpty, reason: 'alice gets it');
+      await forward(alice, ab, id, ac);
+      await until(() async => (await carol.voices(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final v = (await carol.voices(ac)).single;
+      expect(v.durationMs, 4000);
+      expect(v.waveform, [1, 2, 3]);
+      expect(await carol.media.load(v.ref), clip.bytes);
+    });
+
+    test('a video forwards with its poster frame', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final v = ProcessedVideo(bytes: photoBytes(900, 2), thumb: photoBytes(30, 4), width: 640, height: 360, duration: const Duration(seconds: 3));
+      final id = await bob.media.sendVideo(ab, v);
+      await until(() async => (await alice.videos(ab)).isNotEmpty, reason: 'alice gets it');
+      await forward(alice, ab, id, ac);
+      await until(() async => (await carol.videos(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final c = (await carol.videos(ac)).single;
+      expect((c.width, c.height, c.durationMs), (640, 360, 3000));
+      expect(await carol.media.load(c.ref), v.bytes);
+      expect(await carol.media.load(c.thumbRef!), v.thumb);
+    });
+
+    test('a text forwards its latest edit, without its reply or mentions', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final id = await bob.sync.sendText(ab, 'typo', replyTo: 'x', mentions: [alice.d.userId]);
+      await bob.sync.editText(ab, id, 'fixed');
+      await until(() async => (await alice.rows(ab)).length == 2, reason: 'alice gets both');
+      final fwd = await forward(alice, ab, id, ac);
+      await until(() async => (await carol.rows(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final body = Plaintext.decode(utf8.encode((await carol.row(fwd))!.body!)) as TextBody;
+      expect((body.text, body.replyTo), ('fixed', null));
+      expect(body.mentions, isEmpty);
+    });
+
+    test('a photo whose media expired cannot be forwarded', () async {
+      final (alice, bob, _, ab, ac) = await trio();
+      final id = await sentPhoto(bob, ab, photoBytes(300));
+      await until(() async => (await alice.photos(ab)).isNotEmpty);
+      final p = (await alice.photos(ab)).single;
+      alice.d.hub.dropEventTypes.add('media_expired');
+      backend.expireMedia([p.mediaKey, p.thumbKey]);
+      await expectLater(forward(alice, ab, id, ac), throwsA(isA<ForwardException>()));
+      expect(await alice.rows(ac), isEmpty);
+    });
   });
 
   test('the message is sent only after both blobs uploaded', () async {
@@ -370,8 +521,11 @@ void main() {
     expect(await db.cacheGet('a'), isNotNull);
     expect(await db.cacheGet('c'), isNotNull);
     expect(await db.cacheBytes(), 800);
-    await db.cachePut('huge', photoBytes(2000), maxBytes: 1000);
-    expect(await db.cacheBytes(), lessThanOrEqualTo(1000));
+    // Something over half the cache (a video) isn't cached at all, and pushes nothing out.
+    await db.cachePut('huge', photoBytes(600), maxBytes: 1000);
+    expect(await db.cacheGet('huge'), isNull);
+    expect(await db.cacheGet('a'), isNotNull);
+    expect(await db.cacheBytes(), 800);
   });
 
   test('concurrent loads download once', () async {

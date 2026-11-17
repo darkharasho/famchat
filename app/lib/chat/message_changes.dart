@@ -50,6 +50,29 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
 /// The id [m] replies to, or null.
 String? replyTargetOf(MessageRow m) => m.kind == 'text' ? _field(m, 'replyTo') : null;
 
+/// Whether [m] is a copy forwarded from another message.
+bool isForwarded(MessageRow m) {
+  if (m.body == null) return false;
+  try {
+    final j = jsonDecode(m.body!);
+    return j is Map && j['forwarded'] == true;
+  } on FormatException {
+    return false;
+  }
+}
+
+/// The users a text @mentions (empty for other kinds).
+List<String> mentionsOf(MessageRow m) {
+  if (m.kind != 'text' || m.body == null) return const [];
+  try {
+    final j = jsonDecode(m.body!);
+    final v = j is Map ? j['mentions'] : null;
+    return v is List ? v.whereType<String>().toList() : const [];
+  } on FormatException {
+    return const [];
+  }
+}
+
 String? _field(MessageRow m, String key) {
   if (m.body == null) return null;
   try {

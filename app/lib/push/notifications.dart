@@ -11,12 +11,12 @@ import 'local_notifier.dart';
 import 'push_messaging.dart';
 
 /// Direct chat: (sender, "New message"). Group: (title, "New message from `sender`").
-Future<(String, String)> notificationText(ChatDb db, String chatId, String senderUserId) async {
+Future<(String, String)> notificationText(ChatDb db, String chatId, String senderUserId, {bool mention = false}) async {
   final sender = (await db.userById(senderUserId))?.name ?? 'Someone';
   final chat = await db.chatById(chatId);
   if (chat == null || chat.kind != 'group') return (sender, 'New message');
   final title = chat.title;
-  return (title == null || title.isEmpty ? 'Group' : title, 'New message from $sender');
+  return (title == null || title.isEmpty ? 'Group' : title, mention ? '$sender mentioned you' : 'New message from $sender');
 }
 
 /// FCM on this device while signed in: permission, token registration (and refreshes), taps, and
@@ -112,7 +112,7 @@ class PushController {
 bool isMuted(ChatRow? chat, DateTime now) => (chat?.mutedUntil ?? 0) > now.millisecondsSinceEpoch;
 
 /// Desktop apps and web tabs: a notification for every `msg` from someone else that arrives over
-/// the socket while the app isn't in front (unless silent, or the chat is muted).
+/// the socket while the app isn't in front (unless silent, or the chat is muted and I wasn't mentioned).
 class MessageNotifier {
   MessageNotifier({
     required this.events,
@@ -143,9 +143,11 @@ class MessageNotifier {
     if (chatId is! String || sender is! String || sender == myUserId || e['silent'] == true || inFront()) return;
     final route = chatRoute(chatId);
     if (route == null) return;
+    // An @mention of me notifies even in a muted chat (docs/protocol.md "msg").
+    final mentioned = (e['mentions'] as List?)?.contains(myUserId) ?? false;
     try {
-      if (isMuted(await db.chatById(chatId), DateTime.now())) return;
-      final (title, body) = await notificationText(db, chatId, sender);
+      if (!mentioned && isMuted(await db.chatById(chatId), DateTime.now())) return;
+      final (title, body) = await notificationText(db, chatId, sender, mention: mentioned);
       await notifier.show(id: chatId.hashCode & 0x7fffffff, title: title, body: body, route: route);
     } catch (_) {
       // The database closed (signed out) meanwhile.

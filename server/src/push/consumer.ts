@@ -53,14 +53,16 @@ export async function handlePushBatch(batch: MessageBatch<PushJob>, env: Env, fe
   }
 }
 
-/** Direct chat: "<sender>" / "New message". Group: "<title>" / "New message from <sender>". */
+/** Direct chat: "<sender>" / "New message". Group: "<title>" / "New message from <sender>" (or
+ * "<sender> mentioned you"). */
 export async function notificationFor(db: D1Database, job: PushJob): Promise<Notification | null> {
   const row = await db.prepare(
     `SELECT c.kind, c.title, u.name AS sender FROM chats c, users u WHERE c.id = ? AND u.id = ?`,
   ).bind(job.chatId, job.senderUserId).first<{ kind: string; title: string | null; sender: string }>();
   if (!row) return null;
   if (row.kind === "direct") return { title: row.sender, body: "New message", chatId: job.chatId };
-  return { title: row.title || "Group", body: `New message from ${row.sender}`, chatId: job.chatId };
+  const body = job.mention ? `${row.sender} mentioned you` : `New message from ${row.sender}`;
+  return { title: row.title || "Group", body, chatId: job.chatId };
 }
 
 /** Sends [job] to every live device with a token of its users who are still members. */
@@ -85,7 +87,7 @@ export async function deliverJob(env: Env, sa: ServiceAccount, job: PushJob, fet
     // After FCM calls went out, nothing may throw: a retry of the whole job would notify the devices
     // that already got it a second time.
     await env.PUSH_QUEUE.send(
-      { chatId: job.chatId, senderUserId: job.senderUserId, messageId: job.messageId, userIds: job.userIds, deviceIds: retry, attempt },
+      { chatId: job.chatId, senderUserId: job.senderUserId, messageId: job.messageId, userIds: job.userIds, deviceIds: retry, attempt, ...(job.mention ? { mention: true } : {}) },
       { delaySeconds: RETRY_DELAY_S * attempt },
     ).catch((e) => console.error("push retry not queued", e));
   }

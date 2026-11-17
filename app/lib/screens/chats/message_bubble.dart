@@ -15,6 +15,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/link_text.dart';
 import 'chat_list.dart' show clockTime;
 import 'photo_view.dart';
+import 'video_view.dart';
 import 'voice_bubble.dart';
 
 const reactionEmoji = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -53,7 +54,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, copy, edit, delete }
+enum MessageAction { reply, forward, copy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -78,11 +79,14 @@ class MessageBubble extends StatefulWidget {
     this.avatar,
     this.avatarSpace = 0,
     this.shownText,
+    this.mentionNames = const [],
     this.edited = false,
     this.deleted = false,
     this.quote,
     this.onOpenQuote,
     this.onReply,
+    this.onForward,
+    this.forwarded = false,
     this.onEdit,
     this.onDelete,
     this.highlighted = false,
@@ -117,6 +121,9 @@ class MessageBubble extends StatefulWidget {
   /// The text to show (its latest edit) instead of the stored one.
   final String? shownText;
 
+  /// Names of the people this text @mentions (bold in it).
+  final List<String> mentionNames;
+
   /// Shows "edited" by the time; [deleted] shows the message as deleted.
   final bool edited, deleted;
 
@@ -125,7 +132,10 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onOpenQuote;
 
   /// Null hides the action.
-  final VoidCallback? onReply, onEdit, onDelete;
+  final VoidCallback? onReply, onForward, onEdit, onDelete;
+
+  /// A copy forwarded from another message: labelled so.
+  final bool forwarded;
 
   /// Briefly tinted after jumping to it.
   final bool highlighted;
@@ -149,14 +159,21 @@ class _MessageBubbleState extends State<MessageBubble> {
   String? get _copyText => !widget.deleted && widget.message.kind == 'text' ? _text : null;
 
   bool get _hasActions =>
-      _reactable || widget.onReply != null || widget.onEdit != null || widget.onDelete != null || _copyText != null;
+      _reactable ||
+      widget.onReply != null ||
+      widget.onForward != null ||
+      widget.onEdit != null ||
+      widget.onDelete != null ||
+      _copyText != null;
 
   /// Touch: a sheet with the reactions and the actions.
   Future<void> _openActions() async {
     final picked = await showModalBottomSheet<Object>(
       context: context,
+      // As tall as its rows (up to most of the screen): the default cap of 9/16 clips them on phones.
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: Space.md),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (_reactable)
@@ -174,6 +191,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   List<MessageAction> get _actions => [
         if (widget.onReply != null) MessageAction.reply,
+        if (widget.onForward != null) MessageAction.forward,
         if (_copyText != null) MessageAction.copy,
         if (widget.onEdit != null) MessageAction.edit,
         if (widget.onDelete != null) MessageAction.delete,
@@ -181,6 +199,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   static (IconData, String) _look(MessageAction a) => switch (a) {
         MessageAction.reply => (Icons.reply_rounded, 'Reply'),
+        MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
         MessageAction.edit => (Icons.edit_outlined, 'Edit'),
         MessageAction.delete => (Icons.delete_outline_rounded, 'Delete'),
@@ -228,6 +247,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onReact(e == _myEmoji ? '' : e);
       case MessageAction.reply:
         widget.onReply?.call();
+      case MessageAction.forward:
+        widget.onForward?.call();
       case MessageAction.copy:
         final text = _copyText;
         if (text == null) return;
@@ -263,6 +284,18 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
+  /// The video in this message, or null.
+  VideoBody? get _video {
+    final m = widget.message;
+    if (widget.deleted || m.kind != 'video' || m.body == null) return null;
+    try {
+      final p = Plaintext.decode(utf8.encode(m.body!));
+      return p is VideoBody ? p : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// The GIF in this message, or null.
   GifBody? get _gif {
     final m = widget.message;
@@ -288,7 +321,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   bool get _reactable =>
-      !widget.deleted && const {'text', 'photo', 'voice', 'gif'}.contains(widget.message.kind) && widget.message.seq != null;
+      !widget.deleted && const {'text', 'photo', 'voice', 'gif', 'video'}.contains(widget.message.kind) && widget.message.seq != null;
 
   BorderRadius get _radius {
     const big = Radius.circular(Radii.lg), small = Radius.circular(Radii.xs);
@@ -308,7 +341,10 @@ class _MessageBubbleState extends State<MessageBubble> {
     final photo = _photo;
     final voice = _voice;
     final gif = _gif;
-    final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null);
+    final video = _video;
+    final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null);
+    // Edge-to-edge media: little padding around it.
+    final visual = photo != null || gif != null || video != null;
     final mine = widget.mine;
     final bg = mine ? t.mineBubble : t.theirsBubble;
     final fg = mine ? t.onMineBubble : t.onTheirsBubble;
@@ -344,6 +380,11 @@ class _MessageBubbleState extends State<MessageBubble> {
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
         if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
       ]);
+    } else if (video != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        VideoThumb(body: video, messageId: m.id, onOpen: () => showVideoViewer(context, video, m.id)),
+        if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+      ]);
     } else if (gif != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         GifView(body: gif),
@@ -370,7 +411,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: Space.sm,
         children: [
-          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg),
+          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames),
           if (showMeta) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
         ],
       );
@@ -382,7 +423,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       onSecondaryTapUp: _hasActions && hoverReactions ? (d) => _menuAt(d.globalPosition) : null,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
-        padding: photo != null || gif != null
+        padding: visual
             ? const EdgeInsets.fromLTRB(4, 4, 4, 6)
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
@@ -393,15 +434,24 @@ class _MessageBubbleState extends State<MessageBubble> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (widget.senderName != null)
             Padding(
-              padding: photo != null || gif != null ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
+              padding: visual ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
               child: Text(
                 widget.senderName!,
                 style: theme.textTheme.labelMedium?.copyWith(color: fg, fontWeight: FontWeight.w700),
               ),
             ),
+          if (widget.forwarded && !widget.deleted)
+            Padding(
+              padding: visual ? const EdgeInsets.fromLTRB(10, 2, 10, 6) : const EdgeInsets.only(bottom: 2),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.shortcut_rounded, size: 14, color: meta),
+                const SizedBox(width: 4),
+                Text('Forwarded', style: theme.textTheme.labelSmall?.copyWith(color: meta, fontStyle: FontStyle.italic)),
+              ]),
+            ),
           if (quote != null && !widget.deleted)
             Padding(
-              padding: photo != null || gif != null ? const EdgeInsets.fromLTRB(4, 2, 4, 6) : const EdgeInsets.only(bottom: 6),
+              padding: visual ? const EdgeInsets.fromLTRB(4, 2, 4, 6) : const EdgeInsets.only(bottom: 6),
               child: _Quote(quote: quote, fg: fg, meta: meta, onTap: widget.onOpenQuote),
             ),
           content,

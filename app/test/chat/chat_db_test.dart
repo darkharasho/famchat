@@ -92,6 +92,17 @@ void main() {
     expect((await db.membersOf('a')).map((m) => m.userId), ['me']);
   });
 
+  test('a draft is kept across server updates; a blank one is cleared', () async {
+    await db.upsertChat(chat('a'));
+    await db.setDraft('a', 'see you at');
+    await db.upsertChat(chat('a', lastSeq: 2));
+    expect((await db.chatById('a'))!.draft, 'see you at');
+    expect((await db.draftOf('a')), 'see you at');
+    await db.setDraft('a', '  \n ');
+    expect((await db.chatById('a'))!.draft, isNull);
+    expect(await db.draftOf('missing'), isNull);
+  });
+
   test('insertMessageIfAbsent dedupes by id', () async {
     await db.upsertChat(chat('a'));
     expect(await db.insertMessageIfAbsent(msg('m1', 'a', 1)), isTrue);

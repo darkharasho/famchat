@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,14 +11,16 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/forward.dart';
+import '../../chat/mentions.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
-import '../../media/photo.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
+import '../../media/send_media.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
@@ -29,6 +32,8 @@ import '../../widgets/typing_dots.dart';
 import 'chat_list.dart' show messageSnippet;
 import 'chats_shell.dart' show shortcutModifier;
 import 'emoji_input.dart';
+import 'forward_picker.dart';
+import 'mention_suggestions.dart';
 import 'message_bubble.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -76,8 +81,25 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Where a query closed with Esc started: it stays closed until the user moves on.
   int? _dismissedAt;
 
+  /// The `@name` being typed in a group, and the members it matches.
+  MentionQuery? _mentionQuery;
+  List<Person> _peopleMatches = const [];
+
+  /// Which query the suggestions are for (the highlight resets when it changes).
+  String? _suggestKey;
+
+  /// Who can be @mentioned here (other members of a group: id → name); set in build.
+  Map<String, String> _people = const {};
+
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
+
+  /// The draft set aside while editing a message, put back when the edit ends.
+  String _stashedDraft = '';
+
+  /// The draft as last written to the database, and the pending write.
+  String _savedDraft = '';
+  Timer? _draftTimer;
 
   /// A message just jumped to, tinted for a moment.
   String? _highlight;
@@ -114,44 +136,108 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (mounted) _focus.requestFocus();
       });
     }
+    _draftKey = '${ref.read(myUserIdProvider)}|${widget.chatId}';
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
       if (empty != _empty && mounted) setState(() => _empty = empty);
       _updateSuggestions();
+      _scheduleDraftSave();
     });
+    unawaited(_loadDraft());
+  }
+
+  /// The latest draft of each chat this run (keyed by user and chat), ahead of the database write:
+  /// a view replaced at once (the window crossing the wide layout) starts from it.
+  static final _latestDrafts = <String, String>{};
+
+  late final String _draftKey;
+
+  Future<void> _loadDraft() async {
+    if (_latestDrafts[_draftKey] case final latest?) {
+      if (latest.isNotEmpty && _text.text.isEmpty && _editing == null) {
+        _savedDraft = latest;
+        _text.value = TextEditingValue(text: latest, selection: TextSelection.collapsed(offset: latest.length));
+      }
+      return;
+    }
+    final draft = await ref.read(chatDbProvider).draftOf(widget.chatId);
+    // Typing (or an edit) that began meanwhile wins.
+    if (draft == null || !mounted || _text.text.isNotEmpty || _editing != null) return;
+    _savedDraft = draft;
+    _text.value = TextEditingValue(text: draft, selection: TextSelection.collapsed(offset: draft.length));
+  }
+
+  /// What this chat's draft is now: the composer, or what it held before an edit began.
+  String get _draft => _editing != null ? _stashedDraft : _text.text;
+
+  void _scheduleDraftSave() {
+    _latestDrafts[_draftKey] = _draft;
+    if (_draft == _savedDraft) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
+  }
+
+  void _saveDraftNow() {
+    _draftTimer?.cancel();
+    final draft = _draft;
+    if (draft == _savedDraft) return;
+    _savedDraft = draft;
+    // Through the container: this also runs from dispose, where `ref` can't be used.
+    unawaited(_container.read(chatDbProvider).setDraft(widget.chatId, draft));
   }
 
   void _updateSuggestions() {
-    final q = shortcodeQueryAt(_text.value);
-    if (q?.start != _dismissedAt) _dismissedAt = null;
-    final matches = q == null || q.start == _dismissedAt ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
-    final same = q?.query == _query?.query && q?.start == _query?.start;
+    final mq = _people.isEmpty ? null : mentionQueryAt(_text.value);
+    final q = mq == null ? shortcodeQueryAt(_text.value) : null;
+    final start = mq?.start ?? q?.start;
+    if (start != _dismissedAt) _dismissedAt = null;
+    final dismissed = start != null && start == _dismissedAt;
+    final people = mq == null || dismissed ? const <Person>[] : matchingPeople(mq.query, _people).take(6).toList();
+    final matches = q == null || dismissed ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
+    final key = mq != null ? '@${mq.start}:${mq.query}' : (q != null ? ':${q.start}:${q.query}' : null);
+    final same = key == _suggestKey;
     if (!mounted) return;
-    if (same && _matches.length == matches.length) {
+    if (same && _matches.length == matches.length && _peopleMatches.length == people.length) {
       _query = q;
+      _mentionQuery = mq;
       return;
     }
     setState(() {
       _query = q;
+      _mentionQuery = mq;
       _matches = matches;
+      _peopleMatches = people;
+      _suggestKey = key;
       if (!same) _selected = 0;
     });
   }
 
-  bool get _suggesting => _matches.isNotEmpty && _query != null;
+  bool get _mentioning => _peopleMatches.isNotEmpty && _mentionQuery != null;
+
+  bool get _suggesting => (_matches.isNotEmpty && _query != null) || _mentioning;
 
   void _pickSuggestion([ShortcodeMatch? m]) {
+    if (_mentioning) return _pickPerson(_peopleMatches[_selected]);
     final query = _query;
     if (query == null || _matches.isEmpty) return;
     _text.value = replaceShortcodeQuery(_text.value, query, (m ?? _matches[_selected]).emoji);
     if (!_pickerOpen) _focus.requestFocus();
   }
 
-  void _moveSelection(int by) => setState(() => _selected = (_selected + by) % _matches.length);
+  void _pickPerson(Person p) {
+    final query = _mentionQuery;
+    if (query == null) return;
+    _text.value = insertMention(_text.value, query, p.name);
+    if (!_pickerOpen) _focus.requestFocus();
+  }
+
+  void _moveSelection(int by) =>
+      setState(() => _selected = (_selected + by) % (_mentioning ? _peopleMatches.length : _matches.length));
 
   void _dismissSuggestions() => setState(() {
-        _dismissedAt = _query?.start;
+        _dismissedAt = _mentionQuery?.start ?? _query?.start;
         _matches = const [];
+        _peopleMatches = const [];
       });
 
   void _insertEmoji(String emoji) => _text.value = insertEmoji(_text.value, emoji);
@@ -185,6 +271,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         // the whole app went away
       }
     }));
+    _saveDraftNow();
     _text.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -254,10 +341,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
       } else {
-        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id);
+        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
       }
-      _text.clear();
-      if (mounted) setState(() => _editing = _replyTo = null);
+      if (editing != null) {
+        _endEdit();
+      } else {
+        _text.clear();
+        if (mounted) setState(() => _replyTo = null);
+      }
+      _saveDraftNow();
     } on ArgumentError {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That message is too long.')));
@@ -272,17 +364,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   String? _currentText(MessageRow m) => _changes.textOf(m);
 
   void _startReply(MessageRow m) {
-    setState(() {
-      _replyTo = m;
-      if (_editing != null) _text.clear();
-      _editing = null;
-    });
+    if (_editing != null) _endEdit();
+    setState(() => _replyTo = m);
     _focus.requestFocus();
   }
 
   void _startEdit(MessageRow m) {
     final text = _currentText(m);
     if (text == null) return;
+    if (_editing == null) _stashedDraft = _text.text;
     setState(() {
       _editing = m;
       _replyTo = null;
@@ -291,10 +381,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _focus.requestFocus();
   }
 
+  /// Leaves edit mode and puts the set-aside draft back in the composer.
+  void _endEdit() {
+    final draft = _stashedDraft;
+    _stashedDraft = '';
+    setState(() => _editing = null);
+    _text.value = TextEditingValue(text: draft, selection: TextSelection.collapsed(offset: draft.length));
+  }
+
   void _cancelCompose() {
-    final wasEditing = _editing != null;
-    setState(() => _editing = _replyTo = null);
-    if (wasEditing) _text.clear();
+    if (_editing != null) _endEdit();
+    setState(() => _replyTo = null);
   }
 
   Future<void> _delete(MessageRow m) async {
@@ -319,6 +416,27 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (ok != true || !mounted) return;
     if (_editing?.id == m.id || _replyTo?.id == m.id) _cancelCompose();
     await ref.read(chatSyncProvider)?.deleteMessage(widget.chatId, m.id);
+  }
+
+  Future<void> _forward(MessageRow m) async {
+    final to = await showForwardPicker(context, fromChatId: widget.chatId);
+    if (to == null || !mounted) return;
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    try {
+      await forwardMessage(
+        message: m,
+        changes: _changes,
+        toChatId: to.id,
+        sync: sync,
+        media: ref.read(mediaServiceProvider),
+      );
+      _snack('Forwarded to ${to.title}');
+    } on ForwardException catch (e) {
+      _snack(e.reason == 'media expired' ? "That's no longer available to forward." : "That message can't be forwarded.");
+    } catch (_) {
+      _snack("Couldn't forward that message.");
+    }
   }
 
   /// Scrolls until [id]'s bubble is built, centers it and tints it for a moment.
@@ -357,55 +475,109 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     unawaited(client.share(picked.slug));
   }
 
-  /// Photos being compressed and encrypted (before they appear in the list).
+  /// Photos and videos being compressed and encrypted (before they appear in the list).
   int _preparing = 0;
 
+  /// Files are being dragged over the conversation (desktop and web).
+  bool _dragging = false;
+
+  /// Photos and videos dropped on the conversation are sent.
+  Widget _dropZone(Widget child) {
+    final theme = Theme.of(context);
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (details) async {
+        setState(() => _dragging = false);
+        final sorted = await pickedFromFiles(details.files.whereType<DropItemFile>().toList());
+        if (sorted.skipped > 0 || details.files.length > sorted.media.length + sorted.skipped) {
+          _snack('Only photos and videos can be sent here.');
+        }
+        await sendPicked(sorted.media);
+      },
+      child: Stack(children: [
+        child,
+        if (_dragging)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                key: const Key('drop-overlay'),
+                margin: const EdgeInsets.all(Space.md),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(Radii.lg),
+                  border: Border.all(color: theme.colorScheme.tertiary, width: 2),
+                ),
+                child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.file_download_outlined, size: 40, color: theme.colorScheme.onTertiaryContainer),
+                    const SizedBox(height: Space.sm),
+                    Text('Drop photos or videos to send',
+                        style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onTertiaryContainer)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+
   Future<void> _attach() async {
-    final media = ref.read(mediaServiceProvider);
-    if (media == null) return;
-    var camera = false;
+    var source = PickSource.library;
     if (cameraAvailable) {
-      final choice = await showModalBottomSheet<bool>(
+      final choice = await showModalBottomSheet<PickSource>(
         context: context,
         builder: (context) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Photo library'),
-              onTap: () => Navigator.pop(context, false),
+              title: const Text('Photos and videos'),
+              onTap: () => Navigator.pop(context, PickSource.library),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Camera'),
-              onTap: () => Navigator.pop(context, true),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(context, PickSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Record a video'),
+              onTap: () => Navigator.pop(context, PickSource.cameraVideo),
             ),
           ]),
         ),
       );
       if (choice == null) return;
-      camera = choice;
+      source = choice;
     }
-    final List<Uint8List> picked;
+    final List<PickedMedia> picked;
     try {
-      picked = await ref.read(photoPickerProvider)(camera: camera);
+      picked = await ref.read(photoPickerProvider)(source);
     } catch (e) {
-      _snack("Couldn't open the photo picker.");
+      _snack("Couldn't open the picker.");
       return;
     }
-    var failed = 0;
-    for (final bytes in picked) {
-      setState(() => _preparing++);
-      try {
-        await media.sendPhoto(widget.chatId, bytes);
-      } on UnsupportedImageException {
-        failed++;
-      } on ArgumentError {
-        failed++;
-      } finally {
+    await sendPicked(picked);
+  }
+
+  /// Sends each photo and video as its own message, saying which couldn't be sent.
+  Future<void> sendPicked(List<PickedMedia> picked) async {
+    final media = ref.read(mediaServiceProvider);
+    if (media == null || picked.isEmpty) return;
+    final report = await sendMedia(
+      media,
+      ref.read(videoProcessorProvider),
+      widget.chatId,
+      picked,
+      onStart: () {
+        if (mounted) setState(() => _preparing++);
+      },
+      onEnd: () {
         if (mounted) setState(() => _preparing--);
-      }
-    }
-    if (failed > 0) _snack(failed == 1 ? "That image can't be sent." : "$failed images can't be sent.");
+      },
+    );
+    if (report.problem case final p?) _snack(p);
   }
 
   void _snack(String text) {
@@ -421,7 +593,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final t = FamTokens.of(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
       IconButton(
-        tooltip: 'Attach photo',
+        tooltip: 'Attach photo or video',
         icon: const Icon(Icons.add_photo_alternate_outlined),
         style: IconButton.styleFrom(fixedSize: const Size.square(48)),
         onPressed: _attach,
@@ -562,6 +734,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final title = chatTitle(chat, members, users, me);
     final other = otherMember(chat, members, me);
     final group = chat.kind == 'group';
+    _people = group
+        ? {for (final m in members) if (m.userId != me && users[m.userId] != null) m.userId: users[m.userId]!.name}
+        : const {};
     final otherOnline = other != null && online.contains(other);
     final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
@@ -615,9 +790,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
+                mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
+                onForward: forwardableKinds.contains(m.kind) && m.body != null && !changes.isDeleted(m.id) ? () => _forward(m) : null,
+                forwarded: isForwarded(m),
                 onEdit: m.senderUserId == me && m.kind == 'text' && !changes.isDeleted(m.id) ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
                 mine: m.senderUserId == me,
@@ -631,7 +809,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 lastInGroup: lastInGroup,
                 avatarSpace: group ? avatarSpace : 0,
                 avatar: group && m.senderUserId != me && lastInGroup
-                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, radius: 15)
+                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, userId: m.senderUserId, radius: 15)
                     : null,
               ),
             ),
@@ -651,7 +829,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           titleSpacing: widget.showBack ? 0 : Space.lg,
           shape: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
           title: Row(children: [
-            PersonAvatar(label: title, colorKey: group ? chat.id : (other ?? chat.id), group: group, online: otherOnline, radius: 20),
+            PersonAvatar(
+              label: title,
+              colorKey: group ? chat.id : (other ?? chat.id),
+              userId: group ? null : other,
+              group: group,
+              online: otherOnline,
+              radius: 20,
+            ),
             const SizedBox(width: Space.md),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -691,7 +876,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             const SizedBox(width: Space.xs),
           ],
         ),
-        body: LayoutBuilder(builder: (context, c) {
+        body: _dropZone(LayoutBuilder(builder: (context, c) {
           // Wide panes keep the messages in a readable column; the backdrop runs edge to edge.
           final side = math.max(Space.md, (c.maxWidth - Widths.conversation) / 2);
           return Column(children: [
@@ -727,6 +912,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       art: PersonAvatar(
                         label: title,
                         colorKey: group ? chat.id : (other ?? chat.id),
+                        userId: group ? null : other,
                         group: group,
                         radius: 36,
                       ),
@@ -784,7 +970,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   alignment: Alignment.centerLeft,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 360),
-                    child: ShortcodeSuggestions(matches: _matches, selected: _selected, onPick: _pickSuggestion),
+                    child: _mentioning
+                        ? MentionSuggestions(people: _peopleMatches, selected: _selected, onPick: _pickPerson)
+                        : ShortcodeSuggestions(matches: _matches, selected: _selected, onPick: _pickSuggestion),
                   ),
                 ),
               ),
@@ -831,13 +1019,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
           ]);
-        }),
+        })),
       ),
     );
   }
 }
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 class _ComposeBanner extends StatelessWidget {

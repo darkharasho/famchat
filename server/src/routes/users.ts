@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { type ResetRow, resetOut } from "../lib/reset";
+import { ApiError } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
+import { avatarObject } from "./me";
 
 export const users = new Hono<AppEnv>();
 users.use(requireAuth);
@@ -18,7 +20,7 @@ users.get("/", async (c) => {
   const mine = "SELECT id FROM users WHERE reviewer = ?";
   const [u, d, r] = await db.batch([
     db.prepare(
-      "SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig, deleted_at FROM users WHERE reviewer = ? ORDER BY created_at",
+      "SELECT id, name, is_admin, identity_pub, admin_by, admin_signer_pub, admin_sig, deleted_at, avatar_key FROM users WHERE reviewer = ? ORDER BY created_at",
     ).bind(side),
     db.prepare(
       `SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices
@@ -51,6 +53,7 @@ users.get("/", async (c) => {
   type U = {
     id: string; name: string; is_admin: number; identity_pub: string;
     admin_by: string | null; admin_signer_pub: string | null; admin_sig: string | null; deleted_at: number | null;
+    avatar_key: string | null;
   };
   return c.json({
     users: (u.results as U[]).map((x) => ({
@@ -65,6 +68,31 @@ users.get("/", async (c) => {
       // A deleted account stays listed (its devices' certificates and resets still verify), named
       // "Deleted user" with every device revoked. Clients don't offer it for new chats.
       deleted: x.deleted_at !== null,
+      // Their profile photo (GET /users/:id/avatar?v=<avatarKey>), or null.
+      avatarKey: x.avatar_key,
     })),
+  });
+});
+
+/**
+ * A user's profile photo (JPEG). With `?v=<avatarKey>` it's that photo, cacheable for good (a new
+ * photo gets a new key); 404 once it's been replaced. Only users on the same side of the reviewer
+ * line see each other's.
+ */
+users.get("/:id/avatar", async (c) => {
+  const row = await c.env.DB.prepare(
+    "SELECT avatar_key FROM users WHERE id = ? AND reviewer = ? AND deleted_at IS NULL",
+  ).bind(c.req.param("id"), c.get("reviewer") ? 1 : 0).first<{ avatar_key: string | null }>();
+  const key = row?.avatar_key;
+  const v = c.req.query("v");
+  if (!key || (v !== undefined && v !== key)) throw new ApiError("not_found");
+  const obj = await c.env.MEDIA.get(avatarObject(c.req.param("id"), key));
+  if (!obj) throw new ApiError("not_found");
+  return new Response(obj.body, {
+    headers: {
+      "content-type": "image/jpeg",
+      "content-length": String(obj.size),
+      "cache-control": v ? "private, max-age=31536000, immutable" : "private, no-cache",
+    },
   });
 });

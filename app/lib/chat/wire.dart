@@ -1,4 +1,6 @@
 // The chat API's JSON shapes (docs/protocol.md) and the interface the sync engine talks to.
+import 'dart:typed_data';
+
 import '../crypto/wrap.dart';
 
 T _f<T>(Map<String, Object?> j, String k) {
@@ -53,9 +55,13 @@ class UserDto {
     this.resets = const [],
     this.adminProof,
     this.deleted = false,
+    this.avatarKey,
   });
 
   final String id, name, identityPub;
+
+  /// The user's profile photo (`GET /users/:id/avatar?v=`), or null.
+  final String? avatarKey;
   final bool isAdmin;
 
   /// The account was deleted (docs/protocol.md "Deleting an account"): listed so old certificates
@@ -84,6 +90,7 @@ class UserDto {
         _ => throw const FormatException('bad adminProof'),
       },
       deleted: j['deleted'] == true,
+      avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
     );
   }
 }
@@ -223,6 +230,14 @@ class MissingWrap {
 /// `SignedOutException` from `lib/api/models.dart`; malformed bodies throw [FormatException].
 abstract interface class ChatApi {
   Future<List<UserDto>> users();
+
+  /// Sets this user's profile photo (a JPEG, docs/protocol.md "Profile photos"); returns its key.
+  Future<String> setAvatar(Uint8List jpeg);
+
+  Future<void> removeAvatar();
+
+  /// [userId]'s profile photo [key] (a JPEG).
+  Future<Uint8List> avatar(String userId, String key);
   Future<List<ChatDto>> chats();
   Future<ChatDto> chat(String id);
   Future<({ChatDto chat, bool created})> createChat({

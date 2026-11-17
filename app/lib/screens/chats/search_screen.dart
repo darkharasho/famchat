@@ -106,6 +106,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               leading: PersonAvatar(
                 label: widget.chatId != null || !group ? nameOf(m.senderUserId) : (where ?? '?'),
                 colorKey: widget.chatId != null || !group ? m.senderUserId : m.chatId,
+                userId: widget.chatId != null || !group ? m.senderUserId : null,
                 group: widget.chatId == null && group,
                 radius: 20,
               ),

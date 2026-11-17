@@ -17,6 +17,8 @@ export const KIND_LIMITS: ReadonlyMap<string, number> = new Map([
   ["photo", 15 * MiB],
   ["thumb", 1 * MiB],
   ["voice", 8 * MiB],
+  // Under the 100 MB request body limit of Workers on the Free and Pro plans.
+  ["video", 64 * MiB],
 ]);
 
 export async function mediaUsage(db: D1Database): Promise<number> {

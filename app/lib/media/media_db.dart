@@ -95,7 +95,10 @@ class MediaDb extends _$MediaDb {
 
   /// Stores [bytes] and evicts least recently used entries until the total is at most [maxBytes]
   /// (an entry larger than [maxBytes] on its own isn't kept).
+  /// Keeps [bytes] under [key], dropping the least recently used entries past [maxBytes]. Anything
+  /// over half of [maxBytes] (a long video) isn't kept: it would push out everything else.
   Future<void> cachePut(String key, Uint8List bytes, {required int maxBytes}) => transaction(() async {
+        if (bytes.length > maxBytes ~/ 2) return;
         await into(cachedMedia).insertOnConflictUpdate(
             CachedMediaRow(key: key, bytes: bytes, size: bytes.length, lastUsed: _now().microsecondsSinceEpoch));
         var total = await cacheBytes();

@@ -23,6 +23,8 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN pinned_admin')
         ..execute('ALTER TABLE local_users DROP COLUMN deleted')
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
+        ..execute('ALTER TABLE local_chats DROP COLUMN draft')
+        ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
         ..execute('PRAGMA user_version = 1');
@@ -47,6 +49,8 @@ void main() {
       raw
         ..execute('ALTER TABLE local_users DROP COLUMN deleted')
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
+        ..execute('ALTER TABLE local_chats DROP COLUMN draft')
+        ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 2');
     }));
@@ -67,6 +71,8 @@ void main() {
     final db = ChatDb(NativeDatabase(file, setup: (raw) {
       raw
         ..execute('ALTER TABLE local_chats DROP COLUMN muted_until')
+        ..execute('ALTER TABLE local_chats DROP COLUMN draft')
+        ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('PRAGMA user_version = 3');
@@ -75,5 +81,47 @@ void main() {
     expect((await db.chatById('C'))!.mutedUntil, isNull);
     await db.setMutedUntil('C', 5);
     expect((await db.chatById('C'))!.mutedUntil, 5);
+  });
+
+  test('schema 4 to 5: chats get a draft, empty for the chats already stored', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('ALTER TABLE local_chats DROP COLUMN draft')
+        ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
+            "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
+        ..execute('PRAGMA user_version = 4');
+    }));
+    addTearDown(db.close);
+    expect((await db.chatById('C'))!.draft, isNull);
+    await db.setDraft('C', 'half a thought');
+    expect((await db.chatById('C'))!.draft, 'half a thought');
+  });
+
+  test('schema 5 to 6: users get a profile photo key, empty for the users already known', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('ALTER TABLE local_users DROP COLUMN avatar_key')
+        ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute('PRAGMA user_version = 5');
+    }));
+    addTearDown(db.close);
+    expect((await db.userById('A'))!.avatarKey, isNull);
+    await db.putUser((await db.userById('A'))!.copyWith(avatarKey: const Value('K1')));
+    expect((await db.userById('A'))!.avatarKey, 'K1');
   });
 }

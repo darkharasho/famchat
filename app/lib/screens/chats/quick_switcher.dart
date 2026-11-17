@@ -135,6 +135,7 @@ class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
                         colorKey: item.chat.kind == 'group'
                             ? item.chat.id
                             : (otherMember(item.chat, item.members, me) ?? item.chat.id),
+                        userId: item.chat.kind == 'group' ? null : otherMember(item.chat, item.members, me),
                         group: item.chat.kind == 'group',
                         radius: 18,
                       ),

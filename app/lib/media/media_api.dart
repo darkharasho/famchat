@@ -2,7 +2,13 @@
 import 'dart:typed_data';
 
 /// Kinds the server knows, with their byte caps (ciphertext).
-const mediaKindLimits = {'photo': 15 * 1024 * 1024, 'thumb': 1024 * 1024, 'voice': 8 * 1024 * 1024};
+const mediaKindLimits = {
+  'photo': 15 * 1024 * 1024,
+  'thumb': 1024 * 1024,
+  'voice': 8 * 1024 * 1024,
+  // Under the 100 MB request body limit of Cloudflare's Workers (Free and Pro plans).
+  'video': 64 * 1024 * 1024,
+};
 
 class MediaUsage {
   const MediaUsage({
