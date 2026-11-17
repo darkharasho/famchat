@@ -4,6 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env";
 import { isUlid } from "./lib/chatdb";
+import { familyPeers } from "./lib/family";
 import { evictOldest } from "./lib/media";
 import { messageOut } from "./lib/messages";
 
@@ -47,10 +48,10 @@ export function queuePush(env: Pick<Env, "PUSH_QUEUE">): PushHook {
 export const STALE_SOCKET_MS = 90_000;
 
 /**
- * [at]: when the socket connected (Unix ms). [rv]: a reviewer account's socket; presence never
- * crosses between reviewers and the family (missing on sockets from before reviewers: family).
+ * [at]: when the socket connected (Unix ms). Sockets from older versions may also carry `rv` (the
+ * reviewer "side" that families replaced); it is ignored.
  */
-type Att = { userId: string; deviceId: string; at: number; rv?: boolean };
+type Att = { userId: string; deviceId: string; at: number };
 type Incoming = Record<string, unknown>;
 
 export const MAX_ENVELOPE_BYTES = 64 * 1024;
@@ -73,6 +74,15 @@ export class FamilyHub extends DurableObject<Env> {
   /** Media evictions run one at a time, so two uploads past the cap never both evict. */
   private evictions: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Who shares a family with each user (themselves included), loaded from D1 on connect or when
+   * first needed. In memory only: lost on hibernation and reloaded lazily; [sharesChanged] clears it.
+   */
+  private peers = new Map<string, Set<string>>();
+
+  /** Bumped by [sharesChanged], so a load that was in flight then isn't cached. */
+  private peersGen = 0;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.push = queuePush(env);
@@ -83,17 +93,19 @@ export class FamilyHub extends DurableObject<Env> {
   async fetch(req: Request): Promise<Response> {
     const userId = req.headers.get("x-famchat-user");
     const deviceId = req.headers.get("x-famchat-device");
-    const rv = req.headers.get("x-famchat-side") === "reviewer";
     if (!userId || !deviceId || req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("bad request", { status: 400 });
     }
-    this.prune();
+    await this.prune();
+    // A connect always reloads the user's peers: they may have joined a family since.
+    this.peers.delete(userId);
+    await this.peersOf(userId);
     const [client, server] = Object.values(new WebSocketPair());
     const wasOnline = this.sockets(userId).length > 0;
     this.ctx.acceptWebSocket(server, [`u:${userId}`, `d:${deviceId}`]);
-    server.serializeAttachment({ userId, deviceId, at: this.now(), rv } satisfies Att);
-    server.send(JSON.stringify({ type: "hello", online: this.onlineUserIds(undefined, rv) }));
-    if (!wasOnline) this.sendAll({ type: "presence", userId, online: true }, rv, server);
+    server.serializeAttachment({ userId, deviceId, at: this.now() } satisfies Att);
+    server.send(JSON.stringify({ type: "hello", online: await this.onlineUserIds(undefined, userId) }));
+    if (!wasOnline) await this.sendPresence(userId, true, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -128,17 +140,20 @@ export class FamilyHub extends DurableObject<Env> {
     } catch {
       /* already closed */
     }
-    this.goneOffline(ws);
+    await this.goneOffline(ws);
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
-    this.goneOffline(ws);
+    await this.goneOffline(ws);
   }
 
   // --- RPC from the Worker ---
 
-  /** Family membership changed; Task 5 drops cached peer sets here. */
-  async sharesChanged(): Promise<void> {}
+  /** Family membership changed (a join, a deletion): drops every cached peer set. */
+  async sharesChanged(): Promise<void> {
+    this.peers.clear();
+    this.peersGen++;
+  }
 
   /** Sends [event] to every open socket of [userIds]. */
   async notify(userIds: string[], event: Record<string, unknown>): Promise<void> {
@@ -154,7 +169,7 @@ export class FamilyHub extends DurableObject<Env> {
       } catch {
         /* already closed */
       }
-      this.goneOffline(ws);
+      await this.goneOffline(ws);
     }
   }
 
@@ -165,13 +180,14 @@ export class FamilyHub extends DurableObject<Env> {
     return (await run).length;
   }
 
-  /** Who is online on one side: the family, or ([reviewer]) the reviewer accounts. */
-  onlineUserIds(exclude?: WebSocket, reviewer = false): string[] {
+  /** Who is online; with [viewer], only people who share a family with them (themselves included). */
+  async onlineUserIds(exclude?: WebSocket, viewer?: string): Promise<string[]> {
+    const visible = viewer === undefined ? null : await this.peersOf(viewer);
     const ids = new Set<string>();
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === exclude || ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
       const att = ws.deserializeAttachment() as Att | null;
-      if (att && !!att.rv === reviewer) ids.add(att.userId);
+      if (att && (!visible || visible.has(att.userId))) ids.add(att.userId);
     }
     return [...ids];
   }
@@ -179,7 +195,7 @@ export class FamilyHub extends DurableObject<Env> {
   // --- internals ---
 
   /** Closes half-open sockets (see [STALE_SOCKET_MS]), except [keep], which just spoke. */
-  private prune(keep?: WebSocket): void {
+  private async prune(keep?: WebSocket): Promise<void> {
     const cutoff = this.now() - STALE_SOCKET_MS;
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === keep) continue;
@@ -192,8 +208,19 @@ export class FamilyHub extends DurableObject<Env> {
       } catch {
         /* already closed */
       }
-      this.goneOffline(ws);
+      await this.goneOffline(ws);
     }
+  }
+
+  /** Live users sharing a family with [userId], themselves included (cached, see [peers]). */
+  private async peersOf(userId: string): Promise<Set<string>> {
+    let set = this.peers.get(userId);
+    if (!set) {
+      const gen = this.peersGen;
+      set = new Set(await familyPeers(this.env.DB, userId));
+      if (gen === this.peersGen) this.peers.set(userId, set);
+    }
+    return set;
   }
 
   private sockets(userId: string, exclude?: WebSocket): WebSocket[] {
@@ -202,24 +229,23 @@ export class FamilyHub extends DurableObject<Env> {
     );
   }
 
-  /** Sends [event] to every socket on one side (family, or [reviewer] accounts). */
-  private sendAll(event: Record<string, unknown>, reviewer: boolean, exclude?: WebSocket): void {
-    const text = JSON.stringify(event);
+  /** Sends [userId]'s presence to the sockets of everyone who shares a family with them. */
+  private async sendPresence(userId: string, online: boolean, exclude?: WebSocket): Promise<void> {
+    const peers = await this.peersOf(userId);
+    const text = JSON.stringify({ type: "presence", userId, online });
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === exclude) continue;
       const att = ws.deserializeAttachment() as Att | null;
-      if (att && !!att.rv === reviewer) trySend(ws, text);
+      if (att && peers.has(att.userId)) trySend(ws, text);
     }
   }
 
-  private goneOffline(ws: WebSocket): void {
+  private async goneOffline(ws: WebSocket): Promise<void> {
     const att = ws.deserializeAttachment() as Att | null;
     if (!att) return;
     // Only once per socket: a revoked socket is seen here and again in webSocketClose.
     ws.serializeAttachment(null);
-    if (this.sockets(att.userId, ws).length === 0) {
-      this.sendAll({ type: "presence", userId: att.userId, online: false }, !!att.rv, ws);
-    }
+    if (this.sockets(att.userId, ws).length === 0) await this.sendPresence(att.userId, false, ws);
   }
 
   private async memberIds(chatId: string): Promise<string[]> {
@@ -232,7 +258,7 @@ export class FamilyHub extends DurableObject<Env> {
     const id = m.id;
     const chatId = m.chatId;
     const env = m.envelope;
-    this.prune(ws);
+    await this.prune(ws);
     const mentions = m.mentions;
     const badMentions = mentions !== undefined &&
       !(Array.isArray(mentions) && mentions.length <= MAX_MENTIONS && mentions.every((u) => typeof u === "string"));
@@ -333,8 +359,10 @@ export class FamilyHub extends DurableObject<Env> {
     if (typeof m.chatId !== "string") return;
     const members = await this.memberIds(m.chatId);
     if (!members.includes(att.userId)) return;
+    // Only to members who still share a family with the sender ("former" partners hear nothing).
+    const peers = await this.peersOf(att.userId);
     const text = JSON.stringify({ type: "typing", chatId: m.chatId, userId: att.userId });
-    for (const u of members) if (u !== att.userId) for (const s of this.sockets(u)) trySend(s, text);
+    for (const u of members) if (u !== att.userId && peers.has(u)) for (const s of this.sockets(u)) trySend(s, text);
   }
 
   private async handleRead(att: Att, m: Incoming): Promise<void> {

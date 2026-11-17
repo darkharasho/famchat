@@ -273,7 +273,8 @@ peers and former chat partners) can see them.
   replaced. Without `v`: the current one, not cached. Only people in the caller's own directory
   (themselves, family peers, former chat partners) can be fetched; anyone else gets 404.
 - `PUT /me/name {name}` → 204: renames the caller (trimmed, 1–40 characters, no control characters).
-- Any of these sends `{type:"profile", userId}` to everyone on that side: `GET /users` again.
+- Any of these sends `{type:"profile", userId}` to everyone who shares a family with the user (not
+  former chat partners): `GET /users` again.
   Deleting an account deletes its photo.
 
 ### Deleting an account
@@ -302,7 +303,7 @@ What happens, atomically:
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
 
 Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,
-`media_expired {chatId, keys}` for their media, and everyone (on the same side: family or reviewers) gets `account_deleted {userId}`.
+`media_expired {chatId, keys}` for their media, and everyone who shared a family with them gets `account_deleted {userId}`.
 Messages are end-to-end encrypted, so the server can't reach copies other members' devices already
 downloaded and decrypted; those stay on those devices until deleted there. A deleted user can't be
 reset, promoted, or added to a chat; their account can't be restored.
@@ -328,8 +329,9 @@ Isolation, enforced by the server:
 - `GET /users` lists only users on the caller's side: the family sees no reviewers; a reviewer sees
   only reviewer accounts (themselves included), with their devices and resets.
 - `POST /chats` and `POST /chats/:id/members` accept only users on the caller's side (else 400).
-- Presence (`hello`, `presence`), `account_deleted` and `reset` go only to the same side; chat events
-  follow chat membership, which never mixes the two.
+- Reviewers are in the hidden reviewer family only, so presence (`hello`, `presence`), `typing`,
+  `profile`, `account_deleted` and `reset`, which go only to people sharing a family ("Hub → client"),
+  never cross; chat events follow chat membership, which never mixes the two.
 - Reviewers can't be promoted or reset (404); they don't count as family for the last-admin rule or
   for `POST /admin/bootstrap`.
 - All reviewer accounts together may hold at most 256 MiB of live media (`413 too_large`), so their
@@ -475,28 +477,33 @@ Frames are JSON text. One socket per device carries every chat.
 | frame | effect |
 |---|---|
 | `{type:"send", id, chatId, envelope, silent?, mentions?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute |
-| `{type:"typing", chatId}` | relayed to the other members' sockets; send at most every 3 s while typing |
+| `{type:"typing", chatId}` | relayed to the sockets of the other members who share a family with you; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
 
 ### Hub → client
+Presence (`hello`, `presence`), `typing`, `profile`, `reset` and `account_deleted` reach only people
+who share a family with the user they're about; `device` reaches only chat partners who also share
+one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat`, `removed`,
+`keys`, `media_expired`) follow chat membership.
+
 | frame | when |
 |---|---|
-| `{type:"hello", online:[userId]}` | right after connecting |
-| `{type:"presence", userId, online}` | a user's first socket opened / last socket closed |
+| `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
+| `{type:"presence", userId, online}` | a user sharing a family with you: their first socket opened / last socket closed |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
-| `{type:"typing", chatId, userId}` | another member is typing; show for ~5 s |
+| `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
 | `{type:"removed", chatId}` | you left or were removed |
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
-| `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
+| `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat and a family with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
-| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone on that side, see "Reviewer accounts"): `GET /users` and check it |
-| `{type:"account_deleted", userId}` | that account was deleted (to everyone on that side): `GET /users` ("Deleting an account") |
-| `{type:"profile", userId}` | that user changed their name or profile photo (to everyone on that side): `GET /users` ("Profile: name and photo") |
+| `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone sharing a family with them): `GET /users` and check it |
+| `{type:"account_deleted", userId}` | that account was deleted (to everyone who shared a family with them): `GET /users` ("Deleting an account") |
+| `{type:"profile", userId}` | that user changed their name or profile photo (to everyone sharing a family with them): `GET /users` ("Profile: name and photo") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |
 

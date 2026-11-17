@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FamilyHub, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
 import { addDevice, api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
-import { BASE, insertUserWithDevice, resetDb } from "./helpers";
+import { notifyReset } from "../src/lib/reset-account";
+import { BASE, insertFamily, insertUserWithDevice, joinFamily, redeemNewDevice, resetDb } from "./helpers";
 
 type Msg = Record<string, unknown> & { type: string };
 
@@ -557,5 +558,110 @@ describe("events from REST", () => {
     const ca = await connect(a);
     expect((await api(a.accessToken, "DELETE", `/devices/${a.deviceId}`)).status).toBe(204);
     expect(await ca.closed).toBe(4001);
+  });
+});
+
+describe("family scope", () => {
+  const hub = () => env.HUB.get(env.HUB.idFromName("family"));
+  const leaveFamily = (userId: string, familyId: number) =>
+    env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(familyId, userId).run();
+
+  it("hello and presence reach only people sharing a family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const ca = await connect(a);
+    await ca.next("hello");
+    const cc = await connect(c);
+    expect((await cc.next("hello")).online).toEqual([c.userId]);
+    await ca.none("presence");
+    const cb = await connect(b);
+    expect(((await cb.next("hello")).online as string[]).sort()).toEqual([a.userId, b.userId].sort());
+    expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: true });
+    await cc.none("presence");
+    cc.ws.close(1000, "bye");
+    await ca.none("presence");
+    await cb.none("presence");
+  });
+
+  it("a newcomer's presence reaches connected people without reconnecting", async () => {
+    const a = await insertUserWithDevice({ admin: true });
+    const ca = await connect(a);
+    await ca.next("hello");
+    const b = await redeemNewDevice();
+    const cb = await connect(b as unknown as TestUser);
+    expect((await cb.next("hello")).online).toEqual(expect.arrayContaining([a.userId, b.userId]));
+    expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: true });
+    // A's cached peer set predates B: redeeming must have cleared it.
+    const chat = await createDirect(a, b as unknown as TestUser);
+    ca.send({ type: "typing", chatId: chat.id });
+    expect(await cb.next("typing")).toEqual({ type: "typing", chatId: chat.id, userId: a.userId });
+  });
+
+  it("typing in a shared direct chat stops when the two share no family", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const chat = await createDirect(a, b);
+    const ca = await connect(a);
+    const cb = await connect(b);
+    ca.send({ type: "typing", chatId: chat.id });
+    expect(await cb.next("typing")).toEqual({ type: "typing", chatId: chat.id, userId: a.userId });
+    await leaveFamily(b.userId, f3);
+    await hub().sharesChanged();
+    ca.send({ type: "typing", chatId: chat.id });
+    await cb.none("typing");
+    cb.send({ type: "typing", chatId: chat.id });
+    await ca.none("typing");
+  });
+
+  it("profile, reset and account_deleted go only to family peers", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice();
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const d = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const ca = await connect(a);
+    const cc = await connect(c);
+    const cd = await connect(d);
+    expect((await api(c.accessToken, "PUT", "/me/name", { name: "Cee" })).status).toBe(204);
+    expect(await cc.next("profile")).toEqual({ type: "profile", userId: c.userId });
+    expect(await cd.next("profile")).toEqual({ type: "profile", userId: c.userId });
+    await ca.none("profile");
+
+    await notifyReset(env, c.userId, "r1");
+    expect(await cd.next("reset")).toEqual({ type: "reset", userId: c.userId, resetId: "r1" });
+    await ca.none("reset");
+
+    expect((await api(c.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
+    expect(await cd.next("account_deleted")).toEqual({ type: "account_deleted", userId: c.userId });
+    await ca.none("account_deleted");
+  });
+
+  it("device events skip former chat partners", async () => {
+    const f3 = await insertFamily();
+    const a = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const b = await insertUserWithDevice({ families: [{ id: f3 }] });
+    const c = await insertUserWithDevice({ families: [{ id: f3 }] });
+    await createGroup(a, [b, c]);
+    await leaveFamily(b.userId, f3);
+    await hub().sharesChanged();
+    const cb = await connect(b);
+    const cc = await connect(c);
+    const extra = await addDevice(a.userId);
+    expect((await api(a.accessToken, "DELETE", `/devices/${extra}`)).status).toBe(204);
+    expect(await cc.next("device")).toEqual({ type: "device", userId: a.userId, deviceId: extra, revoked: true });
+    await cb.none("device");
+  });
+
+  it("deleting an account clears the peer cache", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const ca = await connect(a);
+    await ca.next("hello");
+    const peers = (h: FamilyHub) => (h as unknown as { peers: Map<string, Set<string>> }).peers;
+    expect(await runInDurableObject(hub(), (h: FamilyHub) => peers(h).get(a.userId)?.has(b.userId))).toBe(true);
+    expect((await api(b.accessToken, "DELETE", "/me", { confirm: "delete" })).status).toBe(204);
+    expect(await runInDurableObject(hub(), (h: FamilyHub) => peers(h).has(a.userId))).toBe(false);
   });
 });

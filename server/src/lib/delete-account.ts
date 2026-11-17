@@ -10,7 +10,7 @@ import { hubStub } from "../hub";
 import { notify } from "../notify";
 import { memberIds } from "./chatdb";
 import { ApiError } from "./errors";
-import { sharingUserIds } from "./family";
+import { familyPeers, sharesChanged, sharingUserIds } from "./family";
 import { eventStmt } from "./reset";
 
 export const DELETED_USER_NAME = "Deleted user";
@@ -99,6 +99,8 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
     if (!row || row.deleted_at !== null) throw new ApiError("not_found");
     throw new ApiError("last_admin");
   }
+  // The hub forgets peer sets that still count the user.
+  await sharesChanged(env);
 
   const revoked = (results[devIdx].results as { id: string }[]).map((r) => r.id);
   const chats = (results[chatIdx].results as { id: string }[]).map((r) => r.id);
@@ -126,11 +128,8 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const byChat = new Map<string, string[]>();
   for (const m of media) if (m.expired_at === null) byChat.set(m.chat_id, [...(byChat.get(m.chat_id) ?? []), m.key]);
   for (const [chatId, ks] of byChat) await notify(env, await memberIds(db, chatId), { type: "media_expired", chatId, keys: ks });
-  // Everyone on the deleted user's side: the family, or the other reviewer accounts.
-  const { results: everyone } = await db.prepare(
-    "SELECT id FROM users WHERE deleted_at IS NULL AND reviewer = (SELECT reviewer FROM users WHERE id = ?)",
-  ).bind(userId).all<{ id: string }>();
-  await notify(env, everyone.map((u) => u.id), { type: "account_deleted", userId });
+  // Everyone who shared a family with them (their family_members rows stay, so this still works).
+  await notify(env, await familyPeers(db, userId), { type: "account_deleted", userId });
 
   return { revokedDevices: revoked, chats, messages: results[msgIdx].meta.changes, media: keys };
 }
