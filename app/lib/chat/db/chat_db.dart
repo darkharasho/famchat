@@ -25,6 +25,9 @@ class LocalChats extends Table {
   /// This user's mute (Unix ms; see [ChatDto.mutedUntil]), or null.
   IntColumn get mutedUntil => integer().nullable()();
 
+  /// Text typed here and not sent yet (this device only), or null.
+  TextColumn get draft => text().nullable()();
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   IntColumn get syncedSeq => integer().withDefault(const Constant(0))();
 
@@ -187,7 +190,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -201,6 +204,7 @@ class ChatDb extends _$ChatDb {
           }
           if (from < 3) await m.addColumn(localUsers, localUsers.deleted);
           if (from < 4) await m.addColumn(localChats, localChats.mutedUntil);
+          if (from < 5) await m.addColumn(localChats, localChats.draft);
         },
       );
 
@@ -370,6 +374,12 @@ class ChatDb extends _$ChatDb {
       (select(localMembers)..where((m) => m.chatId.equals(chatId))).watch();
 
   static const _changeKinds = ['reaction', 'edit', 'delete'];
+
+  /// Keeps [text] as [chatId]'s draft; blank text clears it.
+  Future<void> setDraft(String chatId, String? text) => (update(localChats)..where((c) => c.id.equals(chatId)))
+      .write(LocalChatsCompanion(draft: Value(text == null || text.trim().isEmpty ? null : text)));
+
+  Future<String?> draftOf(String chatId) async => (await chatById(chatId))?.draft;
 
   Future<void> setMutedUntil(String chatId, int? until) =>
       (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(mutedUntil: Value(until)));

@@ -77,6 +77,8 @@ class _ChatTile extends StatelessWidget {
       return m.userId != me && u != null && u.identityPub != u.trustedIdentityPub;
     });
     final muted = (item.chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch;
+    // Shown unless new messages came in since: those are what the person needs to see.
+    final draft = unread ? null : item.chat.draft?.replaceAll('\n', ' ');
     final tileColor = selected ? theme.listTileTheme.selectedTileColor : null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
@@ -138,15 +140,25 @@ class _ChatTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(children: [
                       Expanded(
-                        child: Text(
-                          preview(item.last, users, me, changes: item.lastChanges),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: unread ? s.onSurface : s.onSurfaceVariant,
-                            fontWeight: unread ? FontWeight.w500 : null,
-                          ),
-                        ),
+                        child: draft != null
+                            ? Text.rich(
+                                TextSpan(children: [
+                                  TextSpan(text: 'Draft: ', style: TextStyle(color: s.error, fontWeight: FontWeight.w600)),
+                                  TextSpan(text: draft),
+                                ]),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant),
+                              )
+                            : Text(
+                                preview(item.last, users, me, changes: item.lastChanges),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: unread ? s.onSurface : s.onSurfaceVariant,
+                                  fontWeight: unread ? FontWeight.w500 : null,
+                                ),
+                              ),
                       ),
                       if (unread) ...[
                         const SizedBox(width: Space.sm),

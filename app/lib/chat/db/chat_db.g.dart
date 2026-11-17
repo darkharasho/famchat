@@ -128,6 +128,15 @@ class $LocalChatsTable extends LocalChats
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _draftMeta = const VerificationMeta('draft');
+  @override
+  late final GeneratedColumn<String> draft = GeneratedColumn<String>(
+    'draft',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _syncedSeqMeta = const VerificationMeta(
     'syncedSeq',
   );
@@ -153,6 +162,7 @@ class $LocalChatsTable extends LocalChats
     createdAt,
     myLastReadSeq,
     mutedUntil,
+    draft,
     syncedSeq,
   ];
   @override
@@ -253,6 +263,12 @@ class $LocalChatsTable extends LocalChats
         mutedUntil.isAcceptableOrUnknown(data['muted_until']!, _mutedUntilMeta),
       );
     }
+    if (data.containsKey('draft')) {
+      context.handle(
+        _draftMeta,
+        draft.isAcceptableOrUnknown(data['draft']!, _draftMeta),
+      );
+    }
     if (data.containsKey('synced_seq')) {
       context.handle(
         _syncedSeqMeta,
@@ -312,6 +328,10 @@ class $LocalChatsTable extends LocalChats
         DriftSqlType.int,
         data['${effectivePrefix}muted_until'],
       ),
+      draft: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}draft'],
+      ),
       syncedSeq: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}synced_seq'],
@@ -340,6 +360,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
   /// This user's mute (Unix ms; see [ChatDto.mutedUntil]), or null.
   final int? mutedUntil;
 
+  /// Text typed here and not sent yet (this device only), or null.
+  final String? draft;
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   final int syncedSeq;
   const ChatRow({
@@ -354,6 +377,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     required this.createdAt,
     required this.myLastReadSeq,
     this.mutedUntil,
+    this.draft,
     required this.syncedSeq,
   });
   @override
@@ -375,6 +399,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     map['my_last_read_seq'] = Variable<int>(myLastReadSeq);
     if (!nullToAbsent || mutedUntil != null) {
       map['muted_until'] = Variable<int>(mutedUntil);
+    }
+    if (!nullToAbsent || draft != null) {
+      map['draft'] = Variable<String>(draft);
     }
     map['synced_seq'] = Variable<int>(syncedSeq);
     return map;
@@ -399,6 +426,9 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       mutedUntil: mutedUntil == null && nullToAbsent
           ? const Value.absent()
           : Value(mutedUntil),
+      draft: draft == null && nullToAbsent
+          ? const Value.absent()
+          : Value(draft),
       syncedSeq: Value(syncedSeq),
     );
   }
@@ -420,6 +450,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       createdAt: serializer.fromJson<int>(json['createdAt']),
       myLastReadSeq: serializer.fromJson<int>(json['myLastReadSeq']),
       mutedUntil: serializer.fromJson<int?>(json['mutedUntil']),
+      draft: serializer.fromJson<String?>(json['draft']),
       syncedSeq: serializer.fromJson<int>(json['syncedSeq']),
     );
   }
@@ -438,6 +469,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       'createdAt': serializer.toJson<int>(createdAt),
       'myLastReadSeq': serializer.toJson<int>(myLastReadSeq),
       'mutedUntil': serializer.toJson<int?>(mutedUntil),
+      'draft': serializer.toJson<String?>(draft),
       'syncedSeq': serializer.toJson<int>(syncedSeq),
     };
   }
@@ -454,6 +486,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     int? createdAt,
     int? myLastReadSeq,
     Value<int?> mutedUntil = const Value.absent(),
+    Value<String?> draft = const Value.absent(),
     int? syncedSeq,
   }) => ChatRow(
     id: id ?? this.id,
@@ -469,6 +502,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     createdAt: createdAt ?? this.createdAt,
     myLastReadSeq: myLastReadSeq ?? this.myLastReadSeq,
     mutedUntil: mutedUntil.present ? mutedUntil.value : this.mutedUntil,
+    draft: draft.present ? draft.value : this.draft,
     syncedSeq: syncedSeq ?? this.syncedSeq,
   );
   ChatRow copyWithCompanion(LocalChatsCompanion data) {
@@ -494,6 +528,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       mutedUntil: data.mutedUntil.present
           ? data.mutedUntil.value
           : this.mutedUntil,
+      draft: data.draft.present ? data.draft.value : this.draft,
       syncedSeq: data.syncedSeq.present ? data.syncedSeq.value : this.syncedSeq,
     );
   }
@@ -512,6 +547,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ..write('createdAt: $createdAt, ')
           ..write('myLastReadSeq: $myLastReadSeq, ')
           ..write('mutedUntil: $mutedUntil, ')
+          ..write('draft: $draft, ')
           ..write('syncedSeq: $syncedSeq')
           ..write(')'))
         .toString();
@@ -530,6 +566,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     createdAt,
     myLastReadSeq,
     mutedUntil,
+    draft,
     syncedSeq,
   );
   @override
@@ -547,6 +584,7 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           other.createdAt == this.createdAt &&
           other.myLastReadSeq == this.myLastReadSeq &&
           other.mutedUntil == this.mutedUntil &&
+          other.draft == this.draft &&
           other.syncedSeq == this.syncedSeq);
 }
 
@@ -562,6 +600,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
   final Value<int> createdAt;
   final Value<int> myLastReadSeq;
   final Value<int?> mutedUntil;
+  final Value<String?> draft;
   final Value<int> syncedSeq;
   final Value<int> rowid;
   const LocalChatsCompanion({
@@ -576,6 +615,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.createdAt = const Value.absent(),
     this.myLastReadSeq = const Value.absent(),
     this.mutedUntil = const Value.absent(),
+    this.draft = const Value.absent(),
     this.syncedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -591,6 +631,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     required int createdAt,
     this.myLastReadSeq = const Value.absent(),
     this.mutedUntil = const Value.absent(),
+    this.draft = const Value.absent(),
     this.syncedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -612,6 +653,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Expression<int>? createdAt,
     Expression<int>? myLastReadSeq,
     Expression<int>? mutedUntil,
+    Expression<String>? draft,
     Expression<int>? syncedSeq,
     Expression<int>? rowid,
   }) {
@@ -627,6 +669,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       if (createdAt != null) 'created_at': createdAt,
       if (myLastReadSeq != null) 'my_last_read_seq': myLastReadSeq,
       if (mutedUntil != null) 'muted_until': mutedUntil,
+      if (draft != null) 'draft': draft,
       if (syncedSeq != null) 'synced_seq': syncedSeq,
       if (rowid != null) 'rowid': rowid,
     });
@@ -644,6 +687,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Value<int>? createdAt,
     Value<int>? myLastReadSeq,
     Value<int?>? mutedUntil,
+    Value<String?>? draft,
     Value<int>? syncedSeq,
     Value<int>? rowid,
   }) {
@@ -659,6 +703,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       createdAt: createdAt ?? this.createdAt,
       myLastReadSeq: myLastReadSeq ?? this.myLastReadSeq,
       mutedUntil: mutedUntil ?? this.mutedUntil,
+      draft: draft ?? this.draft,
       syncedSeq: syncedSeq ?? this.syncedSeq,
       rowid: rowid ?? this.rowid,
     );
@@ -700,6 +745,9 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     if (mutedUntil.present) {
       map['muted_until'] = Variable<int>(mutedUntil.value);
     }
+    if (draft.present) {
+      map['draft'] = Variable<String>(draft.value);
+    }
     if (syncedSeq.present) {
       map['synced_seq'] = Variable<int>(syncedSeq.value);
     }
@@ -723,6 +771,7 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
           ..write('createdAt: $createdAt, ')
           ..write('myLastReadSeq: $myLastReadSeq, ')
           ..write('mutedUntil: $mutedUntil, ')
+          ..write('draft: $draft, ')
           ..write('syncedSeq: $syncedSeq, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -3769,6 +3818,7 @@ typedef $$LocalChatsTableCreateCompanionBuilder = LocalChatsCompanion Function({
   required int createdAt,
   Value<int> myLastReadSeq,
   Value<int?> mutedUntil,
+  Value<String?> draft,
   Value<int> syncedSeq,
   Value<int> rowid,
 });
@@ -3784,6 +3834,7 @@ typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
   Value<int> createdAt,
   Value<int> myLastReadSeq,
   Value<int?> mutedUntil,
+  Value<String?> draft,
   Value<int> syncedSeq,
   Value<int> rowid,
 });
@@ -3849,6 +3900,11 @@ class $$LocalChatsTableFilterComposer
 
   ColumnFilters<int> get mutedUntil => $composableBuilder(
     column: $table.mutedUntil,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get draft => $composableBuilder(
+    column: $table.draft,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3922,6 +3978,11 @@ class $$LocalChatsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get draft => $composableBuilder(
+    column: $table.draft,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get syncedSeq => $composableBuilder(
     column: $table.syncedSeq,
     builder: (column) => ColumnOrderings(column),
@@ -3980,6 +4041,9 @@ class $$LocalChatsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get draft =>
+      $composableBuilder(column: $table.draft, builder: (column) => column);
+
   GeneratedColumn<int> get syncedSeq =>
       $composableBuilder(column: $table.syncedSeq, builder: (column) => column);
 }
@@ -4023,6 +4087,7 @@ class $$LocalChatsTableTableManager
                 Value<int> createdAt = const Value.absent(),
                 Value<int> myLastReadSeq = const Value.absent(),
                 Value<int?> mutedUntil = const Value.absent(),
+                Value<String?> draft = const Value.absent(),
                 Value<int> syncedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion(
@@ -4037,6 +4102,7 @@ class $$LocalChatsTableTableManager
                 createdAt: createdAt,
                 myLastReadSeq: myLastReadSeq,
                 mutedUntil: mutedUntil,
+                draft: draft,
                 syncedSeq: syncedSeq,
                 rowid: rowid,
               ),
@@ -4053,6 +4119,7 @@ class $$LocalChatsTableTableManager
                 required int createdAt,
                 Value<int> myLastReadSeq = const Value.absent(),
                 Value<int?> mutedUntil = const Value.absent(),
+                Value<String?> draft = const Value.absent(),
                 Value<int> syncedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion.insert(
@@ -4067,6 +4134,7 @@ class $$LocalChatsTableTableManager
                 createdAt: createdAt,
                 myLastReadSeq: myLastReadSeq,
                 mutedUntil: mutedUntil,
+                draft: draft,
                 syncedSeq: syncedSeq,
                 rowid: rowid,
               ),

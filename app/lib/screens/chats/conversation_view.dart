@@ -79,6 +79,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
 
+  /// The draft set aside while editing a message, put back when the edit ends.
+  String _stashedDraft = '';
+
+  /// The draft as last written to the database, and the pending write.
+  String _savedDraft = '';
+  Timer? _draftTimer;
+
   /// A message just jumped to, tinted for a moment.
   String? _highlight;
   Timer? _unhighlight;
@@ -118,7 +125,35 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       final empty = _text.text.trim().isEmpty;
       if (empty != _empty && mounted) setState(() => _empty = empty);
       _updateSuggestions();
+      _scheduleDraftSave();
     });
+    unawaited(_loadDraft());
+  }
+
+  Future<void> _loadDraft() async {
+    final draft = await ref.read(chatDbProvider).draftOf(widget.chatId);
+    // Typing (or an edit) that began meanwhile wins.
+    if (draft == null || !mounted || _text.text.isNotEmpty || _editing != null) return;
+    _savedDraft = draft;
+    _text.value = TextEditingValue(text: draft, selection: TextSelection.collapsed(offset: draft.length));
+  }
+
+  /// What this chat's draft is now: the composer, or what it held before an edit began.
+  String get _draft => _editing != null ? _stashedDraft : _text.text;
+
+  void _scheduleDraftSave() {
+    if (_draft == _savedDraft) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
+  }
+
+  void _saveDraftNow() {
+    _draftTimer?.cancel();
+    final draft = _draft;
+    if (draft == _savedDraft) return;
+    _savedDraft = draft;
+    // Through the container: this also runs from dispose, where `ref` can't be used.
+    unawaited(_container.read(chatDbProvider).setDraft(widget.chatId, draft));
   }
 
   void _updateSuggestions() {
@@ -185,6 +220,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         // the whole app went away
       }
     }));
+    _saveDraftNow();
     _text.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -256,8 +292,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       } else {
         await sync.sendText(widget.chatId, text, replyTo: replyTo?.id);
       }
-      _text.clear();
-      if (mounted) setState(() => _editing = _replyTo = null);
+      if (editing != null) {
+        _endEdit();
+      } else {
+        _text.clear();
+        if (mounted) setState(() => _replyTo = null);
+      }
+      _saveDraftNow();
     } on ArgumentError {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That message is too long.')));
@@ -272,17 +313,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   String? _currentText(MessageRow m) => _changes.textOf(m);
 
   void _startReply(MessageRow m) {
-    setState(() {
-      _replyTo = m;
-      if (_editing != null) _text.clear();
-      _editing = null;
-    });
+    if (_editing != null) _endEdit();
+    setState(() => _replyTo = m);
     _focus.requestFocus();
   }
 
   void _startEdit(MessageRow m) {
     final text = _currentText(m);
     if (text == null) return;
+    if (_editing == null) _stashedDraft = _text.text;
     setState(() {
       _editing = m;
       _replyTo = null;
@@ -291,10 +330,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _focus.requestFocus();
   }
 
+  /// Leaves edit mode and puts the set-aside draft back in the composer.
+  void _endEdit() {
+    final draft = _stashedDraft;
+    _stashedDraft = '';
+    setState(() => _editing = null);
+    _text.value = TextEditingValue(text: draft, selection: TextSelection.collapsed(offset: draft.length));
+  }
+
   void _cancelCompose() {
-    final wasEditing = _editing != null;
-    setState(() => _editing = _replyTo = null);
-    if (wasEditing) _text.clear();
+    if (_editing != null) _endEdit();
+    setState(() => _replyTo = null);
   }
 
   Future<void> _delete(MessageRow m) async {
