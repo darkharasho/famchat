@@ -242,22 +242,36 @@ the history at once; `trust` is E's trust-on-first-use state for other users, so
 of whatever the server shows. Member devices also add wraps for N on the `device` event.
 
 ### Directory
-- `GET /users` → `{users: User[]}`: every family member and every device, revoked ones included
+- `GET /users` → `{users: User[]}`: the caller, everyone who shares a family with them, and "former"
+  chat partners (below). Nobody else is ever listed. Every device is included, revoked ones too
   (`revoked: true`) so old signatures still verify. Wrap only for devices with `revoked: false`.
   `resets` is the user's signed reset history, oldest first: their past identity keys, which clients
-  accept only through resets they verify ("Account resets"). A deleted account stays listed with
-  `deleted: true`, name `"Deleted user"` and every device revoked; don't offer it for new chats.
-  `avatarKey` names the user's profile photo, or is null.
+  accept only through resets they verify ("Account resets"). A deleted account stays listed to the
+  people who shared a family with it, with `deleted: true`, name `"Deleted user"` and every device
+  revoked; don't offer it for new chats. `avatarKey` names the user's profile photo, or is null.
+- `families: {id, role: "admin"|"member", adminProof: {byUserId, signerPub, sig} | null}[]` lists
+  only the families that user shares with the caller (a person's other families are never shown).
+  `adminProof` is set for admins who have a signed proof. Reviewers see the hidden reviewer family
+  in their own and other reviewers' lists.
+- `isAdmin` and `adminProof` describe family #1 only, and only when the caller is in family #1 too;
+  otherwise `false`/`null`, so family #1's roles don't leak to outsiders.
+- `former: true` marks people the caller shares a chat with (including a read-only direct chat or a
+  group they left, recorded in `chat_leavers`) but no family. They're listed so history still
+  verifies on a new or reset device, with the normal shape but `isAdmin: false`, `adminProof: null`
+  and `families: []`. They get no presence, typing or `profile` events and are never offered in
+  pickers. Every other entry has `former: false`.
+- `GET /me` also returns `operator: boolean`; its `isAdmin` means admin of family #1.
 
 ### Profile: name and photo
-Not end-to-end encrypted, like names: the server and everyone on the user's side of the reviewer
-line can see them.
+Not end-to-end encrypted, like names: the server and everyone in the user's directory (family
+peers and former chat partners) can see them.
 
 - `PUT /me/avatar` with a JPEG as the raw body (`content-type: image/jpeg`, at most 256 KiB; the app
   sends 512×512) → `{avatarKey}`. Each photo gets a new key; the previous one is deleted.
 - `DELETE /me/avatar` → 204.
 - `GET /users/:id/avatar?v=<avatarKey>` → the JPEG, cacheable for good (`immutable`); 404 once
-  replaced. Without `v`: the current one, not cached.
+  replaced. Without `v`: the current one, not cached. Only people in the caller's own directory
+  (themselves, family peers, former chat partners) can be fetched; anyone else gets 404.
 - `PUT /me/name {name}` → 204: renames the caller (trimmed, 1–40 characters, no control characters).
 - Any of these sends `{type:"profile", userId}` to everyone on that side: `GET /users` again.
   Deleting an account deletes its photo.

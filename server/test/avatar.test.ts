@@ -1,7 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { api, type TestUser } from "./chat-helpers";
-import { BASE, insertUserWithDevice, resetDb } from "./helpers";
+import { api, createDirect, type TestUser } from "./chat-helpers";
+import { BASE, insertFamily, insertUserWithDevice, resetDb } from "./helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
 beforeEach(resetDb);
@@ -80,6 +80,19 @@ describe("profile photos", () => {
     await put(mom, jpeg());
     expect(await sk.next("profile")).toMatchObject({ userId: mom.userId });
     await sr.none("profile");
+  });
+
+  it("only people in your directory can fetch your photo", async () => {
+    const mom = await insertUserWithDevice({ families: [{ id: 1 }, { id: await insertFamily() }] });
+    const stranger = await insertUserWithDevice({ families: [{ id: await insertFamily() }] });
+    const ex = await insertUserWithDevice({ families: [{ id: 1 }] });
+    await put(mom, jpeg());
+    await createDirect(mom, ex);
+    expect((await get(ex, mom.userId)).status).toBe(200);
+    expect((await get(stranger, mom.userId)).status).toBe(404);
+    await env.DB.prepare("DELETE FROM family_members WHERE user_id = ?").bind(ex.userId).run();
+    expect((await get(ex, mom.userId)).status).toBe(200); // former
+    expect((await get(mom, ex.userId)).status).toBe(404); // ex has no photo
   });
 
   it("aren't visible across the reviewer line", async () => {

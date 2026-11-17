@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { deleteAccount } from "../lib/delete-account";
+import { FAMILY_ONE } from "../lib/family";
 import { newId } from "../lib/ids";
 import { notify } from "../notify";
 import { ApiError } from "../lib/errors";
@@ -12,15 +13,19 @@ me.use(requireAuth);
 
 /** The signed-in user's profile. isAdmin comes from the database, not the access token. */
 me.get("/", async (c) => {
-  const row = await c.env.DB.prepare("SELECT name, is_admin, recovery_pub IS NOT NULL AS has_recovery FROM users WHERE id = ?")
-    .bind(c.get("userId"))
-    .first<{ name: string; is_admin: number; has_recovery: number }>();
+  const row = await c.env.DB.prepare(`SELECT name, operator, recovery_pub IS NOT NULL AS has_recovery,
+       EXISTS (SELECT 1 FROM family_members WHERE family_id = ? AND user_id = users.id AND role = 'admin') AS is_admin
+     FROM users WHERE id = ?`)
+    .bind(FAMILY_ONE, c.get("userId"))
+    .first<{ name: string; is_admin: number; operator: number; has_recovery: number }>();
   if (!row) throw new ApiError("unauthorized");
   return c.json({
     userId: c.get("userId"),
     deviceId: c.get("deviceId"),
     name: row.name,
+    // Admin of family #1 (the original family).
     isAdmin: row.is_admin === 1,
+    operator: row.operator === 1,
     // An admin recovery key is registered (the printed code was saved).
     recoveryCodeSet: row.has_recovery === 1,
     // A reviewer account (docs/protocol.md "Reviewer accounts").
