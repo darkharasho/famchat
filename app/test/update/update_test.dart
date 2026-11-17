@@ -6,7 +6,7 @@ import 'package:famchat/update/release_feed.dart';
 import 'package:famchat/update/update_banner.dart';
 import 'package:famchat/update/update_controller.dart';
 import 'package:famchat/update/update_platform.dart';
-import 'package:famchat/update/update_platform_io.dart' show downloadVerified;
+import 'package:famchat/update/update_platform_io.dart' show downloadInBackground, downloadVerified;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -139,6 +139,28 @@ void main() {
       final target = File('${dir.path}/a');
       await expectLater(downloadVerified(asset('00' * 32), client, target, (_) {}), throwsA(isA<UpdateException>()));
       expect(await target.exists(), isFalse);
+    });
+
+    test('downloads in a background isolate, off the UI thread', () async {
+      final body = List<int>.generate(300000, (i) => i % 251);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((req) => req.response
+        ..contentLength = body.length
+        ..add(body)
+        ..close());
+      final a = ReleaseAsset(
+          name: 'x', url: Uri.parse('http://127.0.0.1:${server.port}/x'), sha256: await sha(body), size: body.length);
+      final target = File('${dir.path}/bg');
+      final progress = <double>[];
+      await downloadInBackground(a, target, progress.add);
+      expect(await target.readAsBytes(), body);
+      expect(progress.last, 1.0);
+      await expectLater(
+        downloadInBackground(ReleaseAsset(name: 'x', url: a.url, sha256: '00' * 32, size: 1), File('${dir.path}/bad'), (_) {}),
+        throwsA(isA<UpdateException>().having((e) => e.message, 'message', contains('checksum'))),
+      );
+      expect(await File('${dir.path}/bad').exists(), isFalse);
     });
 
     test('refuses a download without a checksum, and an HTTP error', () async {
