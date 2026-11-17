@@ -17,6 +17,7 @@ import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
 import 'screens/pair_screen.dart';
+import 'screens/operator_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screen.dart';
 import 'screens/spikes_screen.dart';
@@ -136,6 +137,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                   ),
                 ],
               ),
+              GoRoute(path: 'operator', builder: (context, state) => const OperatorScreen()),
               // The one-family screen's old address (the admin setup banner, old links).
               GoRoute(path: 'family', redirect: (context, state) => '/settings/families/1'),
             ],

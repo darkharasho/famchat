@@ -107,6 +107,10 @@ class FakeServer {
   /// memberCount). Tests edit it to play the operator approving or declining.
   final extraFamilies = <Map<String, Object?>>[];
 
+  /// `GET /operator/families` rows (id, name, status, createdAt, creator: {id, name} | null,
+  /// memberCount); approve and decline change `status`.
+  final operatorRequests = <Map<String, Object?>>[];
+
   /// `GET /families` answers 403 while set (a refresh that fails).
   bool failFamilies = false;
 
@@ -258,7 +262,7 @@ class FakeServer {
         'forbidden' => 403,
         'not_found' => 404,
         'invite_invalid' || 'pairing_invalid' => 410,
-        'last_admin' => 409,
+        'last_admin' || 'conflict' => 409,
         _ => 500,
       });
 
@@ -389,6 +393,22 @@ class FakeServer {
     if (familyRoute != null && familyRoute[1] != null) {
       final res = await _family(r, users[userId]!, int.parse(familyRoute[1]!), familyRoute[2] ?? '');
       if (res != null) return res;
+    }
+    if (path == '/api/operator/families' || path.startsWith('/api/operator/families/')) {
+      final u = users[userId]!;
+      if (!u.operator || u.reviewer) return _err('forbidden');
+      if (r.method == 'GET' && path == '/api/operator/families') {
+        final status = r.url.queryParameters['status'] ?? 'pending';
+        return _json({'families': [for (final f in operatorRequests) if (f['status'] == status) f]});
+      }
+      final decide = RegExp(r'^/api/operator/families/(\d+)/(approve|decline)$').firstMatch(path);
+      if (r.method == 'POST' && decide != null) {
+        final f = operatorRequests.where((f) => f['id'] == int.parse(decide[1]!)).firstOrNull;
+        if (f == null) return _err('not_found');
+        if (f['status'] != 'pending') return _err('conflict');
+        f['status'] = decide[2] == 'approve' ? 'approved' : 'declined';
+        return http.Response('', 204);
+      }
     }
     if (r.method == 'GET' && path == '/api/families') {
       if (failFamilies) return _err('forbidden');

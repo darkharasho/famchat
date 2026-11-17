@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../admin/admin_providers.dart';
 import '../api/models.dart';
 import '../chat/chat_sync.dart';
 import '../chat/providers.dart';
@@ -48,6 +49,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final admin = session?.isAdmin ?? false;
     final myId = ref.watch(myUserIdProvider);
     final reviewer = ref.watch(meProvider).value?.reviewer ?? false;
+    final operator = ref.watch(meProvider).value?.operator ?? false;
+    final waiting = operator ? ref.watch(operatorRequestsProvider).value?.length : null;
     final familyNames = [for (final f in ref.watch(familiesProvider).value ?? const <Family>[]) f.name];
     // The directory has a rename at once; the session catches up at the next /me.
     final name = (myId == null ? null : ref.watch(usersProvider).value?[myId]?.name) ?? session?.name ?? 'You';
@@ -110,6 +113,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 row(Icons.diversity_3_rounded, 'Families', familyNames.isEmpty ? 'Start or join a family' : familyNames.join(', '),
                     '/settings/families',
                     key: const Key('settings-families')),
+              ]),
+            if (operator)
+              SettingsGroup(title: 'Operator', children: [
+                row(Icons.how_to_reg_rounded, 'Family requests',
+                    waiting == null ? 'New families, and app review' : waiting == 0 ? 'None waiting' : '$waiting waiting',
+                    '/settings/operator',
+                    key: const Key('settings-operator')),
               ]),
             const AppVersionGroup(),
             if (ref.watch(developerToolsProvider))

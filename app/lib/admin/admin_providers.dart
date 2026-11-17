@@ -27,6 +27,13 @@ final reviewersProvider = FutureProvider.autoDispose<Reviewers>(
   retry: _noRetry,
 );
 
+/// Families waiting for the operator (`GET /operator/families`), for the operator's screen and the
+/// Settings tile.
+final operatorRequestsProvider = FutureProvider.autoDispose<List<FamilyRequest>>(
+  (ref) => ref.watch(apiClientProvider).operatorFamilies(),
+  retry: _noRetry,
+);
+
 /// The family as the server lists it now (`GET /users`), for the Family screen.
 final familyProvider = FutureProvider.autoDispose<List<UserDto>>(
   (ref) => ref.watch(chatApiProvider).users(),
