@@ -123,6 +123,31 @@ void main() {
     expect(b64url(await publicKeyOf(rk)), resetVector['recoveryPub']);
     expect(b64url(await signPromotion(signer, userId: st.userId, byUserId: st.signerUserId)), resetVector['promotionSig']);
   });
+  group('v2 promotions', () {
+    const seed = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    const signerPub = 'A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg';
+    const userId = '01JMOM0000000000000000000A';
+    const byUserId = '01JADMIN000000000000000000';
+    const sig = 'R15HUaNwSBgJ2AhhhRTOuzSYuCYKEiSPof7eXnK4EOEZPSgMz8u-wzyzgveO6l6cWd6NifFbfeKcnY23AQs-Dw';
+
+    test('shared vector verifies; wrong family and v1 do not', () async {
+      Future<bool> v2(int familyId) => verifyPromotionV2(
+          signerPub: b64urlDecode(signerPub), familyId: familyId, userId: userId, byUserId: byUserId, sig: b64urlDecode(sig));
+      expect(await v2(1), isTrue);
+      expect(await v2(2), isFalse);
+      expect(await verifyPromotion(signerPub: b64urlDecode(signerPub), userId: userId, byUserId: byUserId, sig: b64urlDecode(sig)), isFalse);
+    });
+
+    test('signing with the vector seed reproduces the vector', () async {
+      final key = await newIdentityKey(seed: b64urlDecode(seed));
+      expect(b64url(await publicKeyOf(key)), signerPub);
+      final s = await signPromotionV2(key, familyId: 1, userId: userId, byUserId: byUserId);
+      expect(b64url(s), sig);
+      expect(await verifyPromotionV2(signerPub: await publicKeyOf(key), familyId: 1, userId: userId, byUserId: byUserId, sig: s), isTrue);
+      expect(await verifyPromotionV2(signerPub: await publicKeyOf(key), familyId: 1, userId: userId, byUserId: 'x', sig: s), isFalse);
+    });
+  });
+
 }
 
 /// The server test (server/test/reset-vector.test.ts) checks the same values.
