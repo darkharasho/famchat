@@ -45,6 +45,8 @@ void main() {
   testWidgets('developer tools show the platform spikes', (tester) async {
     await openSettings(tester, dev: true);
     await tester.scrollUntilVisible(find.text('Platform spikes'), 100);
+    await tester.ensureVisible(find.text('Platform spikes'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Platform spikes'));
     await tester.pumpAndSettle();
     expect(find.byType(SpikesScreen), findsOneWidget);

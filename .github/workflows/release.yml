@@ -117,7 +117,7 @@ jobs:
           echo "upload=$upload" >> "$GITHUB_OUTPUT"
 
       - name: Build (Flutter, unsigned)
-        run: flutter build ios --release --no-codesign --build-name "$NAME" --build-number "$NUMBER"
+        run: flutter build ios --release --no-codesign --build-name "$NAME" --build-number "$NUMBER" --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
 
       # Archive unsigned and sign only at export (cloud-managed distribution signing), as in
       # duel-binder: signing the archive made a new development certificate on every fresh runner.
@@ -218,7 +218,7 @@ jobs:
           [ -n "$KEYSTORE" ] || { echo "::error::ANDROID_KEYSTORE_BASE64 isn't set."; exit 1; }
           export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/upload.jks"
           printf '%s' "$KEYSTORE" | base64 -d > "$ANDROID_KEYSTORE_FILE"
-          flutter build appbundle --release --build-name "$NAME" --build-number "$NUMBER"
+          flutter build appbundle --release --build-name "$NAME" --build-number "$NUMBER" --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           rm -f "$ANDROID_KEYSTORE_FILE"
           aab=build/app/outputs/bundle/release/app-release.aab
           # Fail if Gradle fell back to the debug key.
