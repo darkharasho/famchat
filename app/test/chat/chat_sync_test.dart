@@ -219,10 +219,40 @@ void main() {
 
     // Only the two texts notify; the edits and the delete were sent silent.
     expect(backend.silentIds, hasLength(3));
-    // Changes aren't unread, and the list shows the latest real message.
+    // Changes and deleted messages aren't unread, and the list shows the latest real message.
     final list = await carol.d.db.watchChatList(carol.d.userId).first;
-    expect(list.single.unread, 2);
+    expect(list.single.unread, 1);
     expect(list.single.last?.id, reply);
+  });
+
+  test('deleting a message whose ack was lost still deletes it for everyone', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await pump();
+    await alice.sync.idle;
+    alice.d.hub.dropNextAck = true; // stored on the server, then the socket drops before the ack
+    final id = await alice.sync.sendText(chatId, 'oops');
+    await until(() async => !alice.d.hub.connected);
+    await until(() async => (await bob.rows(chatId)).isNotEmpty, reason: 'bob got it');
+    await alice.sync.deleteMessage(chatId, id);
+    await alice.d.hub.connect();
+    await until(() async => messageChanges(await bob.rows(chatId)).isDeleted(id), reason: 'bob sees it deleted');
+    await alice.sync.idle;
+    expect(messageChanges(await alice.rows(chatId)).isDeleted(id), isTrue);
+  });
+
+  test('deleting a message that never left this device just drops it', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    alice.d.hub.drop();
+    final id = await alice.sync.sendText(chatId, 'never mind');
+    await alice.sync.deleteMessage(chatId, id);
+    expect(await alice.rows(chatId), isEmpty);
+    await alice.d.hub.connect();
+    await alice.sync.idle;
+    expect(backend.storedMessages(chatId), isEmpty);
   });
 
   test('reactions are sent silent', () async {

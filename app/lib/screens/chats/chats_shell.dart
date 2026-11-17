@@ -51,7 +51,7 @@ class ChatsShell extends ConsumerWidget {
         child: LayoutBuilder(builder: (context, c) {
           final wide = c.maxWidth >= twoPaneWidth;
           if (!wide) {
-            return id == null ? const _ListPane(selectedId: null) : ConversationView(chatId: id);
+            return id == null ? const _ListPane(selectedId: null) : ConversationView(key: ValueKey(id), chatId: id);
           }
           return Row(children: [
             SizedBox(width: listWidth, child: _ListPane(selectedId: id)),

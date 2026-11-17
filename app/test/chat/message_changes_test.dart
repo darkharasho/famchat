@@ -91,6 +91,16 @@ void main() {
     expect(c.isDeleted('p'), isTrue);
   });
 
+  test('a change stored before its target (out-of-order sends) still applies', () {
+    final edit = row('a', const EditBody('t', 'fixed'));
+    final del = row('a', const DeleteBody('u'));
+    final t = row('a', const TextBody('typo'), id: 't');
+    final u = row('a', const TextBody('oops'), id: 'u');
+    final c = messageChanges([edit, del, t, u]);
+    expect(c.textOf(t), 'fixed');
+    expect(c.isDeleted('u'), isTrue);
+  });
+
   test('replyTo of a text', () {
     final r = row('b', const TextBody('yes', replyTo: 't'));
     expect(replyTargetOf(r), 't');

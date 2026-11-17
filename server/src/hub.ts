@@ -246,8 +246,13 @@ export class FamilyHub extends DurableObject<Env> {
     if (env.epoch !== chat.current_epoch || chat.ready !== 1) return send(ws, { type: "error", id, error: "stale_epoch" });
 
     const now = Date.now();
+    // Silent sends (reactions, edits, deletes) reach sockets marked as such, push no one and don't
+    // count as chat activity.
+    const silent = m.silent === true;
     const [, inserted] = await db.batch([
-      db.prepare("UPDATE chats SET last_seq = last_seq + 1, last_message_at = ? WHERE id = ?").bind(now, chatId),
+      db.prepare(
+        "UPDATE chats SET last_seq = last_seq + 1, last_message_at = CASE WHEN ? THEN last_message_at ELSE ? END WHERE id = ?",
+      ).bind(silent ? 1 : 0, now, chatId),
       db.prepare(
         `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at)
          SELECT id, last_seq, ?, ?, ?, ?, ? FROM chats WHERE id = ? RETURNING seq`,
@@ -256,8 +261,6 @@ export class FamilyHub extends DurableObject<Env> {
     const seq = (inserted.results[0] as { seq: number }).seq;
     send(ws, { type: "ack", id, seq, createdAt: now });
 
-    // Silent sends (reactions, edits, deletes) reach sockets marked as such and push no one.
-    const silent = m.silent === true;
     const msg = JSON.stringify({
       type: "msg",
       ...(silent ? { silent: true } : {}),

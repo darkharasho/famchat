@@ -33,7 +33,8 @@ class ChatSync {
     this.syncRetryDelays = const [Duration(seconds: 2), Duration(seconds: 10), Duration(seconds: 30), Duration(minutes: 1)],
     DateTime Function()? now,
   })  : directory = directory ?? Directory(db, api, me),
-        _now = now ?? DateTime.now {
+        _now = now ?? DateTime.now,
+        _madeAt = (now ?? DateTime.now)().millisecondsSinceEpoch {
     this.keys = keys ?? ChatKeys(db: db, api: api, directory: this.directory, me: me);
   }
 
@@ -57,6 +58,11 @@ class ChatSync {
   final _subs = <StreamSubscription<Object?>>[];
   Future<void> _chain = Future.value();
   final _inflight = <String>{};
+
+  /// Every row handed to the hub since this engine was made (unlike [_inflight], kept across
+  /// reconnects): the server may have stored it even if no ack came back.
+  final _handedToHub = <String>{};
+  final int _madeAt;
   final _staleRetries = <String, int>{};
   final _lastTypingSent = <String, DateTime>{};
 
@@ -221,14 +227,18 @@ class ChatSync {
     if (m.seq <= chat.syncedSeq) return;
     if (m.seq > chat.syncedSeq + 1 && !catchingUp) return _catchUp(m.chatId);
     final existing = await db.messageById(m.id);
+    final MessageRow row;
     if (existing != null) {
       if (existing.seq == null) await db.ackMessage(m.id, seq: m.seq, createdAt: m.createdAt);
       _inflight.remove(m.id);
+      row = existing;
     } else {
-      await db.insertMessageIfAbsent(await _decrypt(m));
+      row = await _decrypt(m);
+      await db.insertMessageIfAbsent(row);
     }
     await db.setSyncedSeq(m.chatId, m.seq);
-    await db.noteActivity(m.chatId, m.seq, m.createdAt);
+    // A change to another message isn't chat activity (0 leaves last_message_at as it is).
+    await db.noteActivity(m.chatId, m.seq, changeKinds.contains(row.kind) ? 0 : m.createdAt);
   }
 
   /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, photo, voice, unknown,
@@ -529,6 +539,7 @@ class ChatSync {
       if (changeKinds.contains(row.kind)) 'silent': true,
     })) {
       _inflight.add(row.id);
+      _handedToHub.add(row.id);
     }
   }
 
@@ -585,7 +596,12 @@ class ChatSync {
   /// Runs in the sync queue, so the outbox can't start sending the message meanwhile.
   Future<void> deleteMessage(String chatId, String messageId) => _enqueue(() async {
         final row = await db.messageById(messageId);
-        if (row != null && row.seq == null && row.senderDeviceId == me.deviceId && !_inflight.contains(messageId)) {
+        // Only a row this engine made and never handed to the hub can't be on the server yet.
+        if (row != null &&
+            row.seq == null &&
+            row.senderDeviceId == me.deviceId &&
+            row.createdAt >= _madeAt &&
+            !_handedToHub.contains(messageId)) {
           await db.deleteMessages([messageId, for (final c in await db.changesTo(chatId, messageId)) c.id]);
           return;
         }

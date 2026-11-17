@@ -26,13 +26,13 @@ class MessageChanges {
   }
 }
 
-/// [rows] in display order (as `watchMessages` gives them).
+/// [rows] in display order (as `watchMessages` gives them). A change may come before its target
+/// (sends can be stored out of order), so every row is indexed first.
 MessageChanges messageChanges(Iterable<MessageRow> rows) {
-  final byId = <String, MessageRow>{};
+  final byId = {for (final r in rows) r.id: r};
   final texts = <String, String>{};
   final deleted = <String>{};
   for (final r in rows) {
-    byId[r.id] = r;
     if ((r.kind != 'edit' && r.kind != 'delete') || r.state == 'failed' || r.targetId == null) continue;
     final target = byId[r.targetId!];
     if (target == null || target.senderUserId != r.senderUserId || deleted.contains(target.id)) continue;

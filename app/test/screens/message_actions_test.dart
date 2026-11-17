@@ -4,6 +4,7 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:famchat/widgets/link_text.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -181,5 +182,58 @@ void main() {
     expect(find.byType(LinkText), findsOneWidget);
     final rich = tester.widget<RichText>(find.descendant(of: find.byType(LinkText), matching: find.byType(RichText)));
     expect(rich.text.toPlainText(), 'menu: https://example.com/menu');
+  });
+
+  chatTestWidgets('a reply in progress does not follow you into another chat', (tester) async {
+    tester0 = tester;
+    await open(tester, messages: [row('m1', 1, bob.userId, 'cake?')]);
+    await tester.longPress(find.text('cake?'));
+    await settle(tester);
+    await tester.tap(find.text('Reply'));
+    await settle(tester);
+    expect(find.text('Replying to Bob'), findsOneWidget);
+    const other = '01JC0000000000000000000002';
+    final carol = await backend.addUser('Carol');
+    await inApp(tester, () => alice.db.upsertChat(ChatDto(
+          id: other,
+          kind: 'direct',
+          title: null,
+          createdBy: alice.userId,
+          currentEpoch: 1,
+          epochReady: true,
+          lastSeq: 0,
+          lastMessageAt: null,
+          createdAt: 1,
+          members: [
+            MemberDto(userId: alice.userId, joinedSeq: 0, lastReadSeq: 0),
+            MemberDto(userId: carol.userId, joinedSeq: 0, lastReadSeq: 0),
+          ],
+        )));
+    ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$other');
+    await settle(tester);
+    expect(find.text('Replying to Bob'), findsNothing);
+  });
+
+  chatTestWidgets('saving an edit to a message deleted meanwhile says so and sends nothing', (tester) async {
+    tester0 = tester;
+    await open(tester, messages: [row('m2', 2, alice.userId, 'see you at 5')]);
+    await tester.longPress(find.text('see you at 5'));
+    await settle(tester);
+    await tester.tap(find.text('Edit'));
+    await settle(tester);
+    // Deleted from Alice's other device.
+    await inApp(tester, () => alice.db.insertMessageIfAbsent(row('d1', 3, alice.userId, '').copyWith(
+          kind: 'delete',
+          body: const Value('{"kind":"delete","target":"m2"}'),
+          targetId: const Value('m2'),
+        )));
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'see you at 6');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Save edit'));
+    await settle(tester);
+    expect(find.text('That message was deleted.'), findsOneWidget);
+    expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
+    expect(find.text('Editing message'), findsNothing);
   });
 }

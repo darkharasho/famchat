@@ -57,7 +57,30 @@ class LinkText extends StatefulWidget {
 }
 
 class _LinkTextState extends State<LinkText> {
+  /// Made when the text changes, not on every build: a rebuild while a link is pressed (a new
+  /// message, a hover) must not dispose the recognizer handling the tap.
+  List<TextPart> _parts = const [];
   final _recognizers = <TapGestureRecognizer>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _split();
+  }
+
+  @override
+  void didUpdateWidget(LinkText old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text) _split();
+  }
+
+  void _split() {
+    _clear();
+    _parts = splitLinks(widget.text);
+    for (final p in _parts) {
+      if (p.uri != null) _recognizers.add(TapGestureRecognizer()..onTap = () => widget.onOpen(p.uri!));
+    }
+  }
 
   @override
   void dispose() {
@@ -74,35 +97,22 @@ class _LinkTextState extends State<LinkText> {
 
   @override
   Widget build(BuildContext context) {
-    final parts = splitLinks(widget.text);
-    if (parts.every((p) => p.uri == null)) return Text(widget.text, style: widget.style);
-    _clear();
+    if (_recognizers.isEmpty) return Text(widget.text, style: widget.style);
     final link = (widget.style ?? const TextStyle()).copyWith(
       color: widget.linkColor,
       decoration: TextDecoration.underline,
       decorationColor: widget.linkColor ?? widget.style?.color,
     );
+    var i = 0;
     return Text.rich(
       TextSpan(children: [
-        for (final p in parts)
+        for (final p in _parts)
           if (p.uri == null)
             TextSpan(text: p.text)
           else
-            TextSpan(
-              text: p.text,
-              style: link,
-              mouseCursor: SystemMouseCursors.click,
-              recognizer: (TapGestureRecognizer()..onTap = () => widget.onOpen(p.uri!)).also(_recognizers.add),
-            ),
+            TextSpan(text: p.text, style: link, mouseCursor: SystemMouseCursors.click, recognizer: _recognizers[i++]),
       ]),
       style: widget.style,
     );
-  }
-}
-
-extension<T> on T {
-  T also(void Function(T) f) {
-    f(this);
-    return this;
   }
 }

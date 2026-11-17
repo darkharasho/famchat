@@ -56,4 +56,26 @@ void main() {
     tap!.onTap!();
     expect(opened, [Uri.parse('https://famchat.dev')]);
   });
+
+  testWidgets("rebuilding with the same text keeps the link's recognizer alive", (tester) async {
+    TapGestureRecognizer? recognizer(WidgetTester tester) {
+      TapGestureRecognizer? found;
+      tester.widget<RichText>(find.byType(RichText).first).text.visitChildren((span) {
+        if (span is TextSpan && span.recognizer is TapGestureRecognizer) found = span.recognizer! as TapGestureRecognizer;
+        return true;
+      });
+      return found;
+    }
+
+    final opened = <Uri>[];
+    Widget app(String text) => MaterialApp(home: Scaffold(body: LinkText(text, onOpen: opened.add)));
+    await tester.pumpWidget(app('see https://a.io'));
+    final first = recognizer(tester);
+    await tester.pumpWidget(app('see https://a.io'));
+    expect(identical(recognizer(tester), first), isTrue);
+    first!.onTap!();
+    expect(opened, [Uri.parse('https://a.io')]);
+    await tester.pumpWidget(app('now https://b.io'));
+    expect(identical(recognizer(tester), first), isFalse);
+  });
 }

@@ -341,9 +341,13 @@ describe("send", () => {
     });
     const ca = await connect(a);
     const cb = await connect(b);
+    const before = await env.DB.prepare("SELECT last_message_at FROM chats WHERE id = ?").bind(chat.id).first<number>("last_message_at");
     ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope(), silent: true });
     await ca.next("ack");
     expect((await cb.next("msg")).silent).toBe(true);
+    // A silent change doesn't count as chat activity (the list order stays put).
+    expect(await env.DB.prepare("SELECT last_message_at FROM chats WHERE id = ?").bind(chat.id).first<number>("last_message_at"))
+      .toBe(before);
     ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
     expect((await cb.next("msg")).silent).toBeUndefined();
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));

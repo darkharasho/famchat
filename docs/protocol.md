@@ -84,7 +84,9 @@ Edits and deletes are messages too, and count only when their sender is the targ
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
-A deleted message shows as "This message was deleted" and loses its reactions and replies' quotes.
+A deleted message shows as "This message was deleted" and loses its reactions; replies quote it as
+"Deleted message". Neither changes nor deleted messages count as unread, and changes don't move the
+chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 Clients keep unknown kinds (whole body) and show them as unsupported.

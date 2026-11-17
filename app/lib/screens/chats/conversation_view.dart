@@ -225,6 +225,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final text = replaceTrailingEmoticon(_text.text);
     if (sync == null || text.trim().isEmpty) return;
     final editing = _editing, replyTo = _replyTo;
+    if (editing != null && _changes.isDeleted(editing.id)) {
+      _cancelCompose();
+      _snack('That message was deleted.');
+      return;
+    }
     try {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
