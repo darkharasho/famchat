@@ -65,12 +65,42 @@ void main() {
     return router;
   }
 
-  chatTestWidgets('the chat list opens message search', (tester) async {
+  chatTestWidgets('the chat list has one search button, for people and messages', (tester) async {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);
-    await tester.tap(find.byTooltip(RegExp('^Search messages')));
+    expect(find.byTooltip(RegExp('^Search')), findsOneWidget);
+    await tester.tap(find.byTooltip(RegExp('^Search')));
     await settle(tester);
-    expect(find.text('Search your messages'), findsOneWidget);
+    expect(find.text('Search people and messages'), findsWidgets);
+  });
+
+  chatTestWidgets('typing a name finds the person and tapping them opens your chat', (tester) async {
+    final router = await openSearch(tester, '/search', const []);
+    await tester.enterText(find.byKey(const Key('search-field')), 'bo');
+    await tester.pump(const Duration(milliseconds: 200));
+    await settle(tester);
+    expect(find.byKey(Key('search-person-${bob.userId}')), findsOneWidget);
+    expect(find.byKey(Key('search-person-${alice.userId}')), findsNothing); // not yourself
+    await tester.tap(find.byKey(Key('search-person-${bob.userId}')));
+    await settle(tester);
+    expect(router.state.uri.toString(), '/chats/$chatId');
+  });
+
+  chatTestWidgets('searching one chat shows no people', (tester) async {
+    await openSearch(tester, '/search?chat=$chatId', const []);
+    await tester.enterText(find.byKey(const Key('search-field')), 'bo');
+    await tester.pump(const Duration(milliseconds: 200));
+    await settle(tester);
+    expect(find.byKey(Key('search-person-${bob.userId}')), findsNothing);
+  });
+
+  chatTestWidgets('with a chat open side by side, the chat list has no back button', (tester) async {
+    setWindow(tester, const Size(1100, 800));
+    await pumpChatApp(tester, alice);
+    await inApp(tester, () => alice.db.upsertChat(direct(alice.userId, bob.userId)));
+    ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
+    await settle(tester);
+    expect(find.byType(BackButton), findsNothing);
   });
 
   chatTestWidgets('typing finds messages and tapping one opens the chat at it', (tester) async {
@@ -95,7 +125,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('search-field')), 'sushi');
     await tester.pump(const Duration(milliseconds: 200)); // the search waits for typing to pause
     await settle(tester);
-    expect(find.text('No messages match "sushi"'), findsOneWidget);
+    expect(find.text('Nothing matches "sushi"'), findsOneWidget);
   });
 
   chatTestWidgets('search in one chat from its header', (tester) async {

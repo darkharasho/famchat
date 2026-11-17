@@ -183,6 +183,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (mounted) _focus.requestFocus();
       });
     }
+    HardwareKeyboard.instance.addHandler(_typeToFocus);
     _draftKey = '${ref.read(myUserIdProvider)}|${widget.chatId}';
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
@@ -302,12 +303,39 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  /// Typing while nothing takes text (say, after clicking a message) goes to the composer, key
+  /// included. Shortcuts (Ctrl/Cmd) and other text fields are left alone, as is this chat when a
+  /// dialog or another screen is on top of it.
+  bool _typeToFocus(KeyEvent event) {
+    if (event is! KeyDownEvent || !mounted || _focus.hasFocus || _focus.context == null) return false;
+    final ch = event.character;
+    if (ch == null || ch.isEmpty || ch.runes.any((r) => r < 0x20 || r == 0x7f)) return false;
+    final keys = HardwareKeyboard.instance;
+    if (keys.isControlPressed || keys.isMetaPressed) return false;
+    if (ModalRoute.of(context)?.isCurrent == false) return false;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null && (focused.widget is EditableText || focused.findAncestorWidgetOfExactType<EditableText>() != null)) {
+      return false;
+    }
+    // A space would otherwise press the focused button; a leading space in a message is no loss.
+    if (ch == ' ' && _text.text.isEmpty) return false;
+    _focus.requestFocus();
+    final v = _text.value;
+    final sel = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+    _text.value = TextEditingValue(
+      text: v.text.replaceRange(sel.start, sel.end, ch),
+      selection: TextSelection.collapsed(offset: sel.start + ch.length),
+    );
+    return true;
+  }
+
   void _closePicker() {
     if (_pickerOpen) setState(() => _pickerOpen = false);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_typeToFocus);
     _recording.dispose(); // discards an unsent recording (one being finished still sends)
     // No voice keeps playing without its bubble on screen (after this frame: providers cannot change
     // while the tree is building).

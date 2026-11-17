@@ -1,5 +1,5 @@
-// Searching messages: across every chat, or in one (`/search?chat=<id>`). Runs on this device's
-// decrypted copy, since the server only holds ciphertext.
+// Searching people and messages across every chat, or messages in one (`/search?chat=<id>`).
+// Messages are searched on this device's decrypted copy, since the server only holds ciphertext.
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -13,7 +13,9 @@ import '../../chat/search.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
+import '../sign_out.dart' show apiErrorMessage;
 import 'chat_list.dart' show shortTime;
+import 'quick_switcher.dart' show rankChats;
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key, this.chatId});
@@ -62,6 +64,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
+  /// Opens (or starts) the direct chat with [userId].
+  Future<void> _openPerson(String userId) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    try {
+      final id = await sync.openDirect(userId);
+      if (mounted) context.go('/chats/$id');
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+    }
+  }
+
   void _close() => context.go(widget.chatId == null ? '/' : '/chats/${widget.chatId}');
 
   @override
@@ -76,53 +90,88 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final scopeTitle = scoped == null ? null : chatTitle(scoped.chat, scoped.members, users, me);
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
 
+    // Across every chat, people come first: matching family members (not yourself).
+    final people = widget.chatId != null || _query.isEmpty
+        ? const <UserRow>[]
+        : rankChats(
+            _query,
+            [for (final u in users.values) if (u.id != me && u.deleted != true && u.former != true) u]
+              ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())),
+            (UserRow u) => u.name,
+          ).take(5).toList();
+
+    Widget heading(String text) => ContentWidth(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, Space.xs),
+            child: Text(text, style: theme.textTheme.labelLarge?.copyWith(color: s.onSurfaceVariant)),
+          ),
+        );
+
+    Widget person(UserRow u) => ContentWidth(
+          child: ListTile(
+            key: Key('search-person-${u.id}'),
+            leading: PersonAvatar(label: u.name, colorKey: u.id, userId: u.id, radius: 20),
+            title: _Highlighted(u.name, _query, strongBase: true),
+            onTap: () => _openPerson(u.id),
+          ),
+        );
+
+    Widget hit(SearchHit h) {
+      final m = h.message;
+      final item = chats[m.chatId];
+      final where = item == null ? null : chatTitle(item.chat, item.members, users, me);
+      final group = item?.chat.kind == 'group';
+      // In one chat: who said it. Across chats: the chat (and who, in groups).
+      final title = widget.chatId != null || !group ? nameOf(m.senderUserId) : '${nameOf(m.senderUserId)} in ${where ?? 'a chat'}';
+      return ContentWidth(
+        child: ListTile(
+          key: Key('search-hit-${m.id}'),
+          leading: PersonAvatar(
+            label: widget.chatId != null || !group ? nameOf(m.senderUserId) : (where ?? '?'),
+            colorKey: widget.chatId != null || !group ? m.senderUserId : m.chatId,
+            userId: widget.chatId != null || !group ? m.senderUserId : null,
+            group: widget.chatId == null && group,
+            radius: 20,
+          ),
+          title: Row(children: [
+            Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: Space.sm),
+            Text(
+              shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
+              style: theme.textTheme.labelSmall?.copyWith(color: s.onSurfaceVariant),
+            ),
+          ]),
+          subtitle: _Highlighted(snippetAround(h.text, _query), _query),
+          onTap: () => context.go('/chats/${m.chatId}?m=${m.id}'),
+        ),
+      );
+    }
+
     final Widget body;
     if (_query.isEmpty) {
       body = EmptyState(
         art: Icon(Icons.manage_search_rounded, size: 48, color: s.onSurfaceVariant),
-        title: 'Search your messages',
+        title: widget.chatId == null ? 'Search people and messages' : 'Search your messages',
         body: 'Messages are searched on this device. Only messages it has received are included.',
       );
-    } else if (_hits.isEmpty) {
+    } else if (_hits.isEmpty && people.isEmpty) {
       body = EmptyState(
         art: Icon(Icons.search_off_rounded, size: 48, color: s.onSurfaceVariant),
-        title: 'No messages match "$_query"',
+        title: widget.chatId == null ? 'Nothing matches "$_query"' : 'No messages match "$_query"',
       );
     } else {
+      // Section headings only when both kinds of result show.
+      final sections = people.isNotEmpty && _hits.isNotEmpty;
+      final rows = <Widget Function()>[
+        if (sections) () => heading('People'),
+        for (final u in people) () => person(u),
+        if (sections) () => heading('Messages'),
+        for (final h in _hits) () => hit(h),
+      ];
       body = ListView.builder(
         padding: EdgeInsets.only(bottom: Space.xl + MediaQuery.paddingOf(context).bottom),
-        itemCount: _hits.length,
-        itemBuilder: (context, i) {
-          final h = _hits[i];
-          final m = h.message;
-          final item = chats[m.chatId];
-          final where = item == null ? null : chatTitle(item.chat, item.members, users, me);
-          final group = item?.chat.kind == 'group';
-          // In one chat: who said it. Across chats: the chat (and who, in groups).
-          final title = widget.chatId != null || !group ? nameOf(m.senderUserId) : '${nameOf(m.senderUserId)} in ${where ?? 'a chat'}';
-          return ContentWidth(
-            child: ListTile(
-              key: Key('search-hit-${m.id}'),
-              leading: PersonAvatar(
-                label: widget.chatId != null || !group ? nameOf(m.senderUserId) : (where ?? '?'),
-                colorKey: widget.chatId != null || !group ? m.senderUserId : m.chatId,
-                userId: widget.chatId != null || !group ? m.senderUserId : null,
-                group: widget.chatId == null && group,
-                radius: 20,
-              ),
-              title: Row(children: [
-                Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                const SizedBox(width: Space.sm),
-                Text(
-                  shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
-                  style: theme.textTheme.labelSmall?.copyWith(color: s.onSurfaceVariant),
-                ),
-              ]),
-              subtitle: _Highlighted(snippetAround(h.text, _query), _query),
-              onTap: () => context.go('/chats/${m.chatId}?m=${m.id}'),
-            ),
-          );
-        },
+        itemCount: rows.length,
+        itemBuilder: (context, i) => rows[i](),
       );
     }
 
@@ -140,7 +189,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             onSubmitted: (_) => _search(),
             style: theme.textTheme.titleMedium,
             decoration: InputDecoration(
-              hintText: scopeTitle == null ? 'Search messages' : 'Search in $scopeTitle',
+              hintText: scopeTitle == null ? 'Search people and messages' : 'Search in $scopeTitle',
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
@@ -171,14 +220,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
 /// [text] with each match of [query] in bold.
 class _Highlighted extends StatelessWidget {
-  const _Highlighted(this.text, this.query);
+  const _Highlighted(this.text, this.query, {this.strongBase = false});
 
   final String text, query;
+
+  /// Title style (a name) rather than the muted snippet style.
+  final bool strongBase;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final base = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final base = strongBase
+        ? theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurface)
+        : theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     final strong = base?.copyWith(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w700);
     final spans = <TextSpan>[];
     var at = 0;
