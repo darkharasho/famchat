@@ -16,7 +16,7 @@ const FORMER_SQL = `SELECT user_id FROM chat_members
     WHERE chat_id IN (SELECT chat_id FROM chat_members WHERE user_id = ?)
   EXCEPT ${DIRECTORY_PEERS_SQL}`;
 
-/** `id` filter for everyone the caller may see: themselves, family peers and former chat partners. Binds the user id 4 times. */
+/** `id` filter for everyone the caller may see: themselves, family peers and former chat partners. Binds the user id 5 times. */
 const VISIBLE_SQL = `(id = ? OR id IN (${DIRECTORY_PEERS_SQL}) OR id IN (${FORMER_SQL}))`;
 
 type Proof = { byUserId: string | null; signerPub: string | null; sig: string };
@@ -31,7 +31,6 @@ type Proof = { byUserId: string | null; signerPub: string | null; sig: string };
 users.get("/", async (c) => {
   const db = c.env.DB;
   const me = c.get("userId");
-  const visible = VISIBLE_SQL;
   const vb = [me, me, me, me, me];
   const [m, u, d, r] = await db.batch([
     // Members of every family the caller is in; everyone in these rows is a family peer.
@@ -40,14 +39,14 @@ users.get("/", async (c) => {
        WHERE family_id IN (SELECT family_id FROM family_members WHERE user_id = ?)`,
     ).bind(me),
     db.prepare(
-      `SELECT id, name, identity_pub, deleted_at, avatar_key FROM users WHERE ${visible} ORDER BY created_at`,
+      `SELECT id, name, identity_pub, deleted_at, avatar_key FROM users WHERE ${VISIBLE_SQL} ORDER BY created_at`,
     ).bind(...vb),
     db.prepare(
       `SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices
-       WHERE user_id IN (SELECT id FROM users WHERE ${visible}) ORDER BY created_at`,
+       WHERE user_id IN (SELECT id FROM users WHERE ${VISIBLE_SQL}) ORDER BY created_at`,
     ).bind(...vb),
     db.prepare(
-      `SELECT * FROM resets WHERE user_id IN (SELECT id FROM users WHERE ${visible}) ORDER BY created_at, id`,
+      `SELECT * FROM resets WHERE user_id IN (SELECT id FROM users WHERE ${VISIBLE_SQL}) ORDER BY created_at, id`,
     ).bind(...vb),
   ]);
   type M = {

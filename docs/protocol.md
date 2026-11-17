@@ -438,7 +438,8 @@ writes an `events` row (audit log; not exposed by the API yet).
   be live members of the group's `familyId` (`400 invalid_request` otherwise).
 - `DELETE /chats/:id/members/:userId` → 204. Groups only. Yourself = leave; someone else = remove
   (creator only). Either moves the chat to `currentEpoch + 1` with `epochReady: false`. The server
-  records the person in `chat_leavers`, which keeps them in the leaver's "former" directory entries.
+  records the person in `chat_leavers`, which keeps the leaver visible as `former` to the group's
+  remaining members.
 - `PUT /chats/:id/mute {until: number|null}` → 204. Your own mute: no pushes from this chat until
   `until` (Unix ms, 0 to 253402300799000; "until I turn it back on" is a far-off time), or `null` to
   unmute. Shown only to you as the chat's `mutedUntil`; your own sockets get a `chat` event.

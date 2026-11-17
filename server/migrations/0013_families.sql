@@ -57,3 +57,4 @@ INSERT OR IGNORE INTO family_members (family_id, user_id, role, joined_at) SELEC
 UPDATE chats SET family_id = CASE WHEN created_by IN (SELECT id FROM users WHERE reviewer = 1) THEN 2 ELSE 1 END WHERE kind = 'group';
 UPDATE invites SET family_id = CASE WHEN reviewer = 1 THEN 2 ELSE 1 END WHERE user_id IS NULL;
 INSERT OR IGNORE INTO chat_leavers (chat_id, user_id, left_at) SELECT DISTINCT m.chat_id, m.sender_user_id, NULL FROM messages m JOIN chats c ON c.id = m.chat_id AND c.kind = 'group' WHERE NOT EXISTS (SELECT 1 FROM chat_members x WHERE x.chat_id = m.chat_id AND x.user_id = m.sender_user_id);
+UPDATE users SET is_admin = 0 WHERE reviewer = 1;

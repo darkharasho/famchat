@@ -122,6 +122,9 @@ describe("migration 0013 data", () => {
       { user_id: "rev", role: "member" },
       { user_id: "revadmin", role: "member" },
     ]);
+    // The legacy is_admin mirror is cleared for reviewers: they are no family's admin.
+    const rev = await env.DB.prepare("SELECT is_admin FROM users WHERE id = 'revadmin'").first();
+    expect(rev).toEqual({ is_admin: 0 });
   });
 
   it("the bootstrapped admin becomes operator and owner", async () => {
