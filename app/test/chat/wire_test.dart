@@ -83,6 +83,12 @@ void main() {
       expect(gone.deleted, isTrue);
     });
 
+    test('former is read and defaults to false', () {
+      final base = {'id': 'U2', 'name': 'Cy', 'isAdmin': false, 'identityPub': 'bb', 'devices': []};
+      expect(UserDto.fromJson(base).former, isFalse);
+      expect(UserDto.fromJson({...base, 'former': true}).former, isTrue);
+    });
+
     test('message keeps the envelope map', () {
       final m = MessageDto.fromJson({
         'chatId': 'C1', 'seq': 3, 'id': 'M1', 'senderUserId': 'U1', 'senderDeviceId': 'D1',

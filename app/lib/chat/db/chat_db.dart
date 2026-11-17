@@ -111,6 +111,9 @@ class LocalUsers extends Table {
   /// certificates still resolve, but not offered for new chats. Null means not deleted.
   BoolColumn get deleted => boolean().nullable()();
 
+  /// Someone I only share a chat with, not a family (multi-family). Null means not former.
+  BoolColumn get former => boolean().nullable()();
+
   /// Their profile photo's key (see [UserDto.avatarKey]), or null.
   TextColumn get avatarKey => text().nullable()();
 
@@ -193,7 +196,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -209,6 +212,7 @@ class ChatDb extends _$ChatDb {
           if (from < 4) await m.addColumn(localChats, localChats.mutedUntil);
           if (from < 5) await m.addColumn(localChats, localChats.draft);
           if (from < 6) await m.addColumn(localUsers, localUsers.avatarKey);
+          if (from < 7) await m.addColumn(localUsers, localUsers.former);
         },
       );
 

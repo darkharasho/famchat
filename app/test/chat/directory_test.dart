@@ -29,6 +29,17 @@ void main() {
     expect((await dir.liveDevices([alice.userId, bob.userId])).map((d) => d.id), unorderedEquals([alice.deviceId, bob.deviceId]));
   });
 
+  test('a former user is stored as former and never pinned as admin', () async {
+    backend.setAdmin(bob.userId);
+    backend.markFormer(bob.userId);
+    await dir.refresh();
+    final row = (await alice.db.userById(bob.userId))!;
+    expect(row.former, isTrue);
+    expect(row.isAdmin, isFalse);
+    expect(row.pinnedAdmin, isFalse);
+    expect((await alice.db.userById(alice.userId))!.former, isNot(isTrue));
+  });
+
   test('changed identity is flagged until acknowledged', () async {
     await dir.refresh();
     final bob2 = await backend.resetUser(bob.userId);

@@ -26,6 +26,7 @@ class _User {
   Uint8List identityPub;
   bool isAdmin = false;
   bool deleted = false;
+  bool former = false;
   AdminProofDto? adminProof;
   final resets = <_Reset>[];
   String? avatarKey;
@@ -154,6 +155,10 @@ class FakeChatBackend {
 
   /// Marks [userId]'s account deleted in the directory (docs/protocol.md "Deleting an account").
   void markDeleted(String userId) => _users[userId]!.deleted = true;
+
+  /// `GET /users` reports [userId] as a former chat partner: no shared family, so never an admin
+  /// and no admin proof, as the server does.
+  void markFormer(String userId, [bool former = true]) => _users[userId]!.former = former;
 
   /// Sets [userId]'s profile photo as the server would, telling everyone.
   String setAvatar(String userId, Uint8List? jpeg) {
@@ -554,9 +559,10 @@ class FakeChatApi implements ChatApi {
           UserDto(
             id: u.id,
             name: u.name,
-            isAdmin: u.isAdmin,
+            isAdmin: u.isAdmin && !u.former,
+            former: u.former,
             resets: [for (final r in u.resets) r.dto()],
-            adminProof: u.adminProof,
+            adminProof: u.former ? null : u.adminProof,
             deleted: u.deleted,
             avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),
