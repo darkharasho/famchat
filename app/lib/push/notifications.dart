@@ -25,6 +25,7 @@ class PushController {
   PushController({
     required this.messaging,
     required this.register,
+    required this.previewsOn,
     required this.openRoute,
     required this.isChatVisible,
     required this.showInApp,
@@ -33,8 +34,11 @@ class PushController {
 
   final PushMessaging messaging;
 
-  /// Sends the token to the server (`PUT /devices/me/push`).
-  final Future<void> Function(String token) register;
+  /// Sends the token and this device's previews setting to the server (`PUT /devices/me/push`).
+  final Future<void> Function(String token, bool previews) register;
+
+  /// This device's "Show message previews" setting.
+  final Future<bool> Function() previewsOn;
   final void Function(String route) openRoute;
 
   /// True while that chat is on screen and the app is in front.
@@ -79,12 +83,24 @@ class PushController {
     }
   }
 
-  Future<void> _register(String token) async {
+  Future<void> _register(String token, [bool? previews]) async {
     if (_stopped) return;
     try {
-      await register(token);
+      await register(token, previews ?? await previewsOn());
     } catch (_) {
       // Offline: the next start registers again.
+    }
+  }
+
+  /// Tells the server the new setting by re-sending the current token. With no token (push not
+  /// set up on this device) the stored value is all there is.
+  Future<void> setPreviews(bool on) async {
+    if (_stopped) return;
+    try {
+      final token = await messaging.getToken();
+      if (token != null) await _register(token, on);
+    } catch (_) {
+      // Offline or no push: the stored value is used at the next registration.
     }
   }
 

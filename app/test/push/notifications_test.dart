@@ -51,10 +51,12 @@ class Harness {
   Harness({bool askNow = true, this.visible}) {
     controller = PushController(
       messaging: messaging,
-      register: (t) async {
+      register: (t, previews) async {
         if (failRegister) throw Exception('offline');
         registered.add(t);
+        registeredPreviews.add(previews);
       },
+      previewsOn: () async => previewsValue,
       openRoute: routes.add,
       isChatVisible: (id) => id == visible,
       showInApp: (m, route) => shown.add((m, route)),
@@ -64,6 +66,8 @@ class Harness {
 
   final messaging = FakeMessaging();
   final registered = <String>[];
+  final registeredPreviews = <bool>[];
+  bool previewsValue = false;
   final routes = <String>[];
   final shown = <(PushMessage, String?)>[];
   String? visible;
@@ -183,6 +187,33 @@ void main() {
       final again = Harness(askNow: false)..messaging.granted = true;
       await again.controller.start();
       expect(again.registered, ['tok-1']);
+    });
+
+    test('enable registers with the previews value', () async {
+      final h = Harness()..previewsValue = true;
+      await h.controller.start();
+      expect(h.registered, ['tok-1']);
+      expect(h.registeredPreviews, [true]);
+    });
+
+    test('setPreviews re-registers the token', () async {
+      final h = Harness();
+      await h.controller.start();
+      await h.controller.setPreviews(true);
+      expect(h.registered, ['tok-1', 'tok-1']);
+      expect(h.registeredPreviews, [false, true]);
+    });
+
+    test('setPreviews without a token registers nothing', () async {
+      final h = Harness()..messaging.token = null;
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
+    });
+
+    test('setPreviews offline does not throw', () async {
+      final h = Harness()..failRegister = true;
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
     });
 
     test('an offline registration does not break start', () async {

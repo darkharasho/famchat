@@ -13,6 +13,7 @@ import '../router.dart';
 import '../session/session_controller.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
+import 'preview_setting.dart';
 import 'push_messaging.dart';
 
 /// The app's ScaffoldMessenger, for foreground pushes shown over any screen.
@@ -32,7 +33,9 @@ final pushControllerProvider = Provider<PushController?>((ref) {
   final router = ref.read(routerProvider);
   final c = PushController(
     messaging: messaging,
-    register: (token) => ref.read(apiClientProvider).authedJson('PUT', '/devices/me/push', body: {'token': token}),
+    register: (token, previews) =>
+        ref.read(apiClientProvider).authedJson('PUT', '/devices/me/push', body: {'token': token, 'previews': previews}),
+    previewsOn: readPreviewsOn,
     openRoute: router.go,
     isChatVisible: (id) => appInFront() && _path(router) == '/chats/$id',
     showInApp: (m, route) => showPushSnackBar(ref.read(rootMessengerKeyProvider).currentState, m, route, router.go),

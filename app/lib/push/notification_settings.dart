@@ -9,6 +9,7 @@ import '../session/session_controller.dart';
 import '../widgets/common.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
+import 'preview_setting.dart';
 import 'providers.dart';
 import 'push_messaging.dart';
 
@@ -27,6 +28,13 @@ class NotificationSettingsGroup extends ConsumerWidget {
       text = apiErrorMessage(e);
     }
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Stores the value, then (Android, where push is set up) tells the server. Offline, the stored
+  /// value stands and the next registration carries it.
+  Future<void> _setPreviews(WidgetRef ref, bool on) async {
+    await ref.read(previewsOnProvider.notifier).set(on);
+    await ref.read(pushControllerProvider)?.setPreviews(on);
   }
 
   @override
@@ -51,6 +59,15 @@ class NotificationSettingsGroup extends ConsumerWidget {
           title: const Text('Send a test notification'),
           subtitle: Text(push ? 'To your devices that allow notifications' : 'On this device'),
           onTap: () => _test(context, ref),
+        ),
+      if ((push || local) && previewsSupported())
+        SwitchListTile(
+          key: const Key('settings-previews'),
+          secondary: const TileIcon(Icons.chat_bubble_outline),
+          title: const Text('Show message previews'),
+          subtitle: const Text('Show what messages say. Only this device can read them.'),
+          value: ref.watch(previewsOnProvider).value ?? false,
+          onChanged: (on) => _setPreviews(ref, on),
         ),
     ]);
   }
