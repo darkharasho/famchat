@@ -165,6 +165,10 @@ void main() {
     await settle(tester);
     await tester.tap(find.byKey(const Key('settings-families')));
     await settle(tester);
+    await tester.tap(find.byKey(const Key('family-tile-1')));
+    await settle(tester);
+    await tester.ensureVisible(find.text('Media storage'));
+    await settle(tester);
     await tester.tap(find.text('Media storage'));
     await settle(tester);
     expect(find.text('Media storage'), findsOneWidget);

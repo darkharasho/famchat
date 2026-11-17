@@ -14,7 +14,10 @@ import 'sign_out.dart';
 const _mono = TextStyle(fontFamily: 'monospace', fontFamilyFallback: ['Courier New', 'Courier'], letterSpacing: 1.5);
 
 class RecoveryCodeScreen extends ConsumerStatefulWidget {
-  const RecoveryCodeScreen({super.key});
+  const RecoveryCodeScreen({super.key, required this.familyId});
+
+  /// The family screen it was opened from, to go back to.
+  final int familyId;
 
   @override
   ConsumerState<RecoveryCodeScreen> createState() => _RecoveryCodeScreenState();
@@ -42,7 +45,7 @@ class _RecoveryCodeScreenState extends ConsumerState<RecoveryCodeScreen> {
 
   void _done() {
     ref.invalidate(meProvider);
-    context.go('/settings/family');
+    context.go('/settings/families/${widget.familyId}');
   }
 
   @override
@@ -52,7 +55,7 @@ class _RecoveryCodeScreenState extends ConsumerState<RecoveryCodeScreen> {
     final had = ref.watch(meProvider).value?.recoveryCodeSet ?? false;
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: code == null ? () => context.go('/settings/family') : _done),
+        leading: BackButton(onPressed: code == null ? () => context.go('/settings/families/${widget.familyId}') : _done),
         title: const Text('Admin recovery code'),
       ),
       body: Center(

@@ -21,6 +21,12 @@ class FakeUser {
   bool deleted = false;
   bool former = false;
 
+  /// In family 1 (removing someone from it clears this; their account stays).
+  bool inFamily1 = true;
+
+  /// Their role (`admin` or `member`) in each family besides family 1.
+  final familyRoles = <int, String>{};
+
   /// A reviewer account: only other reviewers see it, and it sees only them.
   final bool reviewer;
   String? recoveryPub, recoverySig;
@@ -41,8 +47,9 @@ class FakeDevice {
 }
 
 class FakeInvite {
-  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset, this.reviewer = false, this.operator});
+  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset, this.reviewer = false, this.operator, this.familyId = 1});
   final bool? operator;
+  final int familyId;
   final String name;
   final bool admin;
   DateTime expiresAt;
@@ -99,6 +106,12 @@ class FakeServer {
   /// The caller's families besides family 1 (`GET /families` rows: id, name, status, role, owner,
   /// memberCount). Tests edit it to play the operator approving or declining.
   final extraFamilies = <Map<String, Object?>>[];
+
+  /// `GET /families` answers 403 while set (a refresh that fails).
+  bool failFamilies = false;
+
+  /// Family 1's name (`PUT /families/1` renames it).
+  String family1Name = 'Family';
 
   /// Every request as "METHOD /path -> status" (status 0 when the response was dropped).
   final log = <String>[];
@@ -167,9 +180,9 @@ class FakeServer {
 
   int get requestCount => log.length;
 
-  String addInvite({String name = 'Mom', bool admin = false, bool? operator}) {
+  String addInvite({String name = 'Mom', bool admin = false, bool? operator, int familyId = 1}) {
     final token = _token();
-    invites[token] = FakeInvite(name, admin, now().add(const Duration(days: 7)), operator: operator);
+    invites[token] = FakeInvite(name, admin, now().add(const Duration(days: 7)), operator: operator, familyId: familyId);
     return token;
   }
 
@@ -307,7 +320,8 @@ class FakeServer {
               'identityPub': u.identityPub,
               'adminProof': u.adminProof,
               'families': [
-                {'id': 1, 'role': u.isAdmin ? 'admin' : 'member', 'adminProof': u.adminProof},
+                if (u.inFamily1) {'id': 1, 'role': u.isAdmin ? 'admin' : 'member', 'adminProof': u.adminProof},
+                for (final f in u.familyRoles.entries) {'id': f.key, 'role': f.value, 'adminProof': null},
               ],
               'devices': [
                 for (final d in devices.values.where((d) => d.userId == u.id))
@@ -369,34 +383,19 @@ class FakeServer {
       }
       return await _reset(_body(r), users[userId]!, target);
     }
-    // server/src/routes/families.ts: only family 1 exists here.
-    final promote = RegExp(r'^/api/families/([^/]+)/admins/([^/]+)$').firstMatch(path);
-    if (r.method == 'POST' && promote != null) {
-      final by = users[userId]!;
-      if (promote[1] != '1' || !by.isAdmin) return _err('forbidden');
-      final sig = _body(r)['sig'];
-      if (sig is! String ||
-          !await verifyPromotionV2(
-            signerPub: b64urlDecode(by.identityPub),
-            familyId: 1,
-            userId: promote[2]!,
-            byUserId: by.id,
-            sig: b64urlDecode(sig),
-          )) {
-        return _err('invalid_request');
-      }
-      final target = users[promote[2]];
-      if (target == null || target.deleted) return _err('not_found');
-      target
-        ..isAdmin = true
-        ..adminProof = {'byUserId': by.id, 'signerPub': by.identityPub, 'sig': sig};
-      return http.Response('', 204);
+    // server/src/routes/families.ts: family 1 plus [extraFamilies] (the caller's rows) and each
+    // user's [FakeUser.familyRoles].
+    final familyRoute = RegExp(r'^/api/families/(\d+)(/.*)?$').firstMatch(path);
+    if (familyRoute != null && familyRoute[1] != null) {
+      final res = await _family(r, users[userId]!, int.parse(familyRoute[1]!), familyRoute[2] ?? '');
+      if (res != null) return res;
     }
     if (r.method == 'GET' && path == '/api/families') {
+      if (failFamilies) return _err('forbidden');
       final u = users[userId]!;
       return _json({
         'families': [
-          {'id': 1, 'name': 'Family', 'status': 'approved', 'role': u.isAdmin ? 'admin' : 'member', 'owner': u.isAdmin, 'memberCount': users.length, 'createdAt': 1},
+          {'id': 1, 'name': family1Name, 'status': 'approved', 'role': u.isAdmin ? 'admin' : 'member', 'owner': u.isAdmin, 'memberCount': users.length, 'createdAt': 1},
           ...extraFamilies,
         ],
       });
@@ -407,11 +406,6 @@ class FakeServer {
       final family = {'id': 10 + extraFamilies.length, 'name': name.trim(), 'status': 'pending', 'role': 'admin', 'owner': true, 'memberCount': 1, 'createdAt': 2};
       extraFamilies.add(family);
       return _json({'family': family}, 201);
-    }
-    final leave = RegExp(r'^/api/families/(\d+)/members/([^/]+)$').firstMatch(path);
-    if (r.method == 'DELETE' && leave != null) {
-      extraFamilies.removeWhere((f) => f['id'] == int.parse(leave[1]!));
-      return http.Response('', 204);
     }
     if (r.method == 'POST' && path == '/api/admin/recovery-key') {
       final u = users[userId]!;
@@ -543,6 +537,106 @@ class FakeServer {
       }, 201);
     }
     return _err('not_found');
+  }
+
+  /// `/families/:id/...` for [me]: rename, invites, promote, demote, leave and remove. Null when
+  /// the route isn't one of these.
+  Future<http.Response?> _family(http.Request r, FakeUser me, int id, String rest) async {
+    final row = extraFamilies.where((f) => f['id'] == id).firstOrNull;
+    if (id != 1 && row == null) return _err('not_found');
+    final name = id == 1 ? family1Name : row!['name'] as String;
+    final approved = id == 1 || row!['status'] == 'approved';
+    final iAmAdmin = id == 1 ? me.isAdmin : row!['role'] == 'admin';
+    final iAmOwner = id == 1 ? me.isAdmin : row!['owner'] == true;
+    bool inIt(FakeUser u) => !u.deleted && !u.reviewer && (id == 1 ? u.inFamily1 : u.familyRoles.containsKey(id));
+    bool adminOf(FakeUser u) => id == 1 ? u.isAdmin : u.familyRoles[id] == 'admin';
+    if (r.method == 'PUT' && rest.isEmpty) {
+      final next = _body(r)['name'];
+      if (next is! String || next.trim().isEmpty || next.trim().length > 40) return _err('invalid_request');
+      if (approved ? !iAmAdmin : !iAmOwner) return _err('forbidden');
+      if (id == 1) {
+        family1Name = next.trim();
+      } else {
+        row!['name'] = next.trim();
+      }
+      return http.Response('', 204);
+    }
+    if (r.method == 'POST' && rest == '/invites') {
+      if (!approved || !iAmAdmin) return _err('forbidden');
+      final invited = (_body(r)['name'] as String?)?.trim() ?? '';
+      if (invited.isEmpty || invited.length > 40) return _err('invalid_request');
+      final token = addInvite(name: invited, familyId: id);
+      return _json({
+        'inviteToken': token,
+        'inviteUrl': 'https://famchat.dev/join#$token',
+        'expiresAt': invites[token]!.expiresAt.millisecondsSinceEpoch,
+      }, 201);
+    }
+    final admins = RegExp(r'^/admins/([^/]+)$').firstMatch(rest);
+    if (r.method == 'POST' && admins != null) {
+      if (!approved || !iAmAdmin) return _err('forbidden');
+      final sig = _body(r)['sig'];
+      if (sig is! String ||
+          !await verifyPromotionV2(
+            signerPub: b64urlDecode(me.identityPub),
+            familyId: id,
+            userId: admins[1]!,
+            byUserId: me.id,
+            sig: b64urlDecode(sig),
+          )) {
+        return _err('invalid_request');
+      }
+      final target = users[admins[1]];
+      if (target == null || !inIt(target)) return _err('not_found');
+      if (id == 1) {
+        target
+          ..isAdmin = true
+          ..adminProof = {'byUserId': me.id, 'signerPub': me.identityPub, 'sig': sig};
+      } else {
+        target.familyRoles[id] = 'admin';
+      }
+      return http.Response('', 204);
+    }
+    if (r.method == 'DELETE' && admins != null) {
+      if (!approved || !iAmOwner) return _err('forbidden');
+      final target = users[admins[1]];
+      if (target == null || target.id == me.id) return _err('forbidden');
+      if (!inIt(target) || !adminOf(target)) return _err('not_found');
+      if (id == 1) {
+        target
+          ..isAdmin = false
+          ..adminProof = null;
+      } else {
+        target.familyRoles[id] = 'member';
+      }
+      return http.Response('', 204);
+    }
+    final members = RegExp(r'^/members/([^/]+)$').firstMatch(rest);
+    if (r.method == 'DELETE' && members != null) {
+      final target = users[members[1]];
+      if (target == null) return _err('not_found');
+      if (target.id == me.id) {
+        final others = users.values.where((u) => u.id != me.id && inIt(u));
+        if (iAmAdmin && others.isNotEmpty && !others.any(adminOf)) {
+          return _json({'error': 'last_admin', 'familyId': id, 'familyName': name}, 409);
+        }
+        if (id != 1) extraFamilies.remove(row);
+      } else {
+        if (!approved || !iAmAdmin) return _err('forbidden');
+        if (!inIt(target)) return _err('not_found');
+        if (adminOf(target)) return _err('forbidden');
+      }
+      if (id == 1) {
+        target
+          ..inFamily1 = false
+          ..isAdmin = false
+          ..adminProof = null;
+      } else {
+        target.familyRoles.remove(id);
+      }
+      return http.Response('', 204);
+    }
+    return null;
   }
 
   /// A session as `GET /devices/pair/:code` and the offer poll show it (with [tamperNextLookup]).

@@ -8,9 +8,11 @@ import '../session/session_controller.dart';
 import '../theme/tokens.dart';
 import 'sign_out.dart';
 
-/// Admin only: create a one-time invite link for a new family member.
+/// Admin of [familyId] only: create a one-time invite link for a new member of it.
 class InviteScreen extends ConsumerStatefulWidget {
-  const InviteScreen({super.key});
+  const InviteScreen({super.key, required this.familyId});
+
+  final int familyId;
 
   @override
   ConsumerState<InviteScreen> createState() => _InviteScreenState();
@@ -39,7 +41,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
       _error = null;
     });
     try {
-      final invite = await ref.read(apiClientProvider).createInvite(name);
+      final invite = await ref.read(apiClientProvider).createFamilyInvite(widget.familyId, name);
       if (mounted) setState(() => _created = (name, invite));
     } catch (e) {
       if (mounted) setState(() => _error = apiErrorMessage(e));
@@ -59,7 +61,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
     final created = _created;
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: () => context.go('/settings')),
+        leading: BackButton(onPressed: () => context.go('/settings/families/${widget.familyId}')),
         title: const Text('Invite someone'),
       ),
       body: Center(

@@ -47,11 +47,12 @@ void main() {
     expect(find.byKey(const Key('settings-family')), findsNothing, reason: 'the old Family group is gone');
     await tester.tap(find.byKey(const Key('settings-families')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('settings-storage')), findsOneWidget);
     await tester.tap(find.byKey(const Key('family-tile-1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('recovery-code-card')), findsOneWidget);
     expect(find.text('Invite someone'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Media storage'), 200);
+    expect(find.text('Media storage'), findsOneWidget);
   });
 
   testWidgets('developer tools show the platform spikes', (tester) async {

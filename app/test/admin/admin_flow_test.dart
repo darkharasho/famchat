@@ -79,7 +79,7 @@ void main() {
     final admin = await member('Michael', admin: true);
     final dad = await member('Dad');
     final adminId = userIdOf(admin), dadId = userIdOf(dad);
-    await adminOf(admin).makeAdmin(dadId);
+    await adminOf(admin).makeAdmin(dadId, familyId: 1);
     expect(server.log, contains('POST /api/families/1/admins/$dadId -> 204'));
     final d = server.users[dadId]!;
     expect(d.isAdmin, isTrue);

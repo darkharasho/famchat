@@ -79,7 +79,11 @@ class Families extends AsyncNotifier<List<Family>> {
 
   @override
   Future<List<Family>> build() async {
-    if (ref.watch(myUserIdProvider) == null) return const [];
+    if (ref.watch(myUserIdProvider) == null) {
+      // A new session starts fresh, not diffed against the last one.
+      _seen = null;
+      return const [];
+    }
     final now = await ref.watch(apiClientProvider).families();
     final before = _seen;
     _seen = now;

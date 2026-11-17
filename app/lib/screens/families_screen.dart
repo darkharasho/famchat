@@ -17,51 +17,38 @@ class FamiliesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final families = ref.watch(familiesProvider);
-    final session = ref.watch(sessionProvider);
-    final admin = session is SignedIn && session.session.isAdmin;
     return Scaffold(
       appBar: AppBar(
         leading: BackButton(onPressed: () => context.go('/settings')),
         title: const Text('Families'),
       ),
-      body: switch (families) {
-        AsyncData(value: final all) => ListView(
-            padding: EdgeInsets.only(top: Space.sm, bottom: Space.xxl + MediaQuery.paddingOf(context).bottom),
-            children: [
-              ContentWidth(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  if (all.isNotEmpty)
-                    SettingsGroup(children: [for (final f in all) _FamilyTile(family: f)]),
-                  // Until family 1's own screen carries it.
-                  if (admin)
-                    SettingsGroup(children: [
-                      ListTile(
-                        key: const Key('settings-storage'),
-                        leading: const TileIcon(Icons.photo_library_outlined),
-                        title: const Text('Media storage'),
-                        subtitle: const Text('Space used by photos and voice'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => context.go('/settings/storage'),
+      // A refresh (or one that failed) keeps showing what was there.
+      body: families.hasValue
+          ? ListView(
+              padding: EdgeInsets.only(top: Space.sm, bottom: Space.xxl + MediaQuery.paddingOf(context).bottom),
+              children: [
+                ContentWidth(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    if (families.value!.isNotEmpty)
+                      SettingsGroup(children: [for (final f in families.value!) _FamilyTile(family: f)]),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+                      child: FilledButton.icon(
+                        key: const Key('start-family'),
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Start a family'),
+                        onPressed: () => _start(context, ref),
                       ),
-                    ]),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-                    child: FilledButton.icon(
-                      key: const Key('start-family'),
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('Start a family'),
-                      onPressed: () => _start(context, ref),
                     ),
-                  ),
-                ]),
-              ),
-            ],
-          ),
-        AsyncError() => Center(
-            child: TextButton(onPressed: () => ref.invalidate(familiesProvider), child: const Text('Try again')),
-          ),
-        _ => const Center(child: CircularProgressIndicator()),
-      },
+                  ]),
+                ),
+              ],
+            )
+          : families.hasError
+              ? Center(
+                  child: TextButton(onPressed: () => ref.invalidate(familiesProvider), child: const Text('Try again')),
+                )
+              : const Center(child: CircularProgressIndicator()),
     );
   }
 }
@@ -75,9 +62,6 @@ class _FamilyTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final f = family;
-    final session = ref.watch(sessionProvider);
-    // Only family 1's admins have a family screen until it works for every family.
-    final open = f.status == 'approved' && f.id == 1 && session is SignedIn && session.session.isAdmin;
     return ListTile(
       key: Key('family-tile-${f.id}'),
       leading: const TileIcon(Icons.diversity_3_rounded),
@@ -93,10 +77,9 @@ class _FamilyTile extends ConsumerWidget {
             onPressed: () => _dismiss(context, ref, f),
             child: const Text('Dismiss'),
           ),
-        _ when open => const Icon(Icons.chevron_right_rounded),
-        _ => null,
+        _ => const Icon(Icons.chevron_right_rounded),
       },
-      onTap: open ? () => context.go('/settings/families/${f.id}') : null,
+      onTap: () => context.go('/settings/families/${f.id}'),
     );
   }
 }

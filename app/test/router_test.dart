@@ -44,8 +44,9 @@ void main() {
     expect(sessionRedirect(user, '/'), isNull);
     expect(sessionRedirect(user, '/settings/devices'), isNull);
     expect(sessionRedirect(user, '/spikes'), isNull);
-    expect(sessionRedirect(user, '/settings/invite'), '/');
-    expect(sessionRedirect(admin, '/settings/invite'), isNull);
+    // Any family's admin invites from its own screen; the server checks the role.
+    expect(sessionRedirect(user, '/settings/families/2/invite'), isNull);
+    expect(sessionRedirect(user, '/settings/families/2/recovery-code'), isNull);
     expect(sessionRedirect(out, '/recover'), isNull);
     expect(sessionRedirect(user, '/recover'), '/');
     expect(sessionRedirect(user, '/settings/family'), '/');
@@ -70,10 +71,10 @@ void main() {
     sessionRedirect(const SessionLoading(), '/chats/01ARZ3NDEKTSV4RRFFQ69G5FAV', pending: pending);
     expect(sessionRedirect(const SignedOut(), '/loading', pending: pending), '/join');
     expect(pending.value, isNull);
-    sessionRedirect(const SessionLoading(), '/settings/invite', pending: pending);
+    sessionRedirect(const SessionLoading(), '/settings/storage', pending: pending);
     expect(sessionRedirect(SignedIn(session()), '/loading', pending: pending), '/');
-    sessionRedirect(const SessionLoading(), '/settings/invite', pending: pending);
-    expect(sessionRedirect(SignedIn(session(admin: true)), '/loading', pending: pending), '/settings/invite');
+    sessionRedirect(const SessionLoading(), '/settings/storage', pending: pending);
+    expect(sessionRedirect(SignedIn(session(admin: true)), '/loading', pending: pending), '/settings/storage');
     // Sign-in pages are never remembered.
     sessionRedirect(const SessionLoading(), '/join', pending: pending);
     expect(pending.value, isNull);

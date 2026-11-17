@@ -1,5 +1,6 @@
 import 'package:famchat/chat/providers.dart';
 import 'package:famchat/session/secure_kv.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -36,14 +37,38 @@ void main() {
     expect(find.text('Member · 3 people'), findsOneWidget);
   });
 
-  testWidgets('a family-1 admin keeps Media storage here', (tester) async {
+  testWidgets("Media storage is on family 1's screen, not in the list", (tester) async {
     await openFamilies(tester);
-    expect(find.byKey(const Key('settings-storage')), findsOneWidget);
+    expect(find.byKey(const Key('settings-storage')), findsNothing);
   });
 
-  testWidgets('a plain member has no Media storage', (tester) async {
+  testWidgets('every family opens its own screen', (tester) async {
+    server.extraFamilies.addAll([
+      family(4, 'Club', 'pending'),
+      family(6, 'Joneses', 'approved', role: 'member', owner: false),
+    ]);
     await openFamilies(tester, admin: false);
-    expect(find.byKey(const Key('settings-storage')), findsNothing);
+    for (final (id, name) in [(1, 'Family'), (4, 'Club'), (6, 'Joneses')]) {
+      await tester.tap(find.byKey(Key('family-tile-$id')));
+      await tester.pumpAndSettle();
+      expect(appRouter(tester).state.uri.path, '/settings/families/$id');
+      expect(find.widgetWithText(AppBar, name), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets('a failed refresh keeps the list', (tester) async {
+    await openFamilies(tester);
+    server.failFamilies = true;
+    appContainer(tester).read(familiesProvider.notifier).refresh().ignore();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('family-tile-1')), findsOneWidget, reason: 'while retrying');
+    await tester.pump(const Duration(minutes: 2)); // past Riverpod's retries
+    await tester.pumpAndSettle();
+    expect(appContainer(tester).read(familiesProvider), isA<AsyncError<Object?>>());
+    expect(find.byKey(const Key('family-tile-1')), findsOneWidget);
+    expect(find.text('Try again'), findsNothing);
   });
 
   testWidgets('starting a family validates the name, then asks the operator', (tester) async {

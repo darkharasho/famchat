@@ -138,7 +138,7 @@ class _ListPane extends ConsumerWidget {
             text: 'Save your admin recovery code, and consider making a second admin.',
             actions: [
               TextButton(
-                onPressed: () => context.go('/settings/family'),
+                onPressed: () => context.go('/settings/families/1'),
                 style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer),
                 child: const Text('Set up'),
               ),
