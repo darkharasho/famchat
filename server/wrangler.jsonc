@@ -11,9 +11,14 @@
   "assets": {
     "directory": "./public",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/.well-known/*"]
   },
-  "vars": { "APP_ORIGIN": "https://famchat.dev" },
+  // ANDROID_CERT_SHA256: Play's app-signing key (Play Console > App integrity), for Android App
+  // Links (/.well-known/assetlinks.json). APPLE_APP_ID comes from the deploy (APPLE_TEAM_ID secret).
+  "vars": {
+    "APP_ORIGIN": "https://famchat.dev",
+    "ANDROID_CERT_SHA256": "68:D1:B1:EF:42:1C:1F:13:FF:2E:0B:66:D6:66:60:D8:97:95:6D:9D:AB:69:57:14:F2:43:A5:9A:DD:A4:44:3D"
+  },
   "d1_databases": [
     {
       "binding": "DB",

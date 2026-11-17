@@ -6,6 +6,7 @@ import 'package:famchat/chat/providers.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/providers.dart';
+import 'package:famchat/session/app_links.dart';
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,9 +24,15 @@ Future<void> pumpApp(
   required FakeServer server,
   required SecureKv kv,
   List<Override> extra = const [],
+  IncomingLinks links = const NoIncomingLinks(),
 }) async {
   await tester.pumpWidget(ProviderScope(
-    overrides: [...sessionOverrides(server, kv), ...quietChatOverrides(), ...extra],
+    overrides: [
+      ...sessionOverrides(server, kv),
+      ...quietChatOverrides(),
+      incomingLinksProvider.overrideWithValue(links),
+      ...extra,
+    ],
     child: const FamChatApp(),
   ));
   await tester.pumpAndSettle();

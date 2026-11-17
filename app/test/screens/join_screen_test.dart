@@ -1,3 +1,4 @@
+import 'package:famchat/screens/join_screen.dart' show offerAppProvider;
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
 import 'package:famchat/session/stored_session.dart';
@@ -117,6 +118,16 @@ void main() {
     expect(find.byKey(const Key('invite-field')), findsNothing);
     await tapJoin(tester);
     expect(find.text('No chats yet'), findsOneWidget);
+  });
+
+  testWidgets('on a phone browser, Join offers the app', (tester) async {
+    await pumpApp(tester, server: server, kv: kv, extra: [offerAppProvider.overrideWithValue(true)]);
+    expect(find.text('Get the app'), findsOneWidget);
+  });
+
+  testWidgets('elsewhere it does not', (tester) async {
+    await pumpApp(tester, server: server, kv: kv, extra: [offerAppProvider.overrideWithValue(false)]);
+    expect(find.text('Get the app'), findsNothing);
   });
 
   testWidgets('storage failure shows the explanation and retry', (tester) async {

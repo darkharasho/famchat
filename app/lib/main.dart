@@ -14,6 +14,7 @@ import 'session/session_controller.dart';
 import 'theme/app_theme.dart';
 import 'update/update_banner.dart';
 import 'media/video_io.dart';
+import 'session/app_links.dart';
 import 'share/share_inbox.dart';
 import 'voice/voice_io.dart';
 import 'window/title_bar.dart';
@@ -61,7 +62,7 @@ class FamChatApp extends ConsumerWidget {
       // FamChat's own title bar over every screen on the desktop apps; nothing elsewhere.
       // The update popup floats over every screen.
       builder: (context, child) => WindowFrame(
-        child: Stack(children: [child ?? const SizedBox.shrink(), const UpdatePrompt(), const ShareInbox()]),
+        child: Stack(children: [child ?? const SizedBox.shrink(), const UpdatePrompt(), const ShareInbox(), const InviteLinkListener()]),
       ),
     );
   }

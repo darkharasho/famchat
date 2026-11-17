@@ -13,6 +13,10 @@ export interface Env {
   FCM_SERVICE_ACCOUNT?: string;
   /** KLIPY app key for GIF search (docs/protocol.md "GIFs"); unset hides GIFs in the app. */
   KLIPY_APP_KEY?: string;
+  /** "<team id>.dev.famchat.app": iOS opens famchat.dev/join links in the app. */
+  APPLE_APP_ID?: string;
+  /** Comma-separated SHA-256 fingerprints of the Android signing certificates (Play and upload). */
+  ANDROID_CERT_SHA256?: string;
 }
 
 export interface AppVars {

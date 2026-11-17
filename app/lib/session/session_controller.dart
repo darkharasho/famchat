@@ -73,6 +73,16 @@ final refreshRetryDelaysProvider = Provider<List<Duration>>(
 /// The token from a `/join#<token>` link the web app was opened with.
 final initialInviteTokenProvider = Provider<String?>((ref) => null);
 
+/// The invite Join uses: the web's opening link, or one tapped on a phone (lib/session/app_links.dart).
+class PendingInvite extends Notifier<String?> {
+  @override
+  String? build() => ref.watch(initialInviteTokenProvider);
+
+  void set(String? invite) => state = invite;
+}
+
+final pendingInviteProvider = NotifierProvider<PendingInvite, String?>(PendingInvite.new);
+
 final sessionStoreProvider = Provider<SessionStore>((ref) => SessionStore(ref.watch(secureKvProvider)));
 
 final apiClientProvider = Provider<ApiClient>((ref) {

@@ -75,6 +75,7 @@ dependencies:
   video_compress: ^3.1.4
   receive_sharing_intent: 1.9.0 # exact: ios/ShareExtension/Vendor copies its iOS extension code
   desktop_drop: ^0.8.0
+  app_links: ^7.2.2
 
 dev_dependencies:
   flutter_test:
