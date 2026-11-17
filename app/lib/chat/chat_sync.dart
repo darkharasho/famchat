@@ -740,9 +740,11 @@ class ChatSync {
     return _create('direct', null, [userId]);
   }
 
-  Future<String> createGroup(String title, List<String> userIds) => _create('group', title.trim(), userIds);
+  /// A new group of [userIds] in [familyId] (null: the server picks; docs/protocol.md "Chats").
+  Future<String> createGroup(String title, List<String> userIds, {int? familyId}) =>
+      _create('group', title.trim(), userIds, familyId: familyId);
 
-  Future<String> _create(String kind, String? title, List<String> userIds) async {
+  Future<String> _create(String kind, String? title, List<String> userIds, {int? familyId}) async {
     final others = userIds.where((u) => u != me.userId).toSet().toList();
     final id = newUlid(_now());
     final key = newChatKey();
@@ -754,7 +756,7 @@ class ChatSync {
       }
       final wraps = await keys.wrapKey(chatId: id, epoch: 1, key: key, devices: await directory.liveDevices([me.userId, ...others]));
       try {
-        final r = await api.createChat(id: id, kind: kind, title: title, userIds: others, wraps: wraps);
+        final r = await api.createChat(id: id, kind: kind, title: title, userIds: others, wraps: wraps, familyId: familyId);
         if (r.chat.id == id) await db.putKey(id, 1, key);
         await db.upsertChat(r.chat);
         if (r.chat.id != id) {

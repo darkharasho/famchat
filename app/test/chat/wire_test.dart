@@ -123,6 +123,19 @@ void main() {
   });
 
   group('HttpChatApi', () {
+    test('createChat sends familyId only when given', () async {
+      final bodies = <Map<String, Object?>>[];
+      final api = HttpChatApi(client((r) async {
+        bodies.add(jsonDecode(r.body) as Map<String, Object?>);
+        return json({'chat': chatJson, 'created': true}, 201);
+      }));
+      final wraps = [ChatKeyWrap.fromJson(wrapJson)];
+      await api.createChat(id: 'C1', kind: 'group', title: 'G', userIds: ['U2'], wraps: wraps);
+      await api.createChat(id: 'C1', kind: 'group', title: 'G', userIds: ['U2'], wraps: wraps, familyId: 7);
+      expect(bodies[0].containsKey('familyId'), isFalse);
+      expect(bodies[1]['familyId'], 7);
+    });
+
     test('calls the contract paths and parses', () async {
       final seen = <String>[];
       final api = HttpChatApi(client((r) async {

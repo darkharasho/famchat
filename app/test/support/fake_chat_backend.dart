@@ -250,6 +250,9 @@ class FakeChatBackend {
   /// The server lists [userId] in another family (a real one, or a lie).
   void addFamilyRole(String userId, FamilyRoleDto role) => _users[userId]!.otherFamilies.add(role);
 
+  /// The `familyId` each `POST /chats` carried, by chat id (null when omitted).
+  final requestedFamily = <String, int?>{};
+
   /// The server stops listing [userId] in [familyId] (they left, or were removed).
   void removeFamilyRole(String userId, int familyId) {
     final u = _users[userId]!;
@@ -643,6 +646,7 @@ class FakeChatApi implements ChatApi {
     String? title,
     required List<String> userIds,
     required List<ChatKeyWrap> wraps,
+    int? familyId,
   }) =>
       _run('POST /chats', () {
         final existing = b._chats[id];
@@ -663,10 +667,11 @@ class FakeChatApi implements ChatApi {
         if (!userIds.every(b._users.containsKey)) b._err('invalid_request');
         final members = [userId, ...userIds.toSet()];
         b._coverage(wraps, id, 1, deviceId, b._liveDevices(members));
+        b.requestedFamily[id] = familyId;
         final t = b.now();
         final c = _Chat(id, kind, kind == 'group' ? title!.trim() : null, userId, directKey, t)
           ..epochs.add(1)
-          ..familyId = kind == 'group' ? 1 : null;
+          ..familyId = kind == 'group' ? (familyId ?? 1) : null;
         for (final u in members) {
           c.members[u] = _Member(0, t);
         }

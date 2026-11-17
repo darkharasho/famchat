@@ -314,6 +314,7 @@ abstract interface class ChatApi {
     String? title,
     required List<String> userIds,
     required List<ChatKeyWrap> wraps,
+    int? familyId,
   });
   Future<ChatDto> addMembers(String chatId, List<String> userIds, List<ChatKeyWrap> wraps);
   Future<void> removeMember(String chatId, String userId);

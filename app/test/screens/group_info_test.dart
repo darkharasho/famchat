@@ -1,4 +1,5 @@
 import 'package:famchat/chat/providers.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
 import 'package:famchat/screens/chats/group_info_screen.dart';
@@ -9,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../support/chat_harness.dart';
 import '../support/fake_chat_backend.dart';
+import '../support/fake_server.dart';
 
 void main() {
   late FakeChatBackend backend;
@@ -106,5 +108,25 @@ void main() {
     await settle(tester);
     expect(find.byType(NewChatScreen), findsOneWidget);
     expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, 'Bob')).value, isTrue);
+  });
+
+  chatTestWidgets('a multi-family user sees which family the group is in', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    final server = FakeServer()..family1Name = 'Hearth';
+    server.extraFamilies.add({
+      'id': 10, 'name': 'Smiths', 'status': 'approved', 'role': 'member', 'owner': false, 'ownerId': 'x', 'memberCount': 3, 'createdAt': 1,
+    });
+    backend.addFamilyRole(alice.userId, const FamilyRoleDto(id: 10, admin: false));
+    backend.addFamilyRole(bob.userId, const FamilyRoleDto(id: 10, admin: false));
+    await pumpChatApp(tester, alice, server: server);
+    final id = await inApp(tester, () => c(tester).read(chatSyncProvider)!.createGroup('Cousins', [bob.userId], familyId: 10));
+    c(tester).read(routerProvider).go('/chats/$id/info');
+    await settle(tester);
+    expect(find.text('Family: Smiths'), findsOneWidget);
+  });
+
+  chatTestWidgets('a single-family user sees no family line', (tester) async {
+    await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId]));
+    expect(find.textContaining('Family:'), findsNothing);
   });
 }
