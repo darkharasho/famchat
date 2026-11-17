@@ -653,6 +653,18 @@ class ChatSync {
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.
+  /// Renames this user; the directory is refreshed, so the new name shows at once. Throws
+  /// [ArgumentError] for a blank or too-long name.
+  Future<void> rename(String name) async {
+    final t = name.trim();
+    if (t.isEmpty || t.runes.length > maxNameLength) throw ArgumentError.value(name, 'name', 'blank or too long');
+    await api.setName(t);
+    await _enqueue(() => directory.refresh());
+  }
+
+  /// Longest display name (the server's limit).
+  static const maxNameLength = 40;
+
   /// Sets this user's profile photo ([jpeg], see `lib/profile/avatar.dart`), or removes it when
   /// null; returns the new photo's key. The directory is refreshed, so it shows at once.
   Future<String?> setAvatar(Uint8List? jpeg) async {

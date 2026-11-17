@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../chat/chat_sync.dart';
 import '../chat/providers.dart';
 import '../dev_tools.dart';
 import '../profile/profile_photo_tile.dart';
@@ -44,7 +45,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final state = ref.watch(sessionProvider);
     final session = state is SignedIn ? state.session : null;
     final admin = session?.isAdmin ?? false;
-    final name = session?.name ?? 'You';
+    final myId = ref.watch(myUserIdProvider);
+    // The directory has a rename at once; the session catches up at the next /me.
+    final name = (myId == null ? null : ref.watch(usersProvider).value?[myId]?.name) ?? session?.name ?? 'You';
     Widget row(IconData icon, String title, String subtitle, String route, {Key? key}) => ListTile(
           key: key,
           leading: TileIcon(icon),
@@ -86,6 +89,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ]),
             ),
             SettingsGroup(title: 'You', children: [
+              ListTile(
+                key: const Key('settings-name'),
+                leading: const TileIcon(Icons.badge_outlined),
+                title: const Text('Your name'),
+                subtitle: Text(name),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _rename(context, ref, name),
+              ),
               const ProfilePhotoTile(),
               row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/settings/devices',
                   key: const Key('settings-devices')),
@@ -149,4 +160,61 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ]),
     );
   }
+}
+
+/// Asks for a new name and saves it (everyone sees it as soon as their directory refreshes).
+Future<void> _rename(BuildContext context, WidgetRef ref, String current) async {
+  final picked = await showDialog<String>(context: context, builder: (context) => _RenameDialog(current: current));
+  if (picked == null || picked == current || !context.mounted) return;
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await ref.read(chatSyncProvider)?.rename(picked);
+    ref.invalidate(meProvider);
+  } catch (_) {
+    messenger.showSnackBar(const SnackBar(content: Text("Couldn't change your name.")));
+  }
+}
+
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.current});
+  final String current;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final _text = TextEditingController(text: widget.current);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  String get _value => _text.text.trim();
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Your name'),
+        content: TextField(
+          key: const Key('name-field'),
+          controller: _text,
+          autofocus: true,
+          maxLength: ChatSync.maxNameLength,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(helperText: 'How your family sees you'),
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) {
+            if (_value.isNotEmpty) Navigator.pop(context, _value);
+          },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: _value.isEmpty ? null : () => Navigator.pop(context, _value),
+            child: const Text('Save'),
+          ),
+        ],
+      );
 }

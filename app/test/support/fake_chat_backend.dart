@@ -20,7 +20,8 @@ import 'package:famchat/media/media_api.dart';
 
 class _User {
   _User(this.id, this.name, this.identity, this.identityPub);
-  final String id, name;
+  final String id;
+  String name;
   SimpleKeyPair identity;
   Uint8List identityPub;
   bool isAdmin = false;
@@ -532,6 +533,12 @@ class FakeChatApi implements ChatApi {
 
   @override
   Future<void> removeAvatar() => _run('DELETE /me/avatar', () => b.setAvatar(userId, null));
+
+  @override
+  Future<void> setName(String name) => _run('PUT /me/name', () {
+        b._users[userId]!.name = name.trim();
+        b._notify(b._users.keys, {'type': 'profile', 'userId': userId});
+      });
 
   @override
   Future<Uint8List> avatar(String userId, String key) => _run('GET /users/$userId/avatar', () {
