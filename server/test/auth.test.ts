@@ -233,3 +233,33 @@ describe("bootstrap invites after first user", () => {
     expect(await count("users")).toBe(1);
   });
 });
+
+describe("family invites at signed-out redeem", () => {
+  const familyInvite = async (familyId: number) => {
+    const token = (await import("../src/lib/tokens")).randomToken();
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id)
+       VALUES (?, 'Cuz', 0, (SELECT id FROM users ORDER BY created_at LIMIT 1), ?, ?, ?)`,
+    ).bind(await sha256Hex(token), now, now + 86_400_000, familyId).run();
+    return token;
+  };
+
+  it("signed-out redeem of a family-3 invite joins family 3 only", async () => {
+    await insertUserWithDevice();
+    await env.DB.prepare("INSERT INTO families (id, name, status, hidden, created_at) VALUES (3, 'Cousins', 'approved', 0, 1)").run();
+    const res = await redeem(await redeemBody(await familyInvite(3)));
+    expect(res.status).toBe(201);
+    const { userId } = await res.json<{ userId: string }>();
+    const { results } = await env.DB.prepare("SELECT family_id FROM family_members WHERE user_id = ?").bind(userId).all<{ family_id: number }>();
+    expect(results.map((r) => r.family_id)).toEqual([3]);
+  });
+
+  it("signed-out redeem of a pending family's invite is 410", async () => {
+    await insertUserWithDevice();
+    await env.DB.prepare("INSERT INTO families (id, name, status, hidden, created_at) VALUES (3, 'Cousins', 'pending', 0, 1)").run();
+    const res = await redeem(await redeemBody(await familyInvite(3)));
+    expect(res.status).toBe(410);
+    expect(await count("users")).toBe(1);
+  });
+});

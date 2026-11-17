@@ -52,7 +52,7 @@ class AdminService {
 
   /// Makes [userId] an admin of [familyId], signed with this admin's identity key (a v2 promotion,
   /// bound to the family) so the family's devices trust it.
-  Future<void> makeAdmin(String userId, {int familyId = 1}) async {
+  Future<void> makeAdmin(String userId, {required int familyId}) async {
     final sig = await signPromotionV2(await _identity(), familyId: familyId, userId: userId, byUserId: _userId);
     await _api.promoteInFamily(familyId, userId, sig: b64url(sig));
   }

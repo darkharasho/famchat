@@ -94,11 +94,11 @@ void main() {
     expect(kv.values, isNotEmpty);
   });
 
-  testWidgets('an admin removes someone from the family after confirming', (tester) async {
+  testWidgets("the operator deletes someone's account after confirming", (tester) async {
     await pumpApp(tester, server: server, kv: kv);
     await signInDirectly(tester, server, name: 'Michael', admin: true);
     final momId = await addMember(tester, 'Mom');
-    appRouter(tester).go('/settings/family');
+    appRouter(tester).go('/settings/families/1');
     await tester.pumpAndSettle();
     expect(find.text('Mom'), findsOneWidget);
 
@@ -107,22 +107,22 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(Key('family-menu-$momId')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Remove from family').last);
+      await tester.tap(find.text('Delete account').last);
       await tester.pumpAndSettle();
     }
 
     await openRemove();
-    expect(find.text('Remove Mom from the family?'), findsOneWidget);
+    expect(find.text("Delete Mom's account?"), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(server.users[momId]!.deleted, isFalse);
 
     await openRemove();
-    await tester.tap(find.byKey(const Key('confirm-remove')));
+    await tester.tap(find.byKey(const Key('confirm-delete')));
     await tester.pumpAndSettle();
     expect(server.users[momId]!.deleted, isTrue);
     expect(server.liveDevices(momId), isEmpty);
-    expect(find.text('Mom was removed'), findsOneWidget);
+    expect(find.text("Mom's account was deleted"), findsOneWidget);
     // Deleted accounts aren't listed as family.
     expect(find.byKey(Key('family-user-$momId')), findsNothing);
     expect(find.text('1 person'), findsOneWidget);

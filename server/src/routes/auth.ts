@@ -65,6 +65,7 @@ auth.post("/invite/redeem", async (c) => {
     db.prepare(
       `UPDATE invites SET used_by = ?, used_at = ?
        WHERE token_hash = ? AND used_by IS NULL AND expires_at > ? AND user_id IS NULL AND reviewer = 0
+         AND EXISTS (SELECT 1 FROM families f WHERE f.id = invites.family_id AND f.status = 'approved' AND f.hidden = 0)
          AND (created_by IS NOT NULL OR (
            NOT EXISTS (SELECT 1 FROM family_members m JOIN users u ON u.id = m.user_id
                        WHERE m.family_id = ${FAMILY_ONE} AND u.deleted_at IS NULL)

@@ -100,13 +100,14 @@ Future<ScriptedHubLink> pumpChatApp(
   FakeRecorders? recorders,
   FakeVoicePlayer? player,
   KlipyClient? gifs,
+  FakeServer? server,
 }) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
     await me.db.bindDevice(me.deviceId); // as ChatSync.start does; binding later would wipe the directory
     await Directory(me.db, me.api, me.me).refresh();
   });
-  final server = FakeServer();
+  server ??= FakeServer();
   await tester.pumpWidget(ProviderScope(
     overrides: [
       ...sessionOverrides(server, MemorySecureKv()),

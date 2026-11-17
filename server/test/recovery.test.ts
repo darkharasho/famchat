@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newId } from "../src/lib/ids";
 import { claimMessage, recoveryKeyMessage, resetMessage } from "../src/lib/reset";
 import { api, createDirect } from "./chat-helpers";
-import { BASE, insertFamily, insertUserWithDevice, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
+import { BASE, insertFamily, insertUserWithDevice, joinFamily, jsonReq, makeKeys, resetDb, type TestKeys } from "./helpers";
 import { ed25519, redeemReset, registerRecovery, resetUser, sign } from "./reset-helpers";
 import { closeSockets, socket } from "./ws-helpers";
 
@@ -78,6 +78,15 @@ describe("recovery key registration by family", () => {
     expect((await registerRecovery(admin)).res.status).toBe(204);
     const member = await insertUserWithDevice({ name: "Mz", families: [{ id: f, role: "member" }] });
     expect((await registerRecovery(member)).res.status).toBe(403);
+  });
+});
+
+describe("recovery key and pending families", () => {
+  it("the creator of a pending family can't register a recovery key", async () => {
+    const creator = await insertUserWithDevice({ name: "Pc" });
+    const f = await insertFamily({ status: "pending", createdBy: creator.userId });
+    await joinFamily(creator.userId, f, "admin");
+    expect((await registerRecovery(creator)).res.status).toBe(403);
   });
 });
 

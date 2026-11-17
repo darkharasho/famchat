@@ -23,7 +23,8 @@ reference; this document says what clients may rely on.
   | `pairing_invalid` | 410 | pairing session expired, cancelled, or already claimed |
   | `rate_limited` | 429 | too many pairing sessions started; wait a few minutes |
   | `conflict` | 409 | a media key already used by another device or for another chat |
-  | `last_admin` | 409 | the only admin can't delete their account while anyone else is in the family |
+  | `last_admin` | 409 | the only admin can't delete their account, or leave a family, while anyone else is in it |
+| `admin_invite` | 409 | `POST /families/:id/join` with an invite that makes its holder an admin; it is meant for a new person, so it is not used up |
   | `media_expired` | 410 | the media was deleted by quota eviction (show "media expired") |
   | `too_large` | 413 | upload over its kind's byte cap |
   | `upgrade_required` | 426 | `/api/ws` without a WebSocket upgrade |
@@ -253,6 +254,64 @@ N accepts it only if it opens, `certSig` verifies over N's own keys with the ide
 the history at once; `trust` is E's trust-on-first-use state for other users, so N starts with it instead
 of whatever the server shows. Member devices also add wraps for N on the `device` event.
 
+### Families
+All `/families` routes need auth and return `403 forbidden` to reviewers. The hidden reviewer family
+never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 characters
+(`400 invalid_request` otherwise). The owner of a family is its creator.
+- `GET /families` → `{families: Family[]}`: the caller's own families, ordered by id.
+  `Family` = `{id, name, status: "pending"|"approved"|"declined", role: "admin"|"member",
+  memberCount, owner: boolean, ownerId: string | null, createdAt}`. `memberCount` counts live (not
+  deleted) members. `owner` is whether the caller owns it; `ownerId` is the owner's user id (null
+  when the family has no owner), so members can tell who it is.
+- `POST /families {name}` → `201 {family: Family}`: requests a new family. It starts `pending`, with
+  the caller as its admin (no admin proof). At most 3 pending requests per creator, else
+  `429 rate_limited`.
+- `PUT /families/:id {name}` → `204`: renames. Allowed for an admin of an approved family, and for
+  the creator of their own pending or declined family (a pending or declined family has no other
+  admin power). Others get `403 forbidden`. Members get a `family` event.
+- `POST /families/:id/invites {name}` → `201 {inviteToken, inviteUrl, expiresAt}`: a member invite
+  (`/join#<token>`, 7 days) for family `:id`. Admin of an approved family only, else `403 forbidden`.
+  An `email` field is `400 invalid_request` for now.
+- `POST /families/invite-lookup {inviteToken}` → `{familyId, familyName, invitedName, alreadyMember}`
+  for an invite that is unused, unexpired, not revoked, not a reset or reviewer invite, and for an
+  approved family. Anything else is `410 invite_invalid`.
+- `POST /families/:id/join {inviteToken}` → `200 {family: Family}`: joins `:id` as a member with the
+  caller's existing account and uses up the invite. `410 invite_invalid` if the invite is unusable or
+  is for another family; `409 conflict` if the caller is already a member and `409 admin_invite` if the
+  invite makes its holder an admin (in both cases the invite stays usable).
+  Members get a `family` event.
+- Signed-out `POST /auth/invite/redeem` of a family invite joins that family, and is `410` if the
+  family is not approved.
+- `POST /families/:id/admins/:userId`: promotes a member (see "Account resets", line 431); also reviewer-blocked.
+- `DELETE /families/:id/admins/:userId` → `204`: demotes an admin of `:id` to member and clears their
+  admin proof (family #1 also clears `isAdmin` and the proof on `users`). Only the owner, while the family
+  is approved; anyone else `403 forbidden`. The owner can't be demoted (`403`); a target who isn't an
+  admin of `:id` is `404 not_found`. Members get a `family` event.
+- `DELETE /families/:id/members/:userId` → `204`: takes someone out of family `:id`.
+  - Yourself (leaving): allowed in any family you're in, pending and declined ones too (that's how a
+    creator dismisses a declined request). The family's last admin gets
+    `409 {error: "last_admin", familyId, familyName}` while any other live member is left (make
+    someone else an admin first). Not a member: `404`.
+  - Someone else: the caller must be an admin of the approved family, else `403 forbidden`. Admins and
+    the owner can't be removed (`403`); a target outside the family is `404 not_found`.
+  - In one transaction the person leaves every group chat of that family they're in, exactly like
+    `DELETE /chats/:id/members/:userId` (new epoch, kept as a leaver); chats of their other families
+    and direct chats stay (a direct chat with someone they no longer share a family with becomes
+    read-only: sends get `no_shared_family`). Family #1 also clears their `isAdmin` and proof on `users`.
+  - Afterwards: `removed {chatId}` to them and `chat {chatId}` to the rest, per chat; a `family` event to
+    the family's members and to them.
+- Ownership: when the owner leaves (or deletes their account), the family passes to its
+  longest-serving other live admin (earliest `joined_at`, then user id); with none left it has no owner.
+
+### Operator: family requests
+Operator-only (`403 forbidden` for everyone else, reviewers included). The hidden reviewer family never
+appears and is `404 not_found`.
+- `GET /operator/families?status=pending|approved|declined` (default `pending`; other values `400`) →
+  `{families: [{id, name, status, createdAt, decidedAt, creator: {id, name} | null, memberCount}]}`, newest first.
+- `POST /operator/families/:id/approve` and `POST /operator/families/:id/decline` → `204`. Only a
+  `pending` family can be decided, else `409 conflict`. Records `decided_at` / `decided_by`, logs
+  `family_approved` / `family_declined`, and sends the family's members a `family` event.
+
 ### Directory
 - `GET /users` → `{users: User[]}`: the caller, everyone who shares a family with them, and "former"
   chat partners (below). Nobody else is ever listed. Every device is included, revoked ones too
@@ -314,6 +373,8 @@ What happens, atomically:
   the admin proof cleared, so the directory still resolves them. Its id and identity key stay because devices, chats, resets and the
   audit log reference them and other members' devices still verify old certificates and resets with
   them. Invites made out to them are renamed; their unused reset links and the invites they made expire.
+- **Passed on:** each family they own goes to its longest-serving other live admin, or to no owner
+  ("Families"); its members get a `family` event.
 - **Logged:** an `events` row `account_deleted {by: "self"|"admin"}` with the user id and who did it.
 
 Afterwards members get `chat {chatId}` per chat, `device {revoked: true}` per device,
@@ -390,7 +451,17 @@ Byte strings (`str` = u16be length ‖ UTF-8, keys raw 32 bytes, `u64` = two big
      that, the device adds an admin to a family only if their `families[].adminProof` is a valid
      promotion for that family: a v2 proof, or a v1 proof in family 1 only. The proof must be signed
      with the current key of a trusted admin of that family. An admin the server stops listing for a
-     family is unpinned there, and needs a fresh proof to be trusted again. A family the device has
+     family is unpinned there, and needs a fresh proof to be trusted again: the device records the
+     `sig` of the valid proof it last saw for them in that family as revoked (and, while they stay
+     pinned, any earlier proof a different one replaces), and a revoked `(familyId, userId, sig)`
+     never adds that admin again. Ed25519 signatures are deterministic, so the same promoter
+     promoting them again makes the same, revoked proof: on a device that saw the demotion they stay
+     untrusted (fails safe: their resets get banners only); a proof from a different trusted admin
+     trusts them again. Revoked proofs aren't part of the pairing handover. Only proofs this device has seen are revoked: a
+     proof it never saw can still re-trust a demoted admin, whether it predates the device's first
+     sight of them, comes from another signer, is on a device upgraded from schema 8, or is on a newly
+     paired device. Closing that needs a protocol change, such as a counter in the promotion statement,
+     which is planned for later. A family the device has
      seen keeps its pins frozen when the server stops listing it (the user left, or the server
      omits it or the user's whole entry): they don't count meanwhile, and if the family is listed
      again they are the starting point, so only never-seen families are trusted on first sight.
@@ -549,6 +620,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 | `{type:"media_expired", chatId, keys:[...]}` | those media keys were evicted; show "media expired" |
 | `{type:"reset", userId, resetId}` | an account was reset, claimed or recovered (to everyone sharing a family with them): `GET /users` and check it |
 | `{type:"account_deleted", userId}` | that account was deleted (to everyone who shared a family with them): `GET /users` ("Deleting an account") |
+| `{type:"family", familyId}` | a family you are in changed: it was renamed or approved, or someone joined, left or was removed, or became or stopped being an admin. Refetch `GET /families` and `GET /users` (the directory carries each family's admins and proofs) |
 | `{type:"profile", userId}` | that user changed their name or profile photo (to everyone sharing a family with them): `GET /users` ("Profile: name and photo") |
 | close code 4001 | this device was revoked |
 | close code 4002 | no ping for 90 s (a half-open socket); reconnect |

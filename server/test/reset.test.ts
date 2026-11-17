@@ -87,7 +87,16 @@ describe("POST /api/admin/users/:id/reset", () => {
     const admin = await insertUserWithDevice({ families: [{ id: f, role: "admin" }] });
     const target = await insertUserWithDevice({ name: "Cousin", families: [{ id: f }] });
     const r = await signedReset(admin, { userId: target.userId, identityPub: target.keys.identityPub });
-    expect((await postReset(admin, target.userId, r.body)).status).toBe(404);
+    expect((await postReset(admin, target.userId, r.body)).status).toBe(403);
+  });
+
+  it("an admin of the hidden family can't reset", async () => {
+    const f = await insertFamily({ name: "Cousins" });
+    const rev = await insertUserWithDevice({ reviewer: true, families: [{ id: 2 }, { id: f, role: "admin" }] });
+    await env.DB.prepare("UPDATE family_members SET role = 'admin' WHERE family_id = 2 AND user_id = ?").bind(rev.userId).run();
+    const target = await insertUserWithDevice({ reviewer: true, name: "Rev" });
+    const r = await signedReset(rev, { userId: target.userId, identityPub: target.keys.identityPub });
+    expect((await postReset(rev, target.userId, r.body)).status).toBe(404);
   });
 
   it("family-1 admin still resets family-1 members (familyId 1)", async () => {

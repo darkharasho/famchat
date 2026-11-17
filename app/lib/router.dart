@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart' show MaterialPage, MediaQuery;
 
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
+import 'screens/families_screen.dart';
 import 'screens/family_screen.dart';
 import 'screens/recover_screen.dart';
 import 'screens/recovery_code_screen.dart';
@@ -16,6 +17,7 @@ import 'screens/invite_screen.dart';
 import 'screens/join_screen.dart';
 import 'screens/loading_screen.dart';
 import 'screens/pair_screen.dart';
+import 'screens/operator_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screen.dart';
 import 'screens/spikes_screen.dart';
@@ -52,13 +54,16 @@ String? sessionRedirect(SessionState s, String location, {PendingLocation? pendi
         if (back == null) return '/';
         return sessionRedirect(s, back) ?? back;
       }
-      if ((location == '/settings/invite' || location == '/settings/storage' || location.startsWith('/settings/family')) &&
+      if ((location == '/settings/storage' || location == '/settings/family' ||
+              location.startsWith('/settings/family/')) &&
           !session.isAdmin) {
         return '/';
       }
       return null;
   }
 }
+
+int _familyId(GoRouterState state) => int.tryParse(state.pathParameters['id']!) ?? 0;
 
 final routerProvider = Provider<GoRouter>((ref) {
   final changes = ValueNotifier<SessionState>(ref.read(sessionProvider));
@@ -113,13 +118,28 @@ final routerProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => const DevicesScreen(),
                 routes: [GoRoute(path: 'add', builder: (context, state) => const AddDeviceScreen())],
               ),
-              GoRoute(path: 'invite', builder: (context, state) => const InviteScreen()),
               GoRoute(path: 'storage', builder: (context, state) => const StorageScreen()),
               GoRoute(
-                path: 'family',
-                builder: (context, state) => const FamilyScreen(),
-                routes: [GoRoute(path: 'recovery-code', builder: (context, state) => const RecoveryCodeScreen())],
+                path: 'families',
+                builder: (context, state) => const FamiliesScreen(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    // An id that isn't a number is no family of mine: the screen says not found.
+                    builder: (context, state) => FamilyScreen(familyId: _familyId(state)),
+                    routes: [
+                      GoRoute(path: 'invite', builder: (context, state) => InviteScreen(familyId: _familyId(state))),
+                      GoRoute(
+                        path: 'recovery-code',
+                        builder: (context, state) => RecoveryCodeScreen(familyId: _familyId(state)),
+                      ),
+                    ],
+                  ),
+                ],
               ),
+              GoRoute(path: 'operator', builder: (context, state) => const OperatorScreen()),
+              // The one-family screen's old address (the admin setup banner, old links).
+              GoRoute(path: 'family', redirect: (context, state) => '/settings/families/1'),
             ],
           ),
         ],

@@ -28,6 +28,9 @@ class LocalChats extends Table {
   /// Text typed here and not sent yet (this device only), or null.
   TextColumn get draft => text().nullable()();
 
+  /// A group's family (see [ChatDto.familyId]); null for direct chats.
+  IntColumn get familyId => integer().nullable()();
+
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   IntColumn get syncedSeq => integer().withDefault(const Constant(0))();
 
@@ -116,6 +119,9 @@ class LocalUsers extends Table {
   /// Their profile photo's key (see [UserDto.avatarKey]), or null.
   TextColumn get avatarKey => text().nullable()();
 
+  /// JSON list of the ids of the families they share with this user, ascending; empty for former users.
+  TextColumn get familyIds => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -178,8 +184,25 @@ class LocalFamilyAdmins extends Table {
   IntColumn get familyId => integer()();
   TextColumn get userId => text()();
 
+  /// The `sig` of their valid promotion proof for this family as last seen, or null: revoked (see
+  /// [LocalRevokedProofs]) when the pin is dropped or a different proof replaces it.
+  TextColumn get proofSig => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {familyId, userId};
+}
+
+/// Promotion proofs that never make their user an admin of their family again on this device: the
+/// last seen proof of an admin the directory unpinned (demoted, removed or gone), and any proof a
+/// pinned admin's newer one replaced. Becoming trusted again needs a different, fresh proof.
+@DataClassName('RevokedProofRow')
+class LocalRevokedProofs extends Table {
+  IntColumn get familyId => integer()();
+  TextColumn get userId => text()();
+  TextColumn get sig => text()();
+
+  @override
+  Set<Column> get primaryKey => {familyId, userId, sig};
 }
 
 @DataClassName('MetaRow')
@@ -222,13 +245,14 @@ class ChatListItem {
   LocalResets,
   LocalFamilies,
   LocalFamilyAdmins,
+  LocalRevokedProofs,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -254,6 +278,14 @@ class ChatDb extends _$ChatDb {
               await customStatement(
                   'INSERT OR IGNORE INTO local_family_admins (family_id, user_id) SELECT 1, id FROM local_users WHERE pinned_admin = 1');
             }
+          }
+          if (from < 9) {
+            // Filled in by the next chat sync and directory refresh.
+            await m.addColumn(localChats, localChats.familyId);
+            await m.addColumn(localUsers, localUsers.familyIds);
+            // Made with its proof column above when coming from before schema 8.
+            if (from == 8) await m.addColumn(localFamilyAdmins, localFamilyAdmins.proofSig);
+            await m.createTable(localRevokedProofs);
           }
         },
       );
@@ -302,6 +334,7 @@ class ChatDb extends _$ChatDb {
             lastMessageAt: Value(c.lastMessageAt),
             createdAt: c.createdAt,
             mutedUntil: Value(c.mutedUntil),
+            familyId: Value(c.familyId),
           ),
           onConflict: DoUpdate((_) => LocalChatsCompanion(
                 kind: Value(c.kind),
@@ -312,6 +345,7 @@ class ChatDb extends _$ChatDb {
                 lastSeq: Value(c.lastSeq),
                 lastMessageAt: Value(c.lastMessageAt),
                 mutedUntil: Value(c.mutedUntil),
+                familyId: Value(c.familyId),
               )),
         );
         await (delete(localMembers)..where((m) => m.chatId.equals(c.id))).go();
@@ -560,19 +594,37 @@ class ChatDb extends _$ChatDb {
 
   /// Replaces the pins of the families in [pins] and marks them seen. Other families keep their
   /// seen mark and their pins, frozen: a family is never seen for the first time twice.
-  Future<void> updateFamilyPins(Map<int, Set<String>> pins) => transaction(() async {
+  /// [proofs]: per family, the sig of each pinned admin's valid promotion proof listed now; a pin
+  /// with none listed keeps the one last seen. In those families, a dropped pin's last seen proof
+  /// is revoked, and so is one a different proof replaces.
+  Future<void> updateFamilyPins(Map<int, Set<String>> pins, {Map<int, Map<String, String>> proofs = const {}}) =>
+      transaction(() async {
+        final before = await (select(localFamilyAdmins)..where((a) => a.familyId.isIn(pins.keys))).get();
+        final last = {for (final a in before) (a.familyId, a.userId): a.proofSig};
+        final revoked = <RevokedProofRow>[
+          for (final a in before)
+            if (a.proofSig case final sig?)
+              if (!pins[a.familyId]!.contains(a.userId) || (proofs[a.familyId]?[a.userId] ?? sig) != sig)
+                RevokedProofRow(familyId: a.familyId, userId: a.userId, sig: sig),
+        ];
         await (delete(localFamilyAdmins)..where((a) => a.familyId.isIn(pins.keys))).go();
         await batch((b) {
+          b.insertAll(localRevokedProofs, revoked, mode: InsertMode.insertOrIgnore);
           b.insertAllOnConflictUpdate(localFamilies, [for (final id in pins.keys) FamilyRow(id: id)]);
           b.insertAll(localFamilyAdmins, [
             for (final e in pins.entries)
-              for (final u in e.value) FamilyAdminRow(familyId: e.key, userId: u),
+              for (final u in e.value)
+                FamilyAdminRow(familyId: e.key, userId: u, proofSig: proofs[e.key]?[u] ?? last[(e.key, u)]),
           ]);
         });
       });
 
-  /// Replaces every family's pins with [pins], from a trusted device's pairing handover: a family
-  /// absent from it is no longer seen.
+  /// Every revoked promotion proof, as (familyId, userId, sig).
+  Future<Set<(int, String, String)>> revokedProofs() async =>
+      {for (final r in await select(localRevokedProofs).get()) (r.familyId, r.userId, r.sig)};
+
+  /// Replaces every family's pins with [pins], for the pairing handover only (from a trusted
+  /// device): a family absent from it is no longer seen. Revoked proofs stay.
   Future<void> replaceFamilyPins(Map<int, Set<String>> pins) => transaction(() async {
         await delete(localFamilyAdmins).go();
         await delete(localFamilies).go();

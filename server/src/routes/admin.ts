@@ -38,20 +38,26 @@ export const NEVER = 253_402_300_799_999;
 
 /**
  * Bootstrap invites (createdBy = null) are only inserted while family #1 has no live member and no
- * live operator exists, in the same statement. Reviewer accounts don't count. Invites are for family #1.
+ * live operator exists, in the same statement. Reviewer accounts don't count. Invites default to family #1.
  */
-async function createInvite(env: Env, inviteName: string, makeAdmin: boolean, createdBy: string | null) {
+export async function createInvite(
+  env: Env,
+  inviteName: string,
+  makeAdmin: boolean,
+  createdBy: string | null,
+  familyId = FAMILY_ONE,
+) {
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
   const res = await env.DB.prepare(
     `INSERT INTO invites (token_hash, name, make_admin, created_by, created_at, expires_at, family_id)
-     SELECT ?, ?, ?, ?, ?, ?, ${FAMILY_ONE} WHERE ? IS NOT NULL
+     SELECT ?, ?, ?, ?, ?, ?, ? WHERE ? IS NOT NULL
        OR (NOT EXISTS (SELECT 1 FROM family_members m JOIN users u ON u.id = m.user_id
                        WHERE m.family_id = ${FAMILY_ONE} AND u.deleted_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM users WHERE operator = 1 AND deleted_at IS NULL))`,
   )
-    .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, createdBy)
+    .bind(await sha256Hex(token), inviteName, makeAdmin ? 1 : 0, createdBy, now, expiresAt, familyId, createdBy)
     .run();
   if (res.meta.changes !== 1) throw new ApiError("already_bootstrapped");
   return { inviteToken: token, inviteUrl: inviteUrl(env, token), expiresAt };
@@ -157,12 +163,12 @@ admin.post("/users/:id/reset", requireAuth, requireAnyAdmin, async (c) => {
 
   const [target, signer] = await Promise.all([
     // The authorizing family: the lowest-numbered approved one where the caller is admin and the
-    // target a member (reviewers sit only in the hidden reviewer family, which has no admins).
+    // target a member (never the hidden reviewer family).
     db.prepare(
       `SELECT u.name, u.identity_pub, MIN(am.family_id) AS family_id FROM users u
        JOIN family_members tm ON tm.user_id = u.id
        JOIN family_members am ON am.family_id = tm.family_id AND am.user_id = ? AND am.role = 'admin'
-       JOIN families f ON f.id = tm.family_id AND f.status = 'approved'
+       JOIN families f ON f.id = tm.family_id AND f.status = 'approved' AND f.hidden = 0
        WHERE u.id = ? AND u.deleted_at IS NULL
        GROUP BY u.id`,
     ).bind(adminId, userId)

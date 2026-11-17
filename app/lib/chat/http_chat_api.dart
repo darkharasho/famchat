@@ -71,11 +71,13 @@ class HttpChatApi implements ChatApi {
     String? title,
     required List<String> userIds,
     required List<ChatKeyWrap> wraps,
+    int? familyId,
   }) async {
     final j = (await _call('POST', '/chats', {
       'id': id,
       'kind': kind,
       if (kind == 'direct') 'userId': userIds.single else ...{'title': title, 'userIds': userIds},
+      'familyId': ?familyId,
       'wraps': [for (final w in wraps) w.toJson()],
     }))!;
     return (chat: ChatDto.fromJson(j['chat'] as Map<String, Object?>), created: j['created'] == true);

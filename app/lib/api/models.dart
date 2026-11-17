@@ -3,9 +3,13 @@
 /// The server answered with an error status. [code] is the `{error}` value, `unknown` when the
 /// body had none, or `bad_response` when a success body didn't have the expected shape.
 class ApiException implements Exception {
-  const ApiException(this.status, this.code);
+  const ApiException(this.status, this.code, {this.familyId, this.familyName});
   final int status;
   final String code;
+
+  /// For `last_admin`: the family whose only admin can't leave (or delete their account) yet.
+  final int? familyId;
+  final String? familyName;
 
   @override
   String toString() => 'ApiException($status, $code)';
@@ -193,4 +197,68 @@ class Invite {
   const Invite({required this.inviteToken, required this.inviteUrl, required this.expiresAt});
   final String inviteToken, inviteUrl;
   final DateTime expiresAt;
+}
+
+/// `GET /families`: one of this user's families (docs/protocol.md "Families").
+class Family {
+  const Family({
+    required this.id,
+    required this.name,
+    required this.status,
+    required this.admin,
+    required this.owner,
+    required this.memberCount,
+    this.ownerId,
+  });
+  final int id;
+  final String name;
+
+  /// `pending`, `approved` or `declined`. Only an approved family can invite or be joined.
+  final String status;
+
+  /// This user is an admin of it.
+  final bool admin;
+
+  /// This user created it (or it passed to them).
+  final bool owner;
+
+  /// The owner's user id; null when the family has none.
+  final String? ownerId;
+
+  /// Live members.
+  final int memberCount;
+}
+
+/// `GET /operator/families`: a family request as the operator sees it.
+class FamilyRequest {
+  const FamilyRequest({
+    required this.id,
+    required this.name,
+    required this.status,
+    required this.createdAt,
+    required this.creatorName,
+    required this.memberCount,
+  });
+  final int id;
+  final String name, status;
+  final DateTime createdAt;
+
+  /// Null once the creator's account is gone.
+  final String? creatorName;
+  final int memberCount;
+}
+
+/// `POST /families/invite-lookup`: the family a member invite is for.
+class InviteLookup {
+  const InviteLookup({
+    required this.familyId,
+    required this.familyName,
+    required this.invitedName,
+    required this.alreadyMember,
+  });
+  final int familyId;
+  final String familyName, invitedName;
+
+  /// This user is already in the family (joining would be `409 conflict`).
+  final bool alreadyMember;
 }

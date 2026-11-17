@@ -226,6 +226,7 @@ Future<void> installHandover(ChatDb db, PairBundle b) async {
             trustedIdentityPub: t.trustedIdentityPub,
             knownIdentityPubs: jsonEncode(known),
             pinnedAdmin: admin,
+            familyIds: '[]',
           ));
     }
     if (pins != null) await db.replaceFamilyPins(pins);

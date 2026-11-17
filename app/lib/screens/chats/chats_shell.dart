@@ -40,6 +40,11 @@ class ChatsShell extends ConsumerWidget {
     ref.watch(chatSyncProvider); // starts the chat engine
     ref.watch(mediaServiceProvider); // and the media pipeline (its outbox gate)
     ref.watch(notificationsProvider); // push registration, desktop notifications
+    ref.listen(familyApprovalsProvider, (_, next) {
+      if (next case AsyncData(:final value)) {
+        ref.read(rootMessengerKeyProvider).currentState?.showSnackBar(SnackBar(content: Text('${value.name} was approved')));
+      }
+    });
     final id = chatId;
     // Cmd on Apple platforms (where Ctrl+K and Ctrl+N edit text), Ctrl elsewhere.
     final apple = {TargetPlatform.macOS, TargetPlatform.iOS}.contains(defaultTargetPlatform);
@@ -133,7 +138,7 @@ class _ListPane extends ConsumerWidget {
             text: 'Save your admin recovery code, and consider making a second admin.',
             actions: [
               TextButton(
-                onPressed: () => context.go('/settings/family'),
+                onPressed: () => context.go('/settings/families/1'),
                 style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer),
                 child: const Text('Set up'),
               ),

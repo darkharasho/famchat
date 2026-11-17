@@ -89,6 +89,9 @@ class _Chat {
   final int createdAt;
   int currentEpoch = 1, lastSeq = 0;
   int? lastMessageAt;
+
+  /// A group's family (the server's default, family 1, unless a test moves it); null for direct chats.
+  int? familyId;
   final members = <String, _Member>{};
   final epochs = <int>{};
   final messages = <MessageDto>[];
@@ -104,6 +107,7 @@ class _Chat {
         lastMessageAt: lastMessageAt,
         createdAt: createdAt,
         mutedUntil: members[viewer]?.mutedUntil,
+        familyId: familyId,
         members: [
           for (final e in members.entries)
             MemberDto(userId: e.key, joinedSeq: e.value.joinedSeq, lastReadSeq: e.value.lastReadSeq),
@@ -246,12 +250,24 @@ class FakeChatBackend {
   /// The server lists [userId] in another family (a real one, or a lie).
   void addFamilyRole(String userId, FamilyRoleDto role) => _users[userId]!.otherFamilies.add(role);
 
+  /// The `familyId` each `POST /chats` carried, by chat id (null when omitted).
+  final requestedFamily = <String, int?>{};
+
   /// The server stops listing [userId] in [familyId] (they left, or were removed).
   void removeFamilyRole(String userId, int familyId) {
     final u = _users[userId]!;
     if (familyId == 1) u.inFamily1 = false;
     u.otherFamilies.removeWhere((f) => f.id == familyId);
   }
+
+  /// Moves group [chatId] to [familyId] and tells its members (`chat`), as a test stand-in.
+  void setChatFamily(String chatId, int familyId) {
+    final c = _chats[chatId]!..familyId = familyId;
+    _notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+  }
+
+  /// Sends `{type: "family", familyId}` to [userIds], as the server does when a family changes.
+  void familyEvent(Iterable<String> userIds, int familyId) => _notify(userIds, {'type': 'family', 'familyId': familyId});
 
   /// The server lists [userId] in family 1 again.
   void addToFamily1(String userId) => _users[userId]!.inFamily1 = true;
@@ -630,6 +646,7 @@ class FakeChatApi implements ChatApi {
     String? title,
     required List<String> userIds,
     required List<ChatKeyWrap> wraps,
+    int? familyId,
   }) =>
       _run('POST /chats', () {
         final existing = b._chats[id];
@@ -650,8 +667,11 @@ class FakeChatApi implements ChatApi {
         if (!userIds.every(b._users.containsKey)) b._err('invalid_request');
         final members = [userId, ...userIds.toSet()];
         b._coverage(wraps, id, 1, deviceId, b._liveDevices(members));
+        b.requestedFamily[id] = familyId;
         final t = b.now();
-        final c = _Chat(id, kind, kind == 'group' ? title!.trim() : null, userId, directKey, t)..epochs.add(1);
+        final c = _Chat(id, kind, kind == 'group' ? title!.trim() : null, userId, directKey, t)
+          ..epochs.add(1)
+          ..familyId = kind == 'group' ? (familyId ?? 1) : null;
         for (final u in members) {
           c.members[u] = _Member(0, t);
         }

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../api/models.dart' show Family;
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../sign_out.dart' show apiErrorMessage;
@@ -125,6 +126,11 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     final title = chatTitle(chat, members, users, me);
     final sorted = [...members]..sort((a, b) => (users[a.userId]?.name ?? '').compareTo(users[b.userId]?.name ?? ''));
     final s = theme.colorScheme;
+    // Only people in two or more families get told which one a group belongs to.
+    final families = ref.watch(myFamiliesProvider).value ?? const <Family>[];
+    final familyName = group && families.length > 1
+        ? families.where((f) => f.id == chat.familyId).map((f) => f.name).firstOrNull
+        : null;
     return Scaffold(
       appBar: AppBar(
         title: Text(group ? 'Group info' : 'Chat info'),
@@ -148,6 +154,13 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
               padding: const EdgeInsets.symmetric(horizontal: Space.xl),
               child: Text(title, textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
             ),
+            if (familyName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: Space.xs, left: Space.xl, right: Space.xl),
+                child: Text('Family: $familyName',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
+              ),
             const SizedBox(height: Space.xl),
             SettingsGroup(children: [
               ListTile(
