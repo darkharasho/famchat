@@ -89,6 +89,13 @@ A deleted message shows as "This message was deleted" and loses its reactions; r
 chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
+### GIFs
+`{"kind":"gif", "slug", "title", "url", "width", "height"}`: a GIF from KLIPY. KLIPY's terms require
+apps to call its API and load its media directly (no proxying or re-hosting), so the app searches
+`https://api.klipy.com/api/v1/<key>/gifs/{trending,search}` itself (with `customer_id` = a hash of the
+user id) and receivers load `url` from KLIPY. Receivers accept only `https` URLs on `klipy.com` or its
+subdomains. `GET /me` returns `gifKey` (the Worker's `KLIPY_APP_KEY` secret, or null: no GIF button).
+
 Clients keep unknown kinds (whole body) and show them as unsupported.
 
 ### Media blobs

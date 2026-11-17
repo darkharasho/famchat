@@ -11,6 +11,8 @@ export interface Env {
   PUSH_QUEUE?: Queue<PushJob>;
   /** The Firebase service-account key (JSON). Without it push is off. */
   FCM_SERVICE_ACCOUNT?: string;
+  /** KLIPY app key for GIF search (docs/protocol.md "GIFs"); unset hides GIFs in the app. */
+  KLIPY_APP_KEY?: string;
 }
 
 export interface AppVars {

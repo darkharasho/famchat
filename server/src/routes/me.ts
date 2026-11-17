@@ -23,6 +23,8 @@ me.get("/", async (c) => {
     recoveryCodeSet: row.has_recovery === 1,
     // A reviewer account (docs/protocol.md "Reviewer accounts").
     reviewer: c.get("reviewer"),
+    // KLIPY's terms have apps call it directly, so the app needs the key (null: GIFs are off).
+    gifKey: c.env.KLIPY_APP_KEY || null,
   });
 });
 

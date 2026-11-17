@@ -1,3 +1,5 @@
+import 'package:famchat/gifs/klipy.dart';
+import 'package:famchat/gifs/providers.dart';
 import 'dart:async';
 import 'package:material_ui/material_ui.dart' show Size, SizedBox;
 import 'package:meta/meta.dart';
@@ -84,6 +86,7 @@ Future<ScriptedHubLink> pumpChatApp(
   PhotoPicker? picker,
   FakeRecorders? recorders,
   FakeVoicePlayer? player,
+  KlipyClient? gifs,
 }) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
@@ -106,6 +109,8 @@ Future<ScriptedHubLink> pumpChatApp(
       // No microphone or speaker in tests: fakes, unless a test brings its own.
       voiceRecorderFactoryProvider.overrideWithValue((recorders ?? FakeRecorders()).call),
       voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),
+      // No GIF search unless a test brings a client (the real one needs the server's key).
+      gifClientProvider.overrideWith((ref) async => gifs),
     ],
     child: const FamChatApp(),
   ));

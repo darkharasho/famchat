@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/plaintext.dart';
+import '../../gifs/gif_picker.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../../theme/app_theme.dart';
@@ -262,6 +263,18 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
+  /// The GIF in this message, or null.
+  GifBody? get _gif {
+    final m = widget.message;
+    if (widget.deleted || m.kind != 'gif' || m.body == null) return null;
+    try {
+      final p = Plaintext.decode(utf8.encode(m.body!));
+      return p is GifBody ? p : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// The voice clip in this message, or null.
   VoiceBody? get _voice {
     final m = widget.message;
@@ -275,7 +288,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   bool get _reactable =>
-      !widget.deleted && const {'text', 'photo', 'voice'}.contains(widget.message.kind) && widget.message.seq != null;
+      !widget.deleted && const {'text', 'photo', 'voice', 'gif'}.contains(widget.message.kind) && widget.message.seq != null;
 
   BorderRadius get _radius {
     const big = Radius.circular(Radii.lg), small = Radius.circular(Radii.xs);
@@ -294,7 +307,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     final m = widget.message;
     final photo = _photo;
     final voice = _voice;
-    final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null);
+    final gif = _gif;
+    final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null);
     final mine = widget.mine;
     final bg = mine ? t.mineBubble : t.theirsBubble;
     final fg = mine ? t.onMineBubble : t.onTheirsBubble;
@@ -330,6 +344,11 @@ class _MessageBubbleState extends State<MessageBubble> {
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
         if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
       ]);
+    } else if (gif != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        GifView(body: gif),
+        if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+      ]);
     } else if (voice != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         VoiceBubble(body: voice, messageId: m.id, mine: mine),
@@ -363,7 +382,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       onSecondaryTapUp: _hasActions && hoverReactions ? (d) => _menuAt(d.globalPosition) : null,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
-        padding: photo != null
+        padding: photo != null || gif != null
             ? const EdgeInsets.fromLTRB(4, 4, 4, 6)
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
@@ -374,7 +393,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (widget.senderName != null)
             Padding(
-              padding: photo != null ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
+              padding: photo != null || gif != null ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
               child: Text(
                 widget.senderName!,
                 style: theme.textTheme.labelMedium?.copyWith(color: fg, fontWeight: FontWeight.w700),
@@ -382,7 +401,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           if (quote != null && !widget.deleted)
             Padding(
-              padding: photo != null ? const EdgeInsets.fromLTRB(4, 2, 4, 6) : const EdgeInsets.only(bottom: 6),
+              padding: photo != null || gif != null ? const EdgeInsets.fromLTRB(4, 2, 4, 6) : const EdgeInsets.only(bottom: 6),
               child: _Quote(quote: quote, fg: fg, meta: meta, onTap: widget.onOpenQuote),
             ),
           content,

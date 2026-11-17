@@ -23,7 +23,7 @@ MessageRow text(String id, String chatId, int seq, String body, {String sender =
 MessageRow change(String id, String chatId, int seq, String kind, String target, {String? newText, String sender = 'bob'}) =>
     text(id, chatId, seq, '', sender: sender).copyWith(
       kind: kind,
-      body: Value(jsonEncode({'kind': kind, 'target': target, if (newText != null) 'text': newText})),
+      body: Value(jsonEncode({'kind': kind, 'target': target, 'text': ?newText})),
       targetId: Value(target),
     );
 

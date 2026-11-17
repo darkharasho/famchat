@@ -50,20 +50,6 @@ void main() {
     bob = await backend.addUser('Bob');
   });
 
-  Future<ScriptedHubLink> open(WidgetTester tester, {List<MessageRow> messages = const []}) async {
-    setWindow(tester, const Size(400, 800));
-    final hub = await pumpChatApp(tester, alice);
-    await inApp(tester, () async {
-      await alice.db.upsertChat(direct(alice.userId, bob.userId));
-      for (final m in messages) {
-        await alice.db.insertMessageIfAbsent(m);
-      }
-    });
-    ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
-    await settle(tester);
-    return hub;
-  }
-
   Future<GoRouter> openSearch(WidgetTester tester, String path, List<MessageRow> messages) async {
     setWindow(tester, const Size(400, 800));
     await pumpChatApp(tester, alice);

@@ -13,6 +13,8 @@ import '../../chat/emoji/shortcodes.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
+import '../../gifs/gif_picker.dart';
+import '../../gifs/providers.dart';
 import '../../media/photo.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
@@ -343,6 +345,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _snack("That message isn't available.");
   }
 
+  Future<void> _pickGif() async {
+    final client = ref.read(gifClientProvider).value;
+    final sync = ref.read(chatSyncProvider);
+    if (client == null || sync == null) return;
+    _closePicker();
+    if (_emojiPopover.isShowing) _emojiPopover.hide();
+    final picked = await showGifPicker(context, client);
+    if (picked == null) return;
+    await sync.enqueueMessage(widget.chatId, picked.body);
+    unawaited(client.share(picked.slug));
+  }
+
   /// Photos being compressed and encrypted (before they appear in the list).
   int _preparing = 0;
 
@@ -412,6 +426,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         style: IconButton.styleFrom(fixedSize: const Size.square(48)),
         onPressed: _attach,
       ),
+      if (ref.watch(gifClientProvider).value != null && _editing == null)
+        IconButton(
+          tooltip: 'GIF',
+          icon: const Icon(Icons.gif_box_outlined),
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          onPressed: _pickGif,
+        ),
       Expanded(
         child: CallbackShortcuts(
           bindings: _suggesting
@@ -816,7 +837,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 class _ComposeBanner extends StatelessWidget {
