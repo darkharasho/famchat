@@ -268,6 +268,15 @@ never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 charact
   admin power). Others get `403 forbidden`. Members get a `family` event.
 - `POST /families/:id/admins/:userId`: promotes a member (see "Account resets", line 431); also reviewer-blocked.
 
+### Operator: family requests
+Operator-only (`403 forbidden` for everyone else, reviewers included). The hidden reviewer family never
+appears and is `404 not_found`.
+- `GET /operator/families?status=pending|approved|declined` (default `pending`; other values `400`) →
+  `{families: [{id, name, status, createdAt, decidedAt, creator: {id, name} | null, memberCount}]}`, newest first.
+- `POST /operator/families/:id/approve` and `POST /operator/families/:id/decline` → `204`. Only a
+  `pending` family can be decided, else `409 conflict`. Records `decided_at` / `decided_by`, logs
+  `family_approved` / `family_declined`, and sends the family's members a `family` event.
+
 ### Directory
 - `GET /users` → `{users: User[]}`: the caller, everyone who shares a family with them, and "former"
   chat partners (below). Nobody else is ever listed. Every device is included, revoked ones too
