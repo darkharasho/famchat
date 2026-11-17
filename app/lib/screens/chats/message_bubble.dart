@@ -15,6 +15,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/link_text.dart';
 import 'chat_list.dart' show clockTime;
 import 'photo_view.dart';
+import 'link_preview_card.dart';
 import 'video_view.dart';
 import 'voice_bubble.dart';
 
@@ -80,6 +81,7 @@ class MessageBubble extends StatefulWidget {
     this.avatarSpace = 0,
     this.shownText,
     this.mentionNames = const [],
+    this.linkPreview,
     this.edited = false,
     this.deleted = false,
     this.quote,
@@ -123,6 +125,9 @@ class MessageBubble extends StatefulWidget {
 
   /// Names of the people this text @mentions (bold in it).
   final List<String> mentionNames;
+
+  /// The card for the text's link, if the sender made one.
+  final LinkPreview? linkPreview;
 
   /// Shows "edited" by the time; [deleted] shows the message as deleted.
   final bool edited, deleted;
@@ -374,7 +379,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     ]);
 
     final showMeta = showTime || (widget.edited && !widget.deleted);
-    final Widget content;
+    Widget content;
     if (photo != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
@@ -415,6 +420,14 @@ class _MessageBubbleState extends State<MessageBubble> {
           if (showMeta) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
         ],
       );
+      final preview = special ? null : widget.linkPreview;
+      if (preview != null) {
+        content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          content,
+          const SizedBox(height: 6),
+          LinkPreviewCard(key: Key('link-preview-${m.id}'), preview: preview, fg: fg, meta: meta),
+        ]);
+      }
     }
     final quote = widget.quote;
 

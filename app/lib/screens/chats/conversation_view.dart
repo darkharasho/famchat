@@ -13,6 +13,8 @@ import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/forward.dart';
 import '../../chat/mentions.dart';
+import '../../chat/wire.dart' show FetchedPreview;
+import '../../widgets/link_text.dart' show splitLinks;
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../chat/reactions.dart';
@@ -32,6 +34,7 @@ import '../../widgets/typing_dots.dart';
 import 'chat_list.dart' show messageSnippet;
 import 'chats_shell.dart' show shortcutModifier;
 import 'emoji_input.dart';
+import 'link_preview_card.dart';
 import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
@@ -94,6 +97,50 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
 
+  /// The link being previewed, what the server found for it (null while loading or nothing), and
+  /// a link whose preview was removed (it stays off while that link is in the text).
+  String? _previewUrl, _dismissedPreviewUrl;
+  FetchedPreview? _preview;
+  Timer? _previewTimer;
+
+  /// The first web link in [text], if any.
+  static String? _firstLink(String text) {
+    for (final p in splitLinks(text)) {
+      if (p.uri != null) return p.uri.toString();
+    }
+    return null;
+  }
+
+  void _schedulePreview() {
+    _previewTimer?.cancel();
+    _previewTimer = Timer(const Duration(milliseconds: 500), _checkPreview);
+  }
+
+  Future<void> _checkPreview() async {
+    final url = _editing == null ? _firstLink(_text.text) : null;
+    if (url == null || url == _dismissedPreviewUrl) {
+      if (_previewUrl != null && mounted) setState(() => _previewUrl = _preview = null);
+      return;
+    }
+    if (url == _previewUrl) return;
+    setState(() {
+      _previewUrl = url;
+      _preview = null;
+    });
+    FetchedPreview? found;
+    try {
+      found = await ref.read(chatApiProvider).preview(url);
+    } catch (_) {
+      found = null; // offline or the site said no: the link just sends plain
+    }
+    if (mounted && _previewUrl == url) setState(() => _preview = found);
+  }
+
+  void _removePreview() => setState(() {
+        _dismissedPreviewUrl = _previewUrl;
+        _previewUrl = _preview = null;
+      });
+
   /// The draft set aside while editing a message, put back when the edit ends.
   String _stashedDraft = '';
 
@@ -142,6 +189,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (empty != _empty && mounted) setState(() => _empty = empty);
       _updateSuggestions();
       _scheduleDraftSave();
+      _schedulePreview();
     });
     unawaited(_loadDraft());
   }
@@ -272,6 +320,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       }
     }));
     _saveDraftNow();
+    _previewTimer?.cancel();
     _text.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -341,7 +390,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
       } else {
-        await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+        final preview = _preview;
+        final media = ref.read(mediaServiceProvider);
+        if (preview != null && media != null && _firstLink(text) == _previewUrl) {
+          await media.sendTextWithPreview(widget.chatId, text, preview,
+              replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+        } else {
+          await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+        }
+        _previewTimer?.cancel();
+        if (mounted) setState(() => _previewUrl = _preview = _dismissedPreviewUrl = null);
       }
       if (editing != null) {
         _endEdit();
@@ -791,6 +849,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
                 mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
+                linkPreview: changes.isDeleted(m.id) ? null : previewOf(m, changes.textOf(m)),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
@@ -983,6 +1042,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               child: SafeArea(
                 top: false,
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (_preview != null && _editing == null && !_recording.active)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
+                      child: ComposerPreview(preview: _preview!, onRemove: _removePreview),
+                    ),
                   if ((_replyTo != null || _editing != null) && !_recording.active)
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),

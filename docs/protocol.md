@@ -103,6 +103,19 @@ A deleted message shows as "This message was deleted" and loses its reactions; r
 chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
+### Link previews
+A text may carry a card for its first link, made by the sender:
+`{"kind":"text", "text":"look https://…", "preview": {"url", "title", "description"?, "siteName"?,
+"image"?: {"mediaKey", "key", "sha256", "width", "height"}}}`. The image is one encrypted `thumb`
+blob (its own media key, purpose `thumb`), uploaded before the message is sent, so receivers never
+contact the site. A preview that doesn't check out is dropped and the text shows as usual.
+
+- `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?}`,
+  or 404 when there's nothing to show. The app asks while a link is being typed. YouTube links use
+  YouTube's oEmbed endpoint; other pages their Open Graph tags (Amazon: its product image).
+  Only public http(s) hosts (no loopback, private or bare names); answers are cached for a day.
+  The server sees the URL, never the message.
+
 ### GIFs
 `{"kind":"gif", "slug", "title", "url", "width", "height"}`: a GIF from KLIPY. KLIPY's terms require
 apps to call its API and load its media directly (no proxying or re-hosting), so the app searches

@@ -3,6 +3,7 @@
 import 'dart:convert';
 
 import 'db/chat_db.dart';
+import 'plaintext.dart';
 
 /// Kinds that change another message instead of showing as one.
 const changeKinds = {'reaction', 'edit', 'delete'};
@@ -49,6 +50,18 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
 
 /// The id [m] replies to, or null.
 String? replyTargetOf(MessageRow m) => m.kind == 'text' ? _field(m, 'replyTo') : null;
+
+/// [m]'s link preview, while its text (after edits, [shownText]) still has that link.
+LinkPreview? previewOf(MessageRow m, String? shownText) {
+  if (m.kind != 'text' || m.body == null || shownText == null) return null;
+  try {
+    final p = Plaintext.decode(utf8.encode(m.body!));
+    final preview = p is TextBody ? p.preview : null;
+    return preview != null && shownText.contains(preview.url.replaceFirst(RegExp(r'/$'), '')) ? preview : null;
+  } on FormatException {
+    return null;
+  }
+}
 
 /// Whether [m] is a copy forwarded from another message.
 bool isForwarded(MessageRow m) {

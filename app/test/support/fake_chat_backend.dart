@@ -165,6 +165,9 @@ class FakeChatBackend {
 
   Uint8List? avatarOf(String userId) => _users[userId]!.avatar;
 
+  /// What GET /preview answers, by URL (anything else: nothing to show).
+  final previews = <String, FetchedPreview>{};
+
   /// Profile photo downloads, as "userId/key".
   final avatarDownloads = <String>[];
 
@@ -523,6 +526,9 @@ class FakeChatApi implements ChatApi {
 
   @override
   Future<String> setAvatar(Uint8List jpeg) => _run('PUT /me/avatar', () => b.setAvatar(userId, jpeg));
+
+  @override
+  Future<FetchedPreview?> preview(String url) => _run('GET /preview', () => b.previews[url]);
 
   @override
   Future<void> removeAvatar() => _run('DELETE /me/avatar', () => b.setAvatar(userId, null));

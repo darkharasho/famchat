@@ -9,6 +9,7 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/forward.dart';
 import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
+import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/media.dart';
 import 'package:famchat/media/media_db.dart';
@@ -175,6 +176,30 @@ void main() {
       );
       expect(await alice.rows(chatId), isEmpty);
     });
+  });
+
+  test('a text with a link preview: its image travels as an encrypted thumbnail', () async {
+    final (alice, bob, chatId) = await pair();
+    final id = await alice.media.sendTextWithPreview(
+      chatId,
+      'look https://shop.example/hose',
+      FetchedPreview(url: 'https://shop.example/hose', title: 'Hose', siteName: 'Shop', image: photoBytes(900, 4)),
+    );
+    await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent after the image uploads');
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    final t = Plaintext.decode(utf8.encode((await bob.row(id))!.body!)) as TextBody;
+    expect((t.text, t.preview!.title, t.preview!.siteName), ('look https://shop.example/hose', 'Hose', 'Shop'));
+    // FakeProcessor's thumbnail is the first 16 bytes.
+    expect(await bob.media.load(t.preview!.image!.ref), photoBytes(900, 4).sublist(0, 16));
+  });
+
+  test('a preview whose image does not decode still sends, without the image', () async {
+    final (alice, bob, chatId) = await pair();
+    final id = await alice.media.sendTextWithPreview(
+        chatId, 'https://x.io', FetchedPreview(url: 'https://x.io', title: 'X', image: Uint8List.fromList([0xff, 0x00, 1])));
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    final t = Plaintext.decode(utf8.encode((await bob.row(id))!.body!)) as TextBody;
+    expect((t.preview!.title, t.preview!.image), ('X', null));
   });
 
   group('forwarding', () {
