@@ -73,7 +73,7 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_libs_windows_video: ^1.0.11
   video_compress: ^3.1.4
-  receive_sharing_intent: ^1.9.0
+  receive_sharing_intent: 1.9.0 # exact: ios/ShareExtension/Vendor copies its iOS extension code
   desktop_drop: ^0.8.0
 
 dev_dependencies:
