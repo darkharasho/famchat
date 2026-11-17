@@ -5,5 +5,10 @@
 	<!-- Push notifications (FCM forwards to APNs). App Store export signs this as production. -->
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- Shared with the share extension (ShareExtension): what other apps share into FamChat. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.famchat.app</string>
+	</array>
 </dict>
 </plist>
