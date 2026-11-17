@@ -1,4 +1,5 @@
 import 'package:famchat/push/notification_settings.dart';
+import 'package:famchat/push/notifications.dart' show PushController;
 import 'package:famchat/push/preview_setting.dart';
 import 'package:famchat/push/providers.dart';
 import 'package:famchat/push/push_messaging.dart';
@@ -21,18 +22,35 @@ class FakePreviews extends PreviewsOnNotifier {
   }
 }
 
+class FakePushController extends PushController {
+  FakePushController()
+    : super(
+        messaging: FakeMessaging(),
+        register: (_, _) async {},
+        previewsOn: () async => false,
+        openRoute: (_) {},
+        isChatVisible: (_) => false,
+        showInApp: (_, _) {},
+        askNow: false,
+      );
+  final calls = <bool>[];
+  @override
+  Future<void> setPreviews(bool on) async => calls.add(on);
+}
+
 const switchKey = Key('settings-previews');
 
 Future<FakePreviews> pump(
   WidgetTester t, {
   PushMessaging? push,
   bool local = true,
+  PushController? controller,
 }) async {
   final previews = FakePreviews();
   final List<Override> overrides = [
     pushMessagingProvider.overrideWithValue(push),
     localNotifierProvider.overrideWithValue(local ? FakeNotifier() : null),
-    pushControllerProvider.overrideWithValue(null),
+    pushControllerProvider.overrideWithValue(controller),
     previewsOnProvider.overrideWith(() => previews),
   ];
   await t.pumpWidget(
@@ -93,4 +111,22 @@ void main() {
     expect(previews.sets, [true]);
     expect(t.widget<SwitchListTile>(find.byKey(switchKey)).value, isTrue);
   });
+
+  testWidgets(
+    'on Android, toggling also tells the server through the push controller',
+    (t) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final controller = FakePushController();
+      final previews = await pump(
+        t,
+        push: FakeMessaging(),
+        local: false,
+        controller: controller,
+      );
+      await t.tap(find.byKey(switchKey));
+      await t.pump();
+      expect(previews.sets, [true]);
+      expect(controller.calls, [true]);
+    },
+  );
 }

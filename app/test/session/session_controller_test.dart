@@ -168,9 +168,11 @@ void main() {
     final c = make();
     await settledSession(c);
     await c.read(sessionProvider.notifier).join(token: server.addInvite(), deviceName: 'Pixel');
-    await writePreviewsOn(true);
+    await c.read(previewsOnProvider.notifier).set(true);
+    expect(await c.read(previewsOnProvider.future), isTrue);
     await c.read(sessionProvider.notifier).signOut();
     expect(await readPreviewsOn(), isFalse);
+    expect(await c.read(previewsOnProvider.future), isFalse);
   });
 
   test('sign out while offline still clears storage', () async {

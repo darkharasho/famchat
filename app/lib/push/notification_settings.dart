@@ -33,8 +33,9 @@ class NotificationSettingsGroup extends ConsumerWidget {
   /// Stores the value, then (Android, where push is set up) tells the server. Offline, the stored
   /// value stands and the next registration carries it.
   Future<void> _setPreviews(WidgetRef ref, bool on) async {
+    final push = ref.read(pushControllerProvider);
     await ref.read(previewsOnProvider.notifier).set(on);
-    await ref.read(pushControllerProvider)?.setPreviews(on);
+    await push?.setPreviews(on);
   }
 
   @override

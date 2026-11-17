@@ -358,6 +358,8 @@ class SessionController extends Notifier<SessionState> {
         } catch (_) {
           // Best effort: the server resets it when the token is cleared.
         }
+        // The switch must not keep showing the old value for the next sign-in.
+        if (ref.mounted) ref.invalidate(previewsOnProvider);
         if (s is SignedIn) {
           try {
             final stored = await _store.load().timeout(_timeout);
