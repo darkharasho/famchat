@@ -33,7 +33,7 @@ app.route("/ws", ws);
 
 app.notFound(() => errorResponse("not_found"));
 app.onError((err) => {
-  if (err instanceof ApiError) return errorResponse(err.code);
+  if (err instanceof ApiError) return errorResponse(err.code, err.extra);
   console.error(err);
   return errorResponse("internal");
 });

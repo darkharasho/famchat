@@ -137,6 +137,9 @@ export class FamilyHub extends DurableObject<Env> {
 
   // --- RPC from the Worker ---
 
+  /** Family membership changed; Task 5 drops cached peer sets here. */
+  async sharesChanged(): Promise<void> {}
+
   /** Sends [event] to every open socket of [userIds]. */
   async notify(userIds: string[], event: Record<string, unknown>): Promise<void> {
     const text = JSON.stringify(event);

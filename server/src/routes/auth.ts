@@ -3,7 +3,7 @@ import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { verifyDeviceCert } from "../lib/devicecert";
 import { ApiError } from "../lib/errors";
-import { sharingUserIds } from "../lib/family";
+import { FAMILY_ONE, REVIEWER_FAMILY, sharingUserIds } from "../lib/family";
 import { newId } from "../lib/ids";
 import { claimMessage, eventStmt, freshTime, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { notifyReset, resetAccount } from "../lib/reset-account";
@@ -71,6 +71,11 @@ auth.post("/invite/redeem", async (c) => {
       `INSERT INTO users (id, name, is_admin, identity_pub, created_at)
        SELECT ?, name, make_admin, ?, ? FROM invites WHERE token_hash = ? AND used_by = ?`,
     ).bind(userId, identityPub, now, tokenHash, userId),
+    // Interim (stage 1): everyone redeeming a plain invite joins family #1; invites get their own family later.
+    db.prepare(
+      `INSERT INTO family_members (family_id, user_id, role, joined_at)
+       SELECT ${FAMILY_ONE}, id, CASE WHEN is_admin = 1 THEN 'admin' ELSE 'member' END, ? FROM users WHERE id = ?`,
+    ).bind(now, userId),
     db.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, refresh_hash, created_at, last_seen)
        SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ?`,
@@ -113,6 +118,8 @@ async function redeemReviewer(env: Env, body: Record<string, unknown>, tokenHash
   const [user] = await db.batch([
     db.prepare(`INSERT INTO users (id, name, is_admin, identity_pub, created_at, reviewer) SELECT ?, ?, 0, ?, ?, 1 WHERE ${live}`)
       .bind(userId, displayName, k.identityPub, now, tokenHash, now),
+    db.prepare(`INSERT INTO family_members (family_id, user_id, role, joined_at) SELECT ${REVIEWER_FAMILY}, id, 'member', ? FROM users WHERE id = ?`)
+      .bind(now, userId),
     db.prepare(
       `INSERT INTO devices (id, user_id, name, platform, enc_pub, sign_pub, cert_sig, refresh_hash, created_at, last_seen)
        SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ?`,

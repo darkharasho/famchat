@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 import { isUlid } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
+import { FAMILY_ONE } from "../lib/family";
 import { MEDIA_CAP, MEDIA_TARGET, mediaUsage } from "../lib/media";
 import { freshTime, logEvent, promotionMessage, pubKey, recoveryKeyMessage, resetMessage, signature, verifyEd25519 } from "../lib/reset";
 import { deleteAccount } from "../lib/delete-account";
@@ -194,6 +195,9 @@ admin.post("/users/:id/admin", requireAuth, requireAdmin, async (c) => {
   )
     .bind(by, signer, sig, userId).run();
   if (res.meta.changes !== 1) throw new ApiError("not_found");
+  await db.prepare(
+    "UPDATE family_members SET role = 'admin', admin_by = ?, admin_signer_pub = ?, admin_sig = ? WHERE family_id = ? AND user_id = ?",
+  ).bind(by, signer, sig, FAMILY_ONE, userId).run();
   await logEvent(db, { kind: "admin_promoted", userId, actorId: by });
   return c.body(null, 204);
 });
