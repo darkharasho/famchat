@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
+import 'package:famchat/crypto/encoding.dart';
+import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/push/firebase_options.dart';
 import 'package:famchat/push/notification_settings.dart' show pushTestSummary, runNotificationTest;
 import 'package:famchat/push/local_notifier.dart';
@@ -271,7 +275,7 @@ void main() {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
       var front = false;
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => front)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => front)
         ..start();
       events.add(msg(chatB, 'dad'));
       events.add(msg(chatB, 'me')); // my own other device
@@ -287,7 +291,7 @@ void main() {
     test('silent messages and muted chats do not notify; an expired mute does', () async {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => false)
         ..start();
       events.add({...msg(chatB, 'dad'), 'silent': true});
       await db.setMutedUntil(chatA, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
@@ -304,7 +308,7 @@ void main() {
     test('a mention of me notifies through a mute and says so', () async {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => false)
         ..start();
       await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
       events.add({...msg(chatB, 'dad'), 'mentions': ['someone-else']});
@@ -313,6 +317,99 @@ void main() {
       expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad mentioned you')]);
       await n.stop();
       await events.close();
+    });
+
+    group('previews', () {
+      final chatKey = Uint8List.fromList(List.generate(32, (i) => i));
+      late DeviceKeys signer;
+      setUpAll(() async => signer = await DeviceKeys.generate());
+      setUp(() async {
+        for (final u in ['mom', 'dad']) {
+          await db.putDevice(DeviceRow(
+            id: 'd-$u',
+            userId: u,
+            name: 'Phone',
+            encPub: 'x',
+            signPub: b64url(await signer.signPub()),
+            certSig: 'x',
+            revoked: false,
+            certValid: true,
+            trusted: true,
+          ));
+        }
+        for (final c in [chatA, chatB]) {
+          await db.putKey(c, 1, chatKey);
+        }
+      });
+
+      // The event as the socket delivers it: the envelope is a parsed JSON map.
+      Future<Map<String, Object?>> event(String chatId, String sender, {String text = 'see you at 6', Object? envelope}) async {
+        final env = envelope ??
+            (await encryptEnvelope(
+              chatKey: chatKey,
+              epoch: 1,
+              chatId: chatId,
+              messageId: 'm',
+              senderDeviceId: 'd-$sender',
+              signKey: signer.sign,
+              plaintext: TextBody(text).encode(),
+            ))
+                .toJson();
+        final e = msg(chatId, sender);
+        (e['message']! as Map<String, Object?>)
+          ..['envelope'] = env
+          ..['senderDeviceId'] = 'd-$sender';
+        return e;
+      }
+
+      Future<List<(String, String)>> run(bool on, Map<String, Object?> e) async {
+        final events = StreamController<Map<String, Object?>>.broadcast();
+        final notifier = FakeNotifier();
+        final n = MessageNotifier(
+            events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => on, inFront: () => false)
+          ..start();
+        events.add(e);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await n.stop();
+        await events.close();
+        return [for (final s in notifier.shown) (s.$2, s.$3)];
+      }
+
+      test('previews on shows the decrypted text', () async {
+        expect(await run(true, await event(chatA, 'mom')), [('Mom', 'see you at 6')]);
+      });
+
+      test('previews off shows generic text', () async {
+        expect(await run(false, await event(chatA, 'mom')), [('Mom', 'New message')]);
+      });
+
+      test('previews on but undecryptable falls back to generic', () async {
+        expect(await run(true, await event(chatA, 'mom', envelope: {'junk': 1})), [('Mom', 'New message')]);
+        expect(await run(true, await event(chatA, 'mom', envelope: 'not a map')), [('Mom', 'New message')]);
+      });
+
+      test('group shows sender prefix', () async {
+        expect(await run(true, await event(chatB, 'dad')), [('Parents', 'Dad: see you at 6')]);
+      });
+
+      test('a mention in a muted chat shows the preview', () async {
+        await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+        final e = {...await event(chatB, 'dad'), 'mentions': ['me']};
+        expect(await run(true, e), [('Parents', 'Dad: see you at 6')]);
+      });
+
+      test('a failing previewsOn still shows generic text', () async {
+        final events = StreamController<Map<String, Object?>>.broadcast();
+        final notifier = FakeNotifier();
+        final n = MessageNotifier(
+            events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => throw Exception('prefs'), inFront: () => false)
+          ..start();
+        events.add(await event(chatA, 'mom'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await n.stop();
+        await events.close();
+        expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Mom', 'New message')]);
+      });
     });
   });
 

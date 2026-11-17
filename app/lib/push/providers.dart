@@ -65,6 +65,7 @@ final messageNotifierProvider = Provider<MessageNotifier?>((ref) {
     myUserId: me,
     db: ref.watch(chatDbProvider),
     notifier: notifier,
+    previewsOn: () async => previewsSupported() && await readPreviewsOn(),
     inFront: appInFront,
   );
   unawaited(() async {

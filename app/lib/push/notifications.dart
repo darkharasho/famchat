@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../chat/db/chat_db.dart';
 import 'chat_route.dart';
 import 'local_notifier.dart';
+import 'preview.dart';
 import 'push_messaging.dart';
 
 /// Direct chat: (sender, "New message"). Group: (title, "New message from `sender`").
@@ -135,6 +136,7 @@ class MessageNotifier {
     required this.myUserId,
     required this.db,
     required this.notifier,
+    required this.previewsOn,
     required this.inFront,
   });
 
@@ -142,6 +144,9 @@ class MessageNotifier {
   final String myUserId;
   final ChatDb db;
   final LocalNotifier notifier;
+
+  /// This device's "Show message previews" setting (never true on the web).
+  final Future<bool> Function() previewsOn;
   final bool Function() inFront;
 
   StreamSubscription<Object?>? _sub;
@@ -163,10 +168,32 @@ class MessageNotifier {
     final mentioned = (e['mentions'] as List?)?.contains(myUserId) ?? false;
     try {
       if (!mentioned && isMuted(await db.chatById(chatId), DateTime.now())) return;
-      final (title, body) = await notificationText(db, chatId, sender, mention: mentioned);
+      final (title, generic) = await notificationText(db, chatId, sender, mention: mentioned);
+      final body = await _previewBody(m, chatId, sender) ?? generic;
       await notifier.show(id: chatId.hashCode & 0x7fffffff, title: title, body: body, route: route);
     } catch (_) {
       // The database closed (signed out) meanwhile.
+    }
+  }
+
+  /// The notification body with previews on, or null (previews off, or no preview) for the generic text.
+  Future<String?> _previewBody(Map<Object?, Object?> m, String chatId, String sender) async {
+    try {
+      if (!await previewsOn()) return null;
+      // The socket carries the envelope as a parsed JSON object; anything else means no preview.
+      final envelope = m['envelope'], id = m['id'], deviceId = m['senderDeviceId'];
+      if (envelope is! Map || id is! String || deviceId is! String) return null;
+      final preview = await previewText(
+        db: db,
+        chatId: chatId,
+        messageId: id,
+        senderUserId: sender,
+        senderDeviceId: deviceId,
+        envelope: Map<String, Object?>.from(envelope),
+      );
+      return preview == null ? null : await previewBody(db: db, chatId: chatId, senderUserId: sender, preview: preview);
+    } catch (_) {
+      return null; // Any failure still notifies, with the generic text.
     }
   }
 
