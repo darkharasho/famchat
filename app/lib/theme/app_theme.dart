@@ -15,7 +15,8 @@ const kDisplayFont = 'FamiljenGrotesk';
 /// Everything you read: messages, labels, buttons.
 const kBodyFont = 'AtkinsonHyperlegibleNext';
 
-/// Adds the bundled fonts' SIL Open Font License texts to the app's license page.
+/// Adds the bundled fonts' SIL Open Font License texts, and the spelling word list's, to the app's
+/// license page.
 void registerFontLicenses() {
   LicenseRegistry.addLicense(() async* {
     for (final (family, file) in const [
@@ -24,6 +25,7 @@ void registerFontLicenses() {
     ]) {
       yield LicenseEntryWithLineBreaks([family], await rootBundle.loadString(file));
     }
+    yield LicenseEntryWithLineBreaks(['SCOWL word list (spell checking)'], await rootBundle.loadString('assets/spelling/LICENSE.txt'));
   });
 }
 

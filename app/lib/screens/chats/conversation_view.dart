@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +18,8 @@ import '../../chat/wire.dart' show FetchedPreview;
 import '../../widgets/link_text.dart' show splitLinks;
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
+import '../../chat/spelling/providers.dart';
+import '../../chat/spelling/speller.dart';
 import '../../chat/reactions.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
@@ -348,6 +351,86 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       selection: TextSelection.collapsed(offset: sel.start + ch.length),
     );
     return true;
+  }
+
+  /// Desktop and web spell checking: the word list, and what else counts as a word (family
+  /// members' names, words added to this user's dictionary). A new service when either changes, so
+  /// the composer checks again.
+  Speller? _speller;
+  Set<String> _knownWords = const {};
+  WordListSpellCheckService? _spellService;
+
+  /// Where the latest right-click in the composer landed (global), for [_contextMenu].
+  Offset? _secondaryClickAt;
+
+  SpellCheckConfiguration? _spellCheck() {
+    if (!usesWordListSpelling) {
+      return WidgetsBinding.instance.platformDispatcher.nativeSpellCheckServiceDefined ? const SpellCheckConfiguration() : null;
+    }
+    final speller = ref.watch(spellerProvider).value;
+    if (speller == null) return null;
+    final known = <String>{
+      for (final u in (ref.watch(usersProvider).value ?? const <String, UserRow>{}).values)
+        for (final part in u.name.toLowerCase().split(RegExp(r'\s+')))
+          if (part.isNotEmpty) part,
+      ...?ref.watch(userWordsProvider).value,
+    };
+    if (!identical(speller, _speller) || !setEquals(known, _knownWords) || _spellService == null) {
+      _speller = speller;
+      _knownWords = known;
+      _spellService = WordListSpellCheckService(speller, known.contains);
+    }
+    return SpellCheckConfiguration(
+      spellCheckService: _spellService,
+      misspelledTextStyle: TextField.materialMisspelledTextStyle,
+    );
+  }
+
+  /// Right-click on a flagged word (desktop, web): its corrections and "Add to dictionary" above
+  /// the usual cut/copy/paste.
+  Widget _contextMenu(BuildContext context, EditableTextState state) {
+    final speller = _speller;
+    final value = state.currentTextEditingValue;
+    // Where the right-click was: Linux and Windows leave the caret where it is.
+    final clicked = _secondaryClickAt;
+    _secondaryClickAt = null;
+    final index = clicked != null
+        ? state.renderEditable.getPositionForPoint(clicked).offset
+        : value.selection.isValid
+            ? value.selection.baseOffset
+            : null;
+    // (findSuggestionSpanAtCursorIndex throws when nothing is flagged.)
+    final flagged = state.spellCheckResults?.suggestionSpans.isNotEmpty ?? false;
+    final span = speller == null || !usesWordListSpelling || index == null || !flagged
+        ? null
+        : state.findSuggestionSpanAtCursorIndex(index);
+    if (speller == null || span == null) return AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
+    final word = span.range.textInside(value.text);
+    void replace(String fix) {
+      state.userUpdateTextEditingValue(
+        TextEditingValue(
+          text: value.text.replaceRange(span.range.start, span.range.end, fix),
+          selection: TextSelection.collapsed(offset: span.range.start + fix.length),
+        ),
+        SelectionChangedCause.toolbar,
+      );
+      state.hideToolbar();
+    }
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: state.contextMenuAnchors,
+      buttonItems: [
+        for (final fix in speller.suggest(word)) ContextMenuButtonItem(label: fix, onPressed: () => replace(fix)),
+        ContextMenuButtonItem(
+          label: 'Add to dictionary',
+          onPressed: () {
+            state.hideToolbar();
+            unawaited(ref.read(userWordsProvider.notifier).add(word));
+          },
+        ),
+        ...state.contextMenuButtonItems,
+      ],
+    );
   }
 
   /// Phones and tablets, where taps elsewhere should put the keyboard away.
@@ -750,7 +833,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               ? context.go('/')
                               : _focus.unfocus(),
                 },
-          child: TextField(
+          child: Listener(
+            onPointerDown: (e) {
+              if (e.buttons & kSecondaryMouseButton != 0) _secondaryClickAt = e.position;
+            },
+            child: TextField(
             key: const Key('composer'),
             controller: _text,
             focusNode: _focus,
@@ -758,6 +845,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             keyboardType: TextInputType.multiline,
+            spellCheckConfiguration: _spellCheck(),
+            contextMenuBuilder: _contextMenu,
             inputFormatters: const [ShortcodeFormatter(), EmoticonFormatter()],
             onTap: _closePicker,
             style: Theme.of(context).textTheme.bodyLarge,
@@ -788,6 +877,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
             onChanged: (_) => ref.read(chatSyncProvider)?.typing(widget.chatId),
+          ),
           ),
         ),
       ),

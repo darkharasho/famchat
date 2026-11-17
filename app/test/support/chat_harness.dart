@@ -1,12 +1,15 @@
 import 'package:famchat/gifs/klipy.dart';
 import 'package:famchat/gifs/providers.dart';
 import 'dart:async';
+import 'dart:io' show File;
 import 'package:material_ui/material_ui.dart' show Size, SizedBox;
 import 'package:meta/meta.dart';
 
 import 'package:famchat/chat/directory.dart';
 import 'package:famchat/chat/hub_link.dart';
 import 'package:famchat/chat/providers.dart';
+import 'package:famchat/chat/spelling/providers.dart';
+import 'package:famchat/chat/spelling/speller.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
@@ -81,6 +84,9 @@ void setWindow(WidgetTester tester, Size size) {
 }
 
 /// Pumps the signed-in app with [me]'s chat stack (database, fake API, scripted hub).
+/// The bundled word list, read once per test file.
+final testSpeller = Speller(File('assets/spelling/en_US.txt').readAsLinesSync());
+
 Future<ScriptedHubLink> pumpChatApp(
   WidgetTester tester,
   TestDevice me, {
@@ -107,6 +113,8 @@ Future<ScriptedHubLink> pumpChatApp(
       chatDbProvider.overrideWithValue(me.db),
       chatApiProvider.overrideWithValue(me.api),
       hubLinkProvider.overrideWithValue(hub),
+      // Read straight from disk: the asset bundle loads off the test clock.
+      spellerProvider.overrideWith((ref) => testSpeller),
       localIdentityProvider.overrideWith((ref) async => me.me),
       mediaDbProvider.overrideWithValue(mediaDb ?? memoryMediaDb()),
       mediaApiProvider.overrideWithValue(me.media),

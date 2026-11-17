@@ -7,7 +7,7 @@ import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/rendering.dart' show RendererBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
