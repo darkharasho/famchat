@@ -365,6 +365,29 @@ class FakeServer {
       }
       return await _reset(_body(r), users[userId]!, target);
     }
+    // server/src/routes/families.ts: only family 1 exists here.
+    final promote = RegExp(r'^/api/families/([^/]+)/admins/([^/]+)$').firstMatch(path);
+    if (r.method == 'POST' && promote != null) {
+      final by = users[userId]!;
+      if (promote[1] != '1' || !by.isAdmin) return _err('forbidden');
+      final sig = _body(r)['sig'];
+      if (sig is! String ||
+          !await verifyPromotionV2(
+            signerPub: b64urlDecode(by.identityPub),
+            familyId: 1,
+            userId: promote[2]!,
+            byUserId: by.id,
+            sig: b64urlDecode(sig),
+          )) {
+        return _err('invalid_request');
+      }
+      final target = users[promote[2]];
+      if (target == null || target.deleted) return _err('not_found');
+      target
+        ..isAdmin = true
+        ..adminProof = {'byUserId': by.id, 'signerPub': by.identityPub, 'sig': sig};
+      return http.Response('', 204);
+    }
     if (r.method == 'POST' && path == '/api/admin/recovery-key') {
       final u = users[userId]!;
       if (!u.isAdmin) return _err('forbidden');

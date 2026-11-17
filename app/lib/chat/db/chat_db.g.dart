@@ -2323,9 +2323,8 @@ class UserRow extends DataClass implements Insertable<UserRow> {
   /// so devices certified by an earlier key still verify their old messages.
   final String knownIdentityPubs;
 
-  /// This device trusts the user as an admin: pinned when it first saw the family (or from a
-  /// pairing handover), or promoted by an admin it trusts (lib/chat/resets.dart). The server's
-  /// [isAdmin] alone doesn't make anyone's reset count.
+  /// This device trusts the user as an admin of some family (see [LocalFamilyAdmins]; kept in step
+  /// with it by the directory). The server's [isAdmin] alone doesn't make anyone's reset count.
   final bool pinnedAdmin;
 
   /// The account was deleted (docs/protocol.md "Deleting an account"): kept so old messages and
@@ -3672,6 +3671,352 @@ class LocalResetsCompanion extends UpdateCompanion<ResetRow> {
   }
 }
 
+class $LocalFamiliesTable extends LocalFamilies
+    with TableInfo<$LocalFamiliesTable, FamilyRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalFamiliesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_families';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FamilyRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  FamilyRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FamilyRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalFamiliesTable createAlias(String alias) {
+    return $LocalFamiliesTable(attachedDatabase, alias);
+  }
+}
+
+class FamilyRow extends DataClass implements Insertable<FamilyRow> {
+  final int id;
+  const FamilyRow({required this.id});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    return map;
+  }
+
+  LocalFamiliesCompanion toCompanion(bool nullToAbsent) {
+    return LocalFamiliesCompanion(id: Value(id));
+  }
+
+  factory FamilyRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FamilyRow(id: serializer.fromJson<int>(json['id']));
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{'id': serializer.toJson<int>(id)};
+  }
+
+  FamilyRow copyWith({int? id}) => FamilyRow(id: id ?? this.id);
+  FamilyRow copyWithCompanion(LocalFamiliesCompanion data) {
+    return FamilyRow(id: data.id.present ? data.id.value : this.id);
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FamilyRow(')
+          ..write('id: $id')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => id.hashCode;
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is FamilyRow && other.id == this.id);
+}
+
+class LocalFamiliesCompanion extends UpdateCompanion<FamilyRow> {
+  final Value<int> id;
+  const LocalFamiliesCompanion({this.id = const Value.absent()});
+  LocalFamiliesCompanion.insert({this.id = const Value.absent()});
+  static Insertable<FamilyRow> custom({Expression<int>? id}) {
+    return RawValuesInsertable({if (id != null) 'id': id});
+  }
+
+  LocalFamiliesCompanion copyWith({Value<int>? id}) {
+    return LocalFamiliesCompanion(id: id ?? this.id);
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalFamiliesCompanion(')
+          ..write('id: $id')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalFamilyAdminsTable extends LocalFamilyAdmins
+    with TableInfo<$LocalFamilyAdminsTable, FamilyAdminRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalFamilyAdminsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _familyIdMeta = const VerificationMeta(
+    'familyId',
+  );
+  @override
+  late final GeneratedColumn<int> familyId = GeneratedColumn<int>(
+    'family_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [familyId, userId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_family_admins';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FamilyAdminRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('family_id')) {
+      context.handle(
+        _familyIdMeta,
+        familyId.isAcceptableOrUnknown(data['family_id']!, _familyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_familyIdMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {familyId, userId};
+  @override
+  FamilyAdminRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FamilyAdminRow(
+      familyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}family_id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalFamilyAdminsTable createAlias(String alias) {
+    return $LocalFamilyAdminsTable(attachedDatabase, alias);
+  }
+}
+
+class FamilyAdminRow extends DataClass implements Insertable<FamilyAdminRow> {
+  final int familyId;
+  final String userId;
+  const FamilyAdminRow({required this.familyId, required this.userId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['family_id'] = Variable<int>(familyId);
+    map['user_id'] = Variable<String>(userId);
+    return map;
+  }
+
+  LocalFamilyAdminsCompanion toCompanion(bool nullToAbsent) {
+    return LocalFamilyAdminsCompanion(
+      familyId: Value(familyId),
+      userId: Value(userId),
+    );
+  }
+
+  factory FamilyAdminRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FamilyAdminRow(
+      familyId: serializer.fromJson<int>(json['familyId']),
+      userId: serializer.fromJson<String>(json['userId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'familyId': serializer.toJson<int>(familyId),
+      'userId': serializer.toJson<String>(userId),
+    };
+  }
+
+  FamilyAdminRow copyWith({int? familyId, String? userId}) => FamilyAdminRow(
+    familyId: familyId ?? this.familyId,
+    userId: userId ?? this.userId,
+  );
+  FamilyAdminRow copyWithCompanion(LocalFamilyAdminsCompanion data) {
+    return FamilyAdminRow(
+      familyId: data.familyId.present ? data.familyId.value : this.familyId,
+      userId: data.userId.present ? data.userId.value : this.userId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FamilyAdminRow(')
+          ..write('familyId: $familyId, ')
+          ..write('userId: $userId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(familyId, userId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FamilyAdminRow &&
+          other.familyId == this.familyId &&
+          other.userId == this.userId);
+}
+
+class LocalFamilyAdminsCompanion extends UpdateCompanion<FamilyAdminRow> {
+  final Value<int> familyId;
+  final Value<String> userId;
+  final Value<int> rowid;
+  const LocalFamilyAdminsCompanion({
+    this.familyId = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalFamilyAdminsCompanion.insert({
+    required int familyId,
+    required String userId,
+    this.rowid = const Value.absent(),
+  }) : familyId = Value(familyId),
+       userId = Value(userId);
+  static Insertable<FamilyAdminRow> custom({
+    Expression<int>? familyId,
+    Expression<String>? userId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (familyId != null) 'family_id': familyId,
+      if (userId != null) 'user_id': userId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalFamilyAdminsCompanion copyWith({
+    Value<int>? familyId,
+    Value<String>? userId,
+    Value<int>? rowid,
+  }) {
+    return LocalFamilyAdminsCompanion(
+      familyId: familyId ?? this.familyId,
+      userId: userId ?? this.userId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (familyId.present) {
+      map['family_id'] = Variable<int>(familyId.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalFamilyAdminsCompanion(')
+          ..write('familyId: $familyId, ')
+          ..write('userId: $userId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -3887,6 +4232,9 @@ abstract class _$ChatDb extends GeneratedDatabase {
   late final $LocalUsersTable localUsers = $LocalUsersTable(this);
   late final $LocalDevicesTable localDevices = $LocalDevicesTable(this);
   late final $LocalResetsTable localResets = $LocalResetsTable(this);
+  late final $LocalFamiliesTable localFamilies = $LocalFamiliesTable(this);
+  late final $LocalFamilyAdminsTable localFamilyAdmins =
+      $LocalFamilyAdminsTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -3904,6 +4252,8 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localUsers,
     localDevices,
     localResets,
+    localFamilies,
+    localFamilyAdmins,
     meta,
     localMessagesChatSeq,
   ];
@@ -5756,6 +6106,272 @@ typedef $$LocalResetsTableProcessedTableManager =
       ResetRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalFamiliesTableCreateCompanionBuilder =
+    LocalFamiliesCompanion Function({Value<int> id});
+typedef $$LocalFamiliesTableUpdateCompanionBuilder =
+    LocalFamiliesCompanion Function({Value<int> id});
+
+class $$LocalFamiliesTableFilterComposer
+    extends Composer<_$ChatDb, $LocalFamiliesTable> {
+  $$LocalFamiliesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalFamiliesTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalFamiliesTable> {
+  $$LocalFamiliesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalFamiliesTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalFamiliesTable> {
+  $$LocalFamiliesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+}
+
+class $$LocalFamiliesTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalFamiliesTable,
+          FamilyRow,
+          $$LocalFamiliesTableFilterComposer,
+          $$LocalFamiliesTableOrderingComposer,
+          $$LocalFamiliesTableAnnotationComposer,
+          $$LocalFamiliesTableCreateCompanionBuilder,
+          $$LocalFamiliesTableUpdateCompanionBuilder,
+          (FamilyRow, BaseReferences<_$ChatDb, $LocalFamiliesTable, FamilyRow>),
+          FamilyRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalFamiliesTableTableManager(_$ChatDb db, $LocalFamiliesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalFamiliesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalFamiliesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalFamiliesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({Value<int> id = const Value.absent()}) =>
+              LocalFamiliesCompanion(id: id),
+          createCompanionCallback: ({Value<int> id = const Value.absent()}) =>
+              LocalFamiliesCompanion.insert(id: id),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalFamiliesTable, FamilyRow>(table),
+                  BaseReferences<_$ChatDb, $LocalFamiliesTable, FamilyRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalFamiliesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalFamiliesTable,
+      FamilyRow,
+      $$LocalFamiliesTableFilterComposer,
+      $$LocalFamiliesTableOrderingComposer,
+      $$LocalFamiliesTableAnnotationComposer,
+      $$LocalFamiliesTableCreateCompanionBuilder,
+      $$LocalFamiliesTableUpdateCompanionBuilder,
+      (FamilyRow, BaseReferences<_$ChatDb, $LocalFamiliesTable, FamilyRow>),
+      FamilyRow,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalFamilyAdminsTableCreateCompanionBuilder =
+    LocalFamilyAdminsCompanion Function({
+      required int familyId,
+      required String userId,
+      Value<int> rowid,
+    });
+typedef $$LocalFamilyAdminsTableUpdateCompanionBuilder =
+    LocalFamilyAdminsCompanion Function({
+      Value<int> familyId,
+      Value<String> userId,
+      Value<int> rowid,
+    });
+
+class $$LocalFamilyAdminsTableFilterComposer
+    extends Composer<_$ChatDb, $LocalFamilyAdminsTable> {
+  $$LocalFamilyAdminsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalFamilyAdminsTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalFamilyAdminsTable> {
+  $$LocalFamilyAdminsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get familyId => $composableBuilder(
+    column: $table.familyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalFamilyAdminsTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalFamilyAdminsTable> {
+  $$LocalFamilyAdminsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get familyId =>
+      $composableBuilder(column: $table.familyId, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+}
+
+class $$LocalFamilyAdminsTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalFamilyAdminsTable,
+          FamilyAdminRow,
+          $$LocalFamilyAdminsTableFilterComposer,
+          $$LocalFamilyAdminsTableOrderingComposer,
+          $$LocalFamilyAdminsTableAnnotationComposer,
+          $$LocalFamilyAdminsTableCreateCompanionBuilder,
+          $$LocalFamilyAdminsTableUpdateCompanionBuilder,
+          (
+            FamilyAdminRow,
+            BaseReferences<_$ChatDb, $LocalFamilyAdminsTable, FamilyAdminRow>,
+          ),
+          FamilyAdminRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalFamilyAdminsTableTableManager(
+    _$ChatDb db,
+    $LocalFamilyAdminsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalFamilyAdminsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalFamilyAdminsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalFamilyAdminsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> familyId = const Value.absent(),
+                Value<String> userId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalFamilyAdminsCompanion(
+                familyId: familyId,
+                userId: userId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required int familyId,
+                required String userId,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalFamilyAdminsCompanion.insert(
+                familyId: familyId,
+                userId: userId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalFamilyAdminsTable, FamilyAdminRow>(table),
+                  BaseReferences<
+                    _$ChatDb,
+                    $LocalFamilyAdminsTable,
+                    FamilyAdminRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalFamilyAdminsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalFamilyAdminsTable,
+      FamilyAdminRow,
+      $$LocalFamilyAdminsTableFilterComposer,
+      $$LocalFamilyAdminsTableOrderingComposer,
+      $$LocalFamilyAdminsTableAnnotationComposer,
+      $$LocalFamilyAdminsTableCreateCompanionBuilder,
+      $$LocalFamilyAdminsTableUpdateCompanionBuilder,
+      (
+        FamilyAdminRow,
+        BaseReferences<_$ChatDb, $LocalFamilyAdminsTable, FamilyAdminRow>,
+      ),
+      FamilyAdminRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -5901,5 +6517,9 @@ class $ChatDbManager {
       $$LocalDevicesTableTableManager(_db, _db.localDevices);
   $$LocalResetsTableTableManager get localResets =>
       $$LocalResetsTableTableManager(_db, _db.localResets);
+  $$LocalFamiliesTableTableManager get localFamilies =>
+      $$LocalFamiliesTableTableManager(_db, _db.localFamilies);
+  $$LocalFamilyAdminsTableTableManager get localFamilyAdmins =>
+      $$LocalFamilyAdminsTableTableManager(_db, _db.localFamilyAdmins);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }

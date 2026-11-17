@@ -95,9 +95,10 @@ class ApiClient {
             ));
       });
 
-  /// Admin: makes [userId] an admin too; [sig] is this admin's signed promotion (base64url).
-  Future<void> makeAdmin(String userId, {required String sig}) => _authed(
-      (t) => _send('POST', '/admin/users/${Uri.encodeComponent(userId)}/admin', bearer: t, body: {'sig': sig}));
+  /// Admin of [familyId]: makes [userId] an admin of it too; [sig] is this admin's signed v2
+  /// promotion (base64url).
+  Future<void> promoteInFamily(int familyId, String userId, {required String sig}) => _authed((t) => _send(
+      'POST', '/families/$familyId/admins/${Uri.encodeComponent(userId)}', bearer: t, body: {'sig': sig}));
 
   /// Deletes this user's account for good (docs/protocol.md "Deleting an account"). Throws
   /// [ApiException] `last_admin` if this is the family's only admin and others are left.

@@ -102,9 +102,8 @@ class LocalUsers extends Table {
   /// so devices certified by an earlier key still verify their old messages.
   TextColumn get knownIdentityPubs => text().withDefault(const Constant('[]'))();
 
-  /// This device trusts the user as an admin: pinned when it first saw the family (or from a
-  /// pairing handover), or promoted by an admin it trusts (lib/chat/resets.dart). The server's
-  /// [isAdmin] alone doesn't make anyone's reset count.
+  /// This device trusts the user as an admin of some family (see [LocalFamilyAdmins]; kept in step
+  /// with it by the directory). The server's [isAdmin] alone doesn't make anyone's reset count.
   BoolColumn get pinnedAdmin => boolean().withDefault(const Constant(false))();
 
   /// The account was deleted (docs/protocol.md "Deleting an account"): kept so old messages and
@@ -161,6 +160,27 @@ class LocalResets extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Families this device has seen and pinned admins for (lib/chat/resets.dart): a family absent here
+/// is seen for the first time at the next directory refresh.
+@DataClassName('FamilyRow')
+class LocalFamilies extends Table {
+  IntColumn get id => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// The users this device trusts as admins of each family in [LocalFamilies]: pinned when it first
+/// saw the family (or from a pairing handover), or promoted by an admin it trusts there.
+@DataClassName('FamilyAdminRow')
+class LocalFamilyAdmins extends Table {
+  IntColumn get familyId => integer()();
+  TextColumn get userId => text()();
+
+  @override
+  Set<Column> get primaryKey => {familyId, userId};
+}
+
 @DataClassName('MetaRow')
 class Meta extends Table {
   TextColumn get key => text()();
@@ -191,12 +211,23 @@ class ChatListItem {
   int get activity => [chat.createdAt, chat.lastMessageAt ?? 0, last?.createdAt ?? 0].reduce((a, b) => a > b ? a : b);
 }
 
-@DriftDatabase(tables: [LocalChats, LocalMembers, LocalMessages, LocalKeys, LocalUsers, LocalDevices, LocalResets, Meta])
+@DriftDatabase(tables: [
+  LocalChats,
+  LocalMembers,
+  LocalMessages,
+  LocalKeys,
+  LocalUsers,
+  LocalDevices,
+  LocalResets,
+  LocalFamilies,
+  LocalFamilyAdmins,
+  Meta,
+])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -213,10 +244,21 @@ class ChatDb extends _$ChatDb {
           if (from < 5) await m.addColumn(localChats, localChats.draft);
           if (from < 6) await m.addColumn(localUsers, localUsers.avatarKey);
           if (from < 7) await m.addColumn(localUsers, localUsers.former);
+          if (from < 8) {
+            await m.createTable(localFamilies);
+            await m.createTable(localFamilyAdmins);
+            // The admins pinned before families existed are family 1's.
+            if (await metaValue(adminsPinnedKey) != null) {
+              await customStatement('INSERT OR IGNORE INTO local_families (id) VALUES (1)');
+              await customStatement(
+                  'INSERT OR IGNORE INTO local_family_admins (family_id, user_id) SELECT 1, id FROM local_users WHERE pinned_admin = 1');
+            }
+          }
         },
       );
 
-  /// Set once this device has pinned the family's admins (lib/chat/directory.dart).
+  /// Set once a device before schema 8 had pinned the family's admins (the upgrade to per-family
+  /// pins reads it).
   static const adminsPinnedKey = 'adminsPinned';
 
   Future<String?> metaValue(String key) async =>
@@ -503,6 +545,30 @@ class ChatDb extends _$ChatDb {
       (select(localDevices)..where((d) => d.userId.isIn(userIds))).get();
 
   Future<void> putDevice(DeviceRow d) => into(localDevices).insertOnConflictUpdate(d);
+
+  // --- admin pins ---
+
+  /// Per family this device has seen, the admins it trusts there.
+  Future<Map<int, Set<String>>> familyPins() async {
+    final pins = {for (final f in await select(localFamilies).get()) f.id: <String>{}};
+    for (final a in await select(localFamilyAdmins).get()) {
+      pins[a.familyId]?.add(a.userId);
+    }
+    return pins;
+  }
+
+  /// Replaces every family's pins with [pins]: a family absent from it is no longer seen.
+  Future<void> replaceFamilyPins(Map<int, Set<String>> pins) => transaction(() async {
+        await delete(localFamilyAdmins).go();
+        await delete(localFamilies).go();
+        await batch((b) {
+          b.insertAll(localFamilies, [for (final id in pins.keys) FamilyRow(id: id)]);
+          b.insertAll(localFamilyAdmins, [
+            for (final e in pins.entries)
+              for (final u in e.value) FamilyAdminRow(familyId: e.key, userId: u),
+          ]);
+        });
+      });
 
   // --- reset banners ---
 

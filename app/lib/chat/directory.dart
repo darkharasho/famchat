@@ -56,15 +56,9 @@ class Directory {
   Future<Set<String>> _refresh() async {
     final users = await _api.users();
     final myPub = b64url(_me.identityPub);
-    // The first time this device sees the family, it pins the admins the server lists (trust on
-    // first use, like identity keys); after that only signed promotions add admins.
-    final firstSight = await _db.metaValue(ChatDb.adminsPinnedKey) == null;
     final inputs = <TrustInput>[];
-    // Today's stored pins are family 1's (none yet on first sight).
-    final pinned1 = <String>{};
     for (final u in users) {
       final old = await _db.userById(u.id);
-      if (old?.pinnedAdmin ?? false) pinned1.add(u.id);
       final mine = u.id == _me.userId;
       // My own devices must chain to the key I hold; others' to a key trusted before (first seen
       // or acknowledged). A device under a new, unacknowledged key verifies but isn't trusted.
@@ -78,15 +72,9 @@ class Directory {
         resets: u.resets,
       ));
     }
-    // Stopgap until per-family pins are stored: after first sight, family 1 keeps its pins and any
-    // other family of mine counts as seen with none (only signed promotions add its admins), so
-    // a family the server adds later can't bring in admins on its word alone.
-    final myFamilies = [for (final i in inputs) if (i.userId == _me.userId) ...i.families];
-    final pinned = <int, Set<String>>{
-      if (!firstSight)
-        for (final f in myFamilies) f.id: f.id == 1 ? pinned1 : <String>{},
-    };
-    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: pinned);
+    // The first time this device sees a family, it pins the admins the server lists for it (trust
+    // on first use, like identity keys); after that only signed promotions add admins there.
+    final t = await resolveTrust(inputs, myUserId: _me.userId, pinned: await _db.familyPins());
     for (final u in users) {
       final mine = u.id == _me.userId;
       final trusted = t.trusted[u.id]!, known = t.known[u.id]!, retired = t.retired[u.id] ?? const {};
@@ -97,8 +85,7 @@ class Directory {
         identityPub: mine ? myPub : u.identityPub,
         trustedIdentityPub: trusted,
         knownIdentityPubs: jsonEncode(known.toList()),
-        // Family 1's pins only: no other family may feed them.
-        pinnedAdmin: t.admins[1]?.contains(u.id) ?? false,
+        pinnedAdmin: t.admins.values.any((a) => a.contains(u.id)),
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,
@@ -125,7 +112,8 @@ class Directory {
         ));
       }
     }
-    if (firstSight) await _db.setMeta(ChatDb.adminsPinnedKey, '1');
+    // Only my families are kept: one I left is seen afresh if I join it again.
+    await _db.replaceFamilyPins(t.admins);
     for (final w in t.witnessed) {
       await _db.recordReset(
         id: w.reset.id,

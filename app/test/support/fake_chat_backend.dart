@@ -29,7 +29,10 @@ class _User {
   bool former = false;
   AdminProofDto? adminProof;
 
-  /// Roles in families other than family 1 (which everyone non-former is in).
+  /// In family 1 (as everyone non-former is, unless removed from it); its role is [isAdmin].
+  bool inFamily1 = true;
+
+  /// Roles in families other than family 1.
   final otherFamilies = <FamilyRoleDto>[];
   final resets = <_Reset>[];
   String? avatarKey;
@@ -239,6 +242,13 @@ class FakeChatBackend {
 
   /// The server lists [userId] in another family (a real one, or a lie).
   void addFamilyRole(String userId, FamilyRoleDto role) => _users[userId]!.otherFamilies.add(role);
+
+  /// The server stops listing [userId] in [familyId] (they left, or were removed).
+  void removeFamilyRole(String userId, int familyId) {
+    final u = _users[userId]!;
+    if (familyId == 1) u.inFamily1 = false;
+    u.otherFamilies.removeWhere((f) => f.id == familyId);
+  }
 
   /// `POST /admin/users/:id/admin` signed by [by]'s identity key.
   Future<void> promote(String userId, {required String by}) async {
@@ -568,11 +578,13 @@ class FakeChatApi implements ChatApi {
           UserDto(
             id: u.id,
             name: u.name,
-            isAdmin: u.isAdmin && !u.former,
+            isAdmin: u.isAdmin && !u.former && u.inFamily1,
             former: u.former,
             resets: [for (final r in u.resets) r.dto()],
             adminProof: u.former ? null : u.adminProof,
-            families: u.former ? const [] : [FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof), ...u.otherFamilies],
+            families: u.former
+                ? const []
+                : [if (u.inFamily1) FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof), ...u.otherFamilies],
             deleted: u.deleted,
             avatarKey: u.avatarKey,
             identityPub: b64url(u.identityPub),
