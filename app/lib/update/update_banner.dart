@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:famchat_updater/famchat_updater.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/motion.dart';
@@ -116,11 +117,31 @@ final appDownloadsProvider = Provider<Future<bool> Function(Uri)?>(
   (ref) => kIsWeb ? (u) => launchUrl(u, webOnlyWindowName: '_blank') : null,
 );
 
+/// The Mac app updates through Sparkle, which has its own schedule and window. Null elsewhere and
+/// in local builds.
+final macUpdaterProvider = Provider<MacUpdater?>(
+  (ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS && appReleaseVersion.isNotEmpty
+      ? const MacUpdater()
+      : null,
+);
+
 class AppVersionGroup extends ConsumerWidget {
   const AppVersionGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final mac = ref.watch(macUpdaterProvider);
+    if (mac != null) {
+      return SettingsGroup(title: 'App', children: [
+        ListTile(
+          key: const Key('settings-version'),
+          leading: const TileIcon(Icons.info_outline_rounded),
+          title: Text('FamChat $appReleaseVersion'),
+          subtitle: const Text('Checks for updates automatically.'),
+          trailing: TextButton(onPressed: mac.checkForUpdates, child: const Text('Check now')),
+        ),
+      ]);
+    }
     if (ref.watch(updateConfigProvider) == null) {
       final open = ref.watch(appDownloadsProvider);
       if (open == null) return const SizedBox.shrink();

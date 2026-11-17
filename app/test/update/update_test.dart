@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:famchat/update/release_feed.dart';
+import 'package:famchat_updater/famchat_updater.dart';
+import 'package:flutter/services.dart';
 import 'package:famchat/update/update_banner.dart';
 import 'package:famchat/update/update_controller.dart';
 import 'package:famchat/update/update_platform.dart';
@@ -333,6 +335,23 @@ void main() {
     await tester.tap(find.text('Get the apps'));
     await tester.pump();
     expect(opened?.path, '/download.html');
+  });
+
+  testWidgets('the Mac app checks for updates through Sparkle', (tester) async {
+    const channel = MethodChannel('famchat/updater');
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (c) async {
+      calls.add(c.method);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(ProviderScope(
+      overrides: [macUpdaterProvider.overrideWithValue(const MacUpdater(channel))],
+      child: const MaterialApp(home: Scaffold(body: AppVersionGroup())),
+    ));
+    await tester.tap(find.text('Check now'));
+    await tester.pump();
+    expect(calls, ['checkForUpdates']);
   });
 
   testWidgets('installed apps show no download link', (tester) async {

@@ -4,10 +4,10 @@ import 'release_feed.dart';
 
 /// How this install downloads and applies an update.
 abstract class UpdatePlatform {
-  /// The [assetSuffixes] key: linux, windows or macos.
+  /// The [assetSuffixes] key: linux or windows.
   String get platform;
 
-  /// False where the app can't replace itself (the sandboxed Mac app, Linux outside an AppImage):
+  /// False where the app can't replace itself (Linux outside an AppImage):
   /// those get a download link instead.
   bool get canSelfInstall;
 

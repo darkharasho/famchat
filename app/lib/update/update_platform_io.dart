@@ -11,7 +11,7 @@ import 'update_platform_base.dart';
 UpdatePlatform? createUpdatePlatform() {
   if (Platform.isLinux) return LinuxAppImageUpdate(Platform.environment['APPIMAGE']);
   if (Platform.isWindows) return WindowsInstallerUpdate();
-  if (Platform.isMacOS) return MacUpdate();
+  // The Mac app updates through Sparkle (packages/famchat_updater).
   return null;
 }
 
@@ -161,20 +161,4 @@ class WindowsInstallerUpdate implements UpdatePlatform {
     await Process.start('cmd.exe', ['/c', script.path], mode: ProcessStartMode.detached);
     exit(0);
   }
-}
-
-/// The sandboxed Mac app can't replace itself: it links to the new DMG instead.
-class MacUpdate implements UpdatePlatform {
-  @override
-  String get platform => 'macos';
-
-  @override
-  bool get canSelfInstall => false;
-
-  @override
-  Future<String> download(ReleaseAsset asset, http.Client client, void Function(double) onProgress) =>
-      throw UnsupportedError('download the DMG instead');
-
-  @override
-  Future<void> installAndRestart(String downloaded) => throw UnsupportedError('download the DMG instead');
 }

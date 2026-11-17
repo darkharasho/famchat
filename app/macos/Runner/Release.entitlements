@@ -10,5 +10,11 @@
 	<true/>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- Sparkle's installer XPC services, which install updates for the sandboxed app. -->
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>dev.famchat.app-spks</string>
+		<string>dev.famchat.app-spki</string>
+	</array>
 </dict>
 </plist>
