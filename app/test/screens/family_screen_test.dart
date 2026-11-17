@@ -209,7 +209,8 @@ void main() {
           {'id': 2, 'name': 'Joneses', 'status': 'approved', 'role': role, 'owner': owner, 'memberCount': 3, 'createdAt': 2});
       await pumpApp(tester, server: server, kv: MemorySecureKv());
       await signInDirectly(tester, server, name: 'Michael', admin: true, operator: false);
-      server.users.values.singleWhere((u) => u.name == 'Michael').familyRoles[2] = role;
+      final michael = server.users.values.singleWhere((u) => u.name == 'Michael')..familyRoles[2] = role;
+      if (owner) server.extraFamilies.single['ownerId'] = michael.id;
       Future<String> key() async => b64url(await publicKeyOf(await newIdentityKey()));
       final keys = (await tester.runAsync(() async => [await key(), await key(), await key()]))!;
       momId = server.addUser('Mom', identityPub: keys[0]);
@@ -223,6 +224,11 @@ void main() {
         ..familyRoles[2] = 'member';
       appRouter(tester).go('/settings/families/2');
       await tester.pumpAndSettle();
+      if (owner) {
+        // The owner's id only exists once Michael has signed in: read the families again.
+        await tester.tap(find.byTooltip('Refresh'));
+        await tester.pumpAndSettle();
+      }
     }
 
     Future<void> openMenu(WidgetTester tester, String userId) async {
@@ -251,6 +257,15 @@ void main() {
       expect(find.text('Admin, No devices'), findsOneWidget);
       expect(find.text('Kid'), findsOneWidget);
       expect(find.text('Mom'), findsNothing);
+    });
+
+    testWidgets("an admin who isn't the owner sees who the owner is", (tester) async {
+      await openFamily2(tester);
+      server.extraFamilies.single['ownerId'] = dadId;
+      await tester.tap(find.byTooltip('Refresh'));
+      await tester.pumpAndSettle();
+      expect(find.text('Owner, No devices'), findsOneWidget, reason: "Dad's tile");
+      expect(find.text('You, Admin, 1 device'), findsOneWidget);
     });
 
     testWidgets('a member sees no admin actions', (tester) async {

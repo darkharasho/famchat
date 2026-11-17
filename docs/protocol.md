@@ -259,7 +259,9 @@ never appears: it is `404 not_found` everywhere. Names are trimmed, 1-40 charact
 (`400 invalid_request` otherwise). The owner of a family is its creator.
 - `GET /families` → `{families: Family[]}`: the caller's own families, ordered by id.
   `Family` = `{id, name, status: "pending"|"approved"|"declined", role: "admin"|"member",
-  memberCount, owner: boolean, createdAt}`. `memberCount` counts live (not deleted) members.
+  memberCount, owner: boolean, ownerId: string | null, createdAt}`. `memberCount` counts live (not
+  deleted) members. `owner` is whether the caller owns it; `ownerId` is the owner's user id (null
+  when the family has no owner), so members can tell who it is.
 - `POST /families {name}` → `201 {family: Family}`: requests a new family. It starts `pending`, with
   the caller as its admin (no admin proof). At most 3 pending requests per creator, else
   `429 rate_limited`.

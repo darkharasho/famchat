@@ -415,7 +415,7 @@ class FakeServer {
       final u = users[userId]!;
       return _json({
         'families': [
-          {'id': 1, 'name': family1Name, 'status': 'approved', 'role': u.isAdmin ? 'admin' : 'member', 'owner': u.isAdmin, 'memberCount': users.length, 'createdAt': 1},
+          {'id': 1, 'name': family1Name, 'status': 'approved', 'role': u.isAdmin ? 'admin' : 'member', 'owner': u.isAdmin, 'ownerId': u.isAdmin ? u.id : users.values.where((x) => x.isAdmin).firstOrNull?.id, 'memberCount': users.length, 'createdAt': 1},
           ...extraFamilies,
         ],
       });
@@ -423,7 +423,7 @@ class FakeServer {
     if (r.method == 'POST' && path == '/api/families') {
       final name = _body(r)['name'];
       if (name is! String || name.trim().isEmpty || name.trim().length > 40) return _err('invalid_request');
-      final family = {'id': 10 + extraFamilies.length, 'name': name.trim(), 'status': 'pending', 'role': 'admin', 'owner': true, 'memberCount': 1, 'createdAt': 2};
+      final family = {'id': 10 + extraFamilies.length, 'name': name.trim(), 'status': 'pending', 'role': 'admin', 'owner': true, 'ownerId': userId, 'memberCount': 1, 'createdAt': 2};
       extraFamilies.add(family);
       return _json({'family': family}, 201);
     }

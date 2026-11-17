@@ -108,6 +108,7 @@ class ApiClient {
         status: f['status'] as String,
         admin: f['role'] == 'admin',
         owner: f['owner'] as bool,
+        ownerId: f['ownerId'] as String?,
         memberCount: f['memberCount'] as int,
       );
 

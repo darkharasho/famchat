@@ -92,9 +92,12 @@ Future<void> _rename(BuildContext context, WidgetRef ref, Family family) async {
   final name = await showDialog<String>(context: context, builder: (context) => _RenameDialog(name: family.name));
   if (name == null || name == family.name || !context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
+  // Read before the await: a `family` event can dispose this screen while the call is in flight.
+  final api = ref.read(apiClientProvider);
+  final families = ref.read(familiesProvider.notifier);
   try {
-    await ref.read(apiClientProvider).renameFamily(family.id, name);
-    await ref.read(familiesProvider.notifier).refresh();
+    await api.renameFamily(family.id, name);
+    await families.refresh();
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
   }
@@ -127,8 +130,9 @@ Future<void> _leave(BuildContext context, WidgetRef ref, Family family) async {
   if (ok != true || !context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
   final router = GoRouter.of(context);
+  final container = ProviderScope.containerOf(context); // outlives this screen
   try {
-    await ref.read(apiClientProvider).leaveOrRemove(family.id, me);
+    await container.read(apiClientProvider).leaveOrRemove(family.id, me);
   } on ApiException catch (e) {
     messenger.showSnackBar(SnackBar(
       content: Text(e.code == 'last_admin' ? "You're the last admin. Make someone else an admin first." : apiErrorMessage(e)),
@@ -139,10 +143,10 @@ Future<void> _leave(BuildContext context, WidgetRef ref, Family family) async {
     return;
   }
   router.go('/settings/families');
-  ref
+  container
     ..invalidate(familyProvider)
     ..invalidate(meProvider); // leaving family 1 ends its admin role on the account
-  ref.read(familiesProvider.notifier).refresh().ignore();
+  container.read(familiesProvider.notifier).refresh().ignore();
 }
 
 class _RenameDialog extends StatefulWidget {
@@ -354,8 +358,7 @@ class _UserTile extends ConsumerWidget {
     final live = user.devices.where((d) => !d.revoked).length;
     final details = [
       if (mine) 'You',
-      // Only my own ownership is known: the server tells each member only about themselves.
-      if (mine && family.owner) 'Owner' else if (admin) 'Admin',
+      if (user.id == family.ownerId) 'Owner' else if (admin) 'Admin',
       live == 0 ? 'No devices' : '$live ${live == 1 ? 'device' : 'devices'}',
     ];
     // _Members only shows approved families, where admin power counts.
@@ -414,14 +417,16 @@ class _UserTile extends ConsumerWidget {
   /// [done], or the error.
   Future<void> _run(BuildContext context, WidgetRef ref, Future<void> Function() act, String done, {bool families = false}) async {
     final messenger = ScaffoldMessenger.of(context);
+    // The container outlives this tile: a `family` event can refetch and drop it while [act] runs.
+    final container = ProviderScope.containerOf(context);
     try {
       await act();
       messenger.showSnackBar(SnackBar(content: Text(done)));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
     }
-    ref.invalidate(familyProvider);
-    if (families) ref.read(familiesProvider.notifier).refresh().ignore();
+    container.invalidate(familyProvider);
+    if (families) container.read(familiesProvider.notifier).refresh().ignore();
   }
 
   Future<void> _reset(BuildContext context, WidgetRef ref) async {
@@ -438,12 +443,13 @@ class _UserTile extends ConsumerWidget {
     if (!ok || !context.mounted) return;
     final admin = ref.read(adminServiceProvider);
     if (admin == null) return;
+    final container = ProviderScope.containerOf(context);
     try {
       final link = await admin.resetUser(user.id, currentIdentityPub: user.identityPub);
-      ref.invalidate(familyProvider);
+      container.invalidate(familyProvider);
       if (context.mounted) await showDialog<void>(context: context, builder: (_) => _ResetLinkDialog(name: name, link: link));
     } catch (e) {
-      ref.invalidate(familyProvider);
+      container.invalidate(familyProvider);
       if (context.mounted) {
         final msg = e is ApiException && e.code == 'conflict'
             ? "$name's account changed meanwhile. Check the list and try again."

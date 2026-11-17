@@ -192,7 +192,7 @@ describe("POST /families/:id/admins/:userId", () => {
 });
 
 describe("GET/POST/PUT /families", () => {
-  type FamilyOut = { id: number; name: string; status: string; role: string; memberCount: number; owner: boolean; createdAt: number };
+  type FamilyOut = { id: number; name: string; status: string; role: string; memberCount: number; owner: boolean; ownerId: string | null; createdAt: number };
   const list = async (u: { accessToken: string }) =>
     (await (await api(u.accessToken, "GET", "/families")).json<{ families: FamilyOut[] }>()).families;
 
@@ -212,6 +212,11 @@ describe("GET/POST/PUT /families", () => {
     expect(fams[0]).toMatchObject({ name: "Family", status: "approved", role: "member", owner: false });
     expect(fams[1]).toMatchObject({ name: "Cousins", status: "pending", role: "admin", memberCount: 2, owner: true });
     expect(typeof fams[1].createdAt).toBe("number");
+    expect(fams[1].ownerId).toBe(me.userId);
+    const first = await env.DB.prepare("SELECT created_by FROM families WHERE id = 1").first<string | null>("created_by");
+    expect(fams[0].ownerId).toBe(first);
+    await env.DB.prepare("UPDATE families SET created_by = NULL WHERE id = ?").bind(f).run();
+    expect((await list(me))[1]).toMatchObject({ owner: false, ownerId: null });
     expect(peer.userId).toBeTruthy();
   });
 

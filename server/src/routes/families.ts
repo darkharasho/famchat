@@ -38,6 +38,7 @@ const familyOut = (r: FamilyRow, userId: string) => ({
   role: r.role,
   memberCount: r.member_count,
   owner: r.created_by === userId,
+  ownerId: r.created_by,
   createdAt: r.created_at,
 });
 

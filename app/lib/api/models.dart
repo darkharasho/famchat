@@ -208,6 +208,7 @@ class Family {
     required this.admin,
     required this.owner,
     required this.memberCount,
+    this.ownerId,
   });
   final int id;
   final String name;
@@ -220,6 +221,9 @@ class Family {
 
   /// This user created it (or it passed to them).
   final bool owner;
+
+  /// The owner's user id; null when the family has none.
+  final String? ownerId;
 
   /// Live members.
   final int memberCount;
