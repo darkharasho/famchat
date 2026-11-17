@@ -2,19 +2,36 @@
 # The AppImage's entry point (build-appimage.sh copies it in).
 HERE="$(dirname "$(readlink -f "$0")")"
 
-# Voice playback needs libmpv. Use the system's when it has one (media_kit finds it by name);
-# otherwise the copy bundled in usr/lib.
-has_system_mpv() {
-  for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /usr/local/lib; do
-    for f in "$d"/libmpv.so "$d"/libmpv.so.2 "$d"/libmpv.so.1; do
-      [ -e "$f" ] && return 0
-    done
+# libmpv plays voice and video. The video plugin links libmpv.so.1 directly, so the bundled
+# libmpv (usr/lib, with the libraries it needs) must be findable at launch on systems without
+# that exact version. Only the bundled libraries the system lacks go on the library path (in a
+# private folder of links): libraries the system has (gnutls, cairo, GTK, ...) stay the system's,
+# which the rest of the desktop stack expects.
+has_lib() {
+  /sbin/ldconfig -p 2>/dev/null | grep -q "^[[:space:]]*$1 " && return 0
+  for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib64 /lib/x86_64-linux-gnu; do
+    [ -e "$d/$1" ] && return 0
   done
   return 1
 }
-if [ -z "$LIBMPV_LIBRARY_PATH" ] && [ -f "$HERE/usr/lib/libmpv.name" ] && ! has_system_mpv; then
-  LIBMPV_LIBRARY_PATH="$HERE/usr/lib/$(cat "$HERE/usr/lib/libmpv.name")"
-  export LIBMPV_LIBRARY_PATH
+if [ -f "$HERE/usr/lib/libmpv.name" ] && ! has_lib libmpv.so.1; then
+  base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+  # Folders left by runs that were killed (their process is gone).
+  for old in "$base"/famchat-libs-*; do
+    [ -d "$old" ] && ! kill -0 "${old##*-}" 2>/dev/null && rm -rf "$old"
+  done
+  libs="$base/famchat-libs-$$"
+  rm -rf "$libs" && mkdir -p "$libs"
+  for f in "$HERE"/usr/lib/*.so*; do
+    name="$(basename "$f")"
+    has_lib "$name" || ln -s "$f" "$libs/$name"
+  done
+  LD_LIBRARY_PATH="$libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH
+  # Audio loads libmpv by name: the same copy the video plugin uses.
+  [ -z "$LIBMPV_LIBRARY_PATH" ] && LIBMPV_LIBRARY_PATH="$libs/$(cat "$HERE/usr/lib/libmpv.name")" && export LIBMPV_LIBRARY_PATH
+  # FamChat runs as this process (exec keeps the pid): the next launch removes the folder once
+  # it's gone.
 fi
 
 # Desktop integration: a launcher named after the app id (dev.famchat.app), so desktops show
