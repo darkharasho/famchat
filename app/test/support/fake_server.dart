@@ -10,11 +10,14 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 class FakeUser {
-  FakeUser(this.id, this.name, this.isAdmin, this.identityPub, {this.reviewer = false});
+  FakeUser(this.id, this.name, this.isAdmin, this.identityPub, {this.reviewer = false, bool? operator}) : operator = operator ?? isAdmin;
   final String id;
   String identityPub;
   String name;
   bool isAdmin;
+
+  /// The operator (server OPERATOR_USER_ID): the only one who removes people or runs reviewers.
+  final bool operator;
   bool deleted = false;
   bool former = false;
 
@@ -38,7 +41,8 @@ class FakeDevice {
 }
 
 class FakeInvite {
-  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset, this.reviewer = false});
+  FakeInvite(this.name, this.admin, this.expiresAt, {this.userId, this.reset, this.reviewer = false, this.operator});
+  final bool? operator;
   final String name;
   final bool admin;
   DateTime expiresAt;
@@ -121,9 +125,9 @@ class FakeServer {
   static const claimRetry = Duration(minutes: 10);
 
   /// Adds a user with [identityPub] (base64url) and no device, as if they joined elsewhere.
-  String addUser(String name, {required String identityPub, bool admin = false, bool reviewer = false}) {
+  String addUser(String name, {required String identityPub, bool admin = false, bool reviewer = false, bool? operator}) {
     final id = _id('U');
-    users[id] = FakeUser(id, name, admin, identityPub, reviewer: reviewer);
+    users[id] = FakeUser(id, name, admin, identityPub, reviewer: reviewer, operator: operator);
     return id;
   }
 
@@ -159,9 +163,9 @@ class FakeServer {
 
   int get requestCount => log.length;
 
-  String addInvite({String name = 'Mom', bool admin = false}) {
+  String addInvite({String name = 'Mom', bool admin = false, bool? operator}) {
     final token = _token();
-    invites[token] = FakeInvite(name, admin, now().add(const Duration(days: 7)));
+    invites[token] = FakeInvite(name, admin, now().add(const Duration(days: 7)), operator: operator);
     return token;
   }
 
@@ -284,6 +288,7 @@ class FakeServer {
         'isAdmin': u.isAdmin,
         'recoveryCodeSet': u.recoveryPub != null,
         'reviewer': u.reviewer,
+        'operator': u.operator,
       });
     }
     if (r.method == 'GET' && path == '/api/users') {
@@ -326,7 +331,7 @@ class FakeServer {
     }
     final removeMatch = RegExp(r'^/api/admin/users/([^/]+)$').firstMatch(path);
     if (r.method == 'DELETE' && removeMatch != null) {
-      if (!users[userId]!.isAdmin) return _err('forbidden');
+      if (!users[userId]!.operator) return _err('forbidden');
       final target = users[removeMatch[1]];
       if (removeMatch[1] == userId) return _err('invalid_request');
       if (target == null || target.deleted) return _err('not_found');
@@ -457,7 +462,7 @@ class FakeServer {
     }
     if (path == '/api/admin/reviewer-invite' || path == '/api/admin/reviewers') {
       final u = users[userId]!;
-      if (!u.isAdmin || u.reviewer) return _err('forbidden');
+      if (!u.operator || u.reviewer) return _err('forbidden');
       String url(String token) => 'https://famchat.dev/join#review.$token';
       if (r.method == 'POST') return _json({'inviteToken': '', 'inviteUrl': url(addReviewerInvite()), 'createdAt': 0}, 201);
       if (r.method == 'DELETE') {
@@ -754,7 +759,7 @@ class FakeServer {
     }
     if (inv != null && inv.usedBy == null && inv.expiresAt.isAfter(t)) {
       final userId = _id('U'), deviceId = _id('D');
-      users[userId] = FakeUser(userId, inv.name, inv.admin, cert['identityPub']!);
+      users[userId] = FakeUser(userId, inv.name, inv.admin, cert['identityPub']!, operator: inv.operator);
       devices[deviceId] = FakeDevice(deviceId, userId, deviceName, b['platform'] as String, cert, refresh, t);
       inv
         ..usedBy = userId

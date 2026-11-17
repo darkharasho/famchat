@@ -37,8 +37,8 @@ ProviderContainer appContainer(WidgetTester tester) =>
 GoRouter appRouter(WidgetTester tester) => appContainer(tester).read(routerProvider);
 
 /// Signs in through the controller (not the UI) and settles on the home screen.
-Future<void> signInDirectly(WidgetTester tester, FakeServer server, {String name = 'Mom', bool admin = false}) async {
-  await appContainer(tester).read(sessionProvider.notifier).join(token: server.addInvite(name: name, admin: admin), deviceName: 'Pixel');
+Future<void> signInDirectly(WidgetTester tester, FakeServer server, {String name = 'Mom', bool admin = false, bool? operator}) async {
+  await appContainer(tester).read(sessionProvider.notifier).join(token: server.addInvite(name: name, admin: admin, operator: operator), deviceName: 'Pixel');
   await tester.pumpAndSettle();
 }
 

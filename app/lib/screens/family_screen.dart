@@ -74,7 +74,7 @@ class FamilyScreen extends ConsumerWidget {
                         onTap: () => context.go('/settings/family/recovery-code'),
                       ),
                   ]),
-                  const _ReviewerSection(),
+                  if (me?.operator == true) const _ReviewerSection(),
                 ]),
               ),
             ],
@@ -194,7 +194,8 @@ class _UserTile extends ConsumerWidget {
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'reset', child: Text('Reset account')),
                 if (!user.isAdmin) const PopupMenuItem(value: 'admin', child: Text('Make admin')),
-                const PopupMenuItem(value: 'remove', child: Text('Remove from family')),
+                if (ref.read(meProvider).value?.operator == true)
+                  const PopupMenuItem(value: 'remove', child: Text('Remove from family')),
               ],
             ),
     );

@@ -126,6 +126,7 @@ class ApiClient {
               isAdmin: j['isAdmin'] as bool,
               recoveryCodeSet: j['recoveryCodeSet'] == true,
               reviewer: j['reviewer'] == true,
+              operator: j['operator'] == true,
               gifKey: j['gifKey'] is String && (j['gifKey'] as String).isNotEmpty ? j['gifKey'] as String : null,
             ));
       });

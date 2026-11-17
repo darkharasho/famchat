@@ -53,6 +53,7 @@ class Me {
     required this.isAdmin,
     this.recoveryCodeSet = false,
     this.reviewer = false,
+    this.operator = false,
     this.gifKey,
   });
   final String userId, deviceId, name;
@@ -66,6 +67,9 @@ class Me {
 
   /// A reviewer account (docs/protocol.md "Reviewer accounts"): sees only other reviewers.
   final bool reviewer;
+
+  /// The family's operator: the only one who removes people or manages reviewer accounts.
+  final bool operator;
 }
 
 /// `GET /admin/reviewers` (docs/protocol.md "Reviewer accounts"): the active reviewer invite's
