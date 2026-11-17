@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +18,8 @@ import '../../chat/wire.dart' show FetchedPreview;
 import '../../widgets/link_text.dart' show splitLinks;
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
+import '../../chat/spelling/providers.dart';
+import '../../chat/spelling/speller.dart';
 import '../../chat/reactions.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
@@ -103,6 +106,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   FetchedPreview? _preview;
   Timer? _previewTimer;
 
+  /// The fetch for [_previewUrl] while it runs, so a send can wait for it.
+  Future<void>? _previewLoad;
+
+  /// A send is waiting for its link's preview (a second tap must not send twice).
+  bool _waitingForPreview = false;
+
   /// The first web link in [text], if any.
   static String? _firstLink(String text) {
     for (final p in splitLinks(text)) {
@@ -127,13 +136,28 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _previewUrl = url;
       _preview = null;
     });
+    final fetch = ref.read(chatApiProvider).preview(url);
+    final load = _previewLoad = fetch.then((_) {}, onError: (Object _) {});
     FetchedPreview? found;
     try {
-      found = await ref.read(chatApiProvider).preview(url);
+      found = await fetch;
     } catch (_) {
       found = null; // offline or the site said no: the link just sends plain
+    } finally {
+      if (identical(_previewLoad, load)) _previewLoad = null;
     }
     if (mounted && _previewUrl == url) setState(() => _preview = found);
+  }
+
+  /// Sending right after pasting a link (usual on phones, where the composer card has no time to
+  /// show): wait briefly for its preview, so the message still carries one.
+  Future<void> _awaitPreviewFor(String text) async {
+    final url = _firstLink(text);
+    if (url == null || url == _dismissedPreviewUrl || (url == _previewUrl && _previewLoad == null)) return;
+    _previewTimer?.cancel();
+    final load = url == _previewUrl ? _previewLoad : _checkPreview();
+    if (load == null) return;
+    await load.timeout(const Duration(seconds: 3), onTimeout: () {});
   }
 
   void _removePreview() => setState(() {
@@ -183,6 +207,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (mounted) _focus.requestFocus();
       });
     }
+    HardwareKeyboard.instance.addHandler(_typeToFocus);
     _draftKey = '${ref.read(myUserIdProvider)}|${widget.chatId}';
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
@@ -302,12 +327,127 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  /// Typing while nothing takes text (say, after clicking a message) goes to the composer, key
+  /// included. Shortcuts (Ctrl/Cmd) and other text fields are left alone, as is this chat when a
+  /// dialog or another screen is on top of it.
+  bool _typeToFocus(KeyEvent event) {
+    if (event is! KeyDownEvent || !mounted || _focus.hasFocus || _focus.context == null) return false;
+    final ch = event.character;
+    if (ch == null || ch.isEmpty || ch.runes.any((r) => r < 0x20 || r == 0x7f)) return false;
+    final keys = HardwareKeyboard.instance;
+    if (keys.isControlPressed || keys.isMetaPressed) return false;
+    if (ModalRoute.of(context)?.isCurrent == false) return false;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null && (focused.widget is EditableText || focused.findAncestorWidgetOfExactType<EditableText>() != null)) {
+      return false;
+    }
+    // A space would otherwise press the focused button; a leading space in a message is no loss.
+    if (ch == ' ' && _text.text.isEmpty) return false;
+    _focus.requestFocus();
+    final v = _text.value;
+    final sel = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+    _text.value = TextEditingValue(
+      text: v.text.replaceRange(sel.start, sel.end, ch),
+      selection: TextSelection.collapsed(offset: sel.start + ch.length),
+    );
+    return true;
+  }
+
+  /// Desktop and web spell checking: the word list, and what else counts as a word (family
+  /// members' names, words added to this user's dictionary). A new service when either changes, so
+  /// the composer checks again.
+  Speller? _speller;
+  Set<String> _knownWords = const {};
+  WordListSpellCheckService? _spellService;
+
+  /// Where the latest right-click in the composer landed (global), for [_contextMenu].
+  Offset? _secondaryClickAt;
+
+  SpellCheckConfiguration? _spellCheck() {
+    if (!usesWordListSpelling) {
+      return WidgetsBinding.instance.platformDispatcher.nativeSpellCheckServiceDefined ? const SpellCheckConfiguration() : null;
+    }
+    final speller = ref.watch(spellerProvider).value;
+    if (speller == null) return null;
+    final known = <String>{
+      for (final u in (ref.watch(usersProvider).value ?? const <String, UserRow>{}).values)
+        for (final part in u.name.toLowerCase().split(RegExp(r'\s+')))
+          if (part.isNotEmpty) part,
+      ...?ref.watch(userWordsProvider).value,
+    };
+    if (!identical(speller, _speller) || !setEquals(known, _knownWords) || _spellService == null) {
+      _speller = speller;
+      _knownWords = known;
+      _spellService = WordListSpellCheckService(speller, known.contains);
+    }
+    return SpellCheckConfiguration(
+      spellCheckService: _spellService,
+      misspelledTextStyle: TextField.materialMisspelledTextStyle,
+    );
+  }
+
+  /// Right-click on a flagged word (desktop, web): its corrections and "Add to dictionary" above
+  /// the usual cut/copy/paste.
+  Widget _contextMenu(BuildContext context, EditableTextState state) {
+    final speller = _speller;
+    final value = state.currentTextEditingValue;
+    // Where the right-click was: Linux and Windows leave the caret where it is.
+    final clicked = _secondaryClickAt;
+    _secondaryClickAt = null;
+    final index = clicked != null
+        ? state.renderEditable.getPositionForPoint(clicked).offset
+        : value.selection.isValid
+            ? value.selection.baseOffset
+            : null;
+    // (findSuggestionSpanAtCursorIndex throws when nothing is flagged.)
+    final flagged = state.spellCheckResults?.suggestionSpans.isNotEmpty ?? false;
+    final span = speller == null || !usesWordListSpelling || index == null || !flagged
+        ? null
+        : state.findSuggestionSpanAtCursorIndex(index);
+    if (speller == null || span == null) return AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
+    final word = span.range.textInside(value.text);
+    void replace(String fix) {
+      state.userUpdateTextEditingValue(
+        TextEditingValue(
+          text: value.text.replaceRange(span.range.start, span.range.end, fix),
+          selection: TextSelection.collapsed(offset: span.range.start + fix.length),
+        ),
+        SelectionChangedCause.toolbar,
+      );
+      state.hideToolbar();
+    }
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: state.contextMenuAnchors,
+      buttonItems: [
+        for (final fix in speller.suggest(word)) ContextMenuButtonItem(label: fix, onPressed: () => replace(fix)),
+        ContextMenuButtonItem(
+          label: 'Add to dictionary',
+          onPressed: () {
+            state.hideToolbar();
+            unawaited(ref.read(userWordsProvider.notifier).add(word));
+          },
+        ),
+        ...state.contextMenuButtonItems,
+      ],
+    );
+  }
+
+  /// Phones and tablets, where taps elsewhere should put the keyboard away.
+  bool get _touch => {TargetPlatform.android, TargetPlatform.iOS}.contains(defaultTargetPlatform);
+
+  void _dismissInput() {
+    _focus.unfocus();
+    _closePicker();
+  }
+
   void _closePicker() {
     if (_pickerOpen) setState(() => _pickerOpen = false);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_typeToFocus);
     _recording.dispose(); // discards an unsent recording (one being finished still sends)
     // No voice keeps playing without its bubble on screen (after this frame: providers cannot change
     // while the tree is building).
@@ -390,6 +530,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       if (editing != null) {
         if (text.trim() != _currentText(editing)?.trim()) await sync.editText(widget.chatId, editing.id, text);
       } else {
+        if (_waitingForPreview) return;
+        _waitingForPreview = true;
+        try {
+          await _awaitPreviewFor(text);
+        } finally {
+          _waitingForPreview = false;
+        }
+        if (!mounted) return;
         final preview = _preview;
         final media = ref.read(mediaServiceProvider);
         if (preview != null && media != null && _firstLink(text) == _previewUrl) {
@@ -685,7 +833,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               ? context.go('/')
                               : _focus.unfocus(),
                 },
-          child: TextField(
+          child: Listener(
+            onPointerDown: (e) {
+              if (e.buttons & kSecondaryMouseButton != 0) _secondaryClickAt = e.position;
+            },
+            child: TextField(
             key: const Key('composer'),
             controller: _text,
             focusNode: _focus,
@@ -693,6 +845,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             keyboardType: TextInputType.multiline,
+            spellCheckConfiguration: _spellCheck(),
+            contextMenuBuilder: _contextMenu,
             inputFormatters: const [ShortcodeFormatter(), EmoticonFormatter()],
             onTap: _closePicker,
             style: Theme.of(context).textTheme.bodyLarge,
@@ -723,6 +877,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
             onChanged: (_) => ref.read(chatSyncProvider)?.typing(widget.chatId),
+          ),
           ),
         ),
       ),
@@ -968,7 +1123,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ],
               ),
             Expanded(
-              child: visible.isEmpty
+              // Phones: a tap on the messages (not on a link or button in one) puts the keyboard
+              // or emoji picker away.
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _touch ? _dismissInput : null,
+                child: visible.isEmpty
                   ? EmptyState(
                       art: PersonAvatar(
                         label: title,
@@ -997,6 +1157,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         return i < 0 ? null : i;
                       },
                     ),
+              ),
             ),
             if (typingNames.isNotEmpty)
               Padding(

@@ -88,16 +88,13 @@ class _ListPane extends ConsumerWidget {
     final admin = signedIn?.isAdmin ?? false;
     return Scaffold(
       appBar: AppBar(
+        // An open chat is a route above this one, which would give the list a back arrow.
+        automaticallyImplyLeading: false,
         title: const Wordmark(),
         actions: [
           IconButton(
-            tooltip: 'Find a chat ($shortcutModifier+K)',
+            tooltip: 'Search people and messages ($shortcutModifier+Shift+F)',
             icon: const Icon(Icons.search_rounded),
-            onPressed: () => showQuickSwitcher(context),
-          ),
-          IconButton(
-            tooltip: 'Search messages ($shortcutModifier+Shift+F)',
-            icon: const Icon(Icons.manage_search_rounded),
             onPressed: () => context.go('/search'),
           ),
           IconButton(

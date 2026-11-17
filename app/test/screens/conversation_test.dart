@@ -3,6 +3,10 @@ import 'package:famchat/chat/directory.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:famchat/widgets/link_text.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -213,5 +217,45 @@ void main() {
     await tester.tap(find.text('Not sent. Tap to retry'));
     await settle(tester);
     expect((await inApp(tester, () => alice.db.messageById('m9')))!.state, 'pending');
+  });
+
+  // Once focused, the platform's text input delivers the following keys (not simulated here).
+  chatTestWidgets('typing while the composer is unfocused moves focus there and keeps the key', (tester) async {
+    await open(tester);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await settle(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyH, character: 'h');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyH);
+    await settle(tester);
+    final field = tester.widget<TextField>(find.byKey(const Key('composer')));
+    expect(field.controller!.text, 'h');
+    expect(field.focusNode!.hasFocus, isTrue);
+  });
+
+  chatTestWidgets('shortcuts with Ctrl are not typed into the composer', (tester) async {
+    await open(tester);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await settle(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyB, character: 'b');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    final field = tester.widget<TextField>(find.byKey(const Key('composer')));
+    expect(field.controller!.text, isNot(contains('b')));
+    expect(field.focusNode!.hasFocus, isFalse);
+  });
+
+  chatTestWidgets('hovering a link in a message shows the link cursor', (tester) async {
+    await open(tester, messages: [row('m1', 1, bob.userId, 'look at https://example.com today')]);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    final text = find.byType(LinkText);
+    // The test font's glyphs are squares of the font size: character 12 is inside the link.
+    final box = tester.getRect(text);
+    await mouse.moveTo(Offset(box.left + 16 * 12.5, box.top + 8));
+    await tester.pump();
+    expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
   });
 }

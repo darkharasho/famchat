@@ -58,6 +58,27 @@ void main() {
   TextEditingController text(WidgetTester tester) => tester.widget<TextField>(composer).controller!;
 
   group('picker', () {
+    chatTestWidgets('on a phone, tapping the messages closes the picker', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Emoji'));
+      await settle(tester);
+      expect(find.byType(EmojiPicker), findsOneWidget);
+      await tester.tapAt(const Offset(200, 300)); // the message area
+      await settle(tester);
+      expect(find.byType(EmojiPicker), findsNothing);
+      expect(find.byTooltip('Emoji'), findsOneWidget);
+    });
+
+    chatTestWidgets('on a phone, tapping the messages closes the keyboard', (tester) async {
+      await open(tester);
+      await tester.tap(composer);
+      await settle(tester);
+      expect(tester.widget<TextField>(composer).focusNode!.hasFocus, isTrue);
+      await tester.tapAt(const Offset(200, 300));
+      await settle(tester);
+      expect(tester.widget<TextField>(composer).focusNode!.hasFocus, isFalse);
+    });
+
     chatTestWidgets('on a phone it replaces the keyboard and inserts at the cursor', (tester) async {
       await open(tester);
       await tester.enterText(composer, 'hello world');

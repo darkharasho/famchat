@@ -30,6 +30,8 @@ class LinkPreviewCard extends ConsumerWidget {
       label: '${preview.siteName ?? 'Link'}: ${preview.title}',
       child: InkWell(
         borderRadius: BorderRadius.circular(Radii.md),
+        // A link, so the hand cursor everywhere (the adaptive default is an arrow on desktop).
+        mouseCursor: SystemMouseCursors.click,
         onTap: uri == null ? null : () => openLink(uri),
         child: Container(
           constraints: const BoxConstraints(maxWidth: 320),
