@@ -13,6 +13,7 @@ import 'video.dart';
 class PlatformVideoProcessor implements VideoProcessor {
   @override
   Future<ProcessedVideo> process(XFile file) async {
+    if (!playsEverywhere(file)) throw const UnsupportedVideoException('only MP4 and MOV');
     final size = await file.length();
     if (size > maxVideoBytes) throw VideoTooLargeException(size);
     final bytes = await file.readAsBytes();

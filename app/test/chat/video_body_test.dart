@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/crypto/media.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:famchat/media/media_service.dart';
+import 'package:famchat/media/video.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const mediaKey = '01JC0000000000000000000000';
@@ -53,5 +55,18 @@ void main() {
     ]) {
       expect(() => decode(bad), throwsFormatException, reason: '$bad');
     }
+  });
+
+  test('only formats every platform plays are sent without converting', () {
+    bool ok(String path, [String? mime]) => playsEverywhere(XFile(path, mimeType: mime));
+    expect(ok('/a.mp4'), isTrue);
+    expect(ok('/a.MOV'), isTrue);
+    expect(ok('/a.m4v'), isTrue);
+    expect(ok('/x', 'video/mp4'), isTrue);
+    expect(ok('/x', 'video/quicktime'), isTrue);
+    expect(ok('/a.mkv'), isFalse);
+    expect(ok('/a.webm'), isFalse);
+    expect(ok('/a.avi'), isFalse);
+    expect(ok('/x', 'video/webm'), isFalse);
   });
 }

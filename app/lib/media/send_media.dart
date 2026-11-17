@@ -18,7 +18,11 @@ class SendReport {
           ? 'That video is too large to send ($mb MB max).'
           : '$bigVideos videos are too large to send ($mb MB max).';
     }
-    if (badVideos > 0) return badVideos == 1 ? "That video can't be sent." : "$badVideos videos can't be sent.";
+    if (badVideos > 0) {
+      return badVideos == 1
+          ? "That video can't be sent. MP4 and MOV videos work."
+          : "$badVideos videos can't be sent. MP4 and MOV videos work.";
+    }
     if (badImages > 0) return badImages == 1 ? "That image can't be sent." : "$badImages images can't be sent.";
     return null;
   }

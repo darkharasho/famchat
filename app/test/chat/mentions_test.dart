@@ -16,6 +16,8 @@ void main() {
     expect(mentionsIn('email me@Mom.com', people), isEmpty, reason: 'not after a letter');
     expect(mentionsIn('@Bo @Bo', people), ['u4']);
     expect(mentionsIn('no mentions', people), isEmpty);
+    // Two people with one name: both are mentioned (the text can't tell them apart).
+    expect(mentionsIn('@sam hi', {'a': 'Sam', 'b': 'Sam', 'c': 'Bo'}), unorderedEquals(['a', 'b']));
   });
 
   test('mentionQueryAt: the @word being typed at the cursor', () {

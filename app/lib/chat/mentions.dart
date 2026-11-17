@@ -67,12 +67,9 @@ List<String> mentionsIn(String text, Map<String, String> people) {
   final found = <String>[];
   for (final (s, e) in ranges) {
     final name = text.substring(s + 1, e).toLowerCase();
-    // The longest-matching person with that name (names are unique enough in one family).
+    // Everyone with that name: the text can't tell two of them apart.
     for (final p in people.entries) {
-      if (p.value.toLowerCase() == name && !found.contains(p.key)) {
-        found.add(p.key);
-        break;
-      }
+      if (p.value.toLowerCase() == name && !found.contains(p.key)) found.add(p.key);
     }
   }
   return found;

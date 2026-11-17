@@ -293,8 +293,9 @@ class ApiClient {
   /// Media transfers get longer than [timeout]: 30 s plus 1 s per 50 kB.
   static Duration mediaTimeout(int bytes) => Duration(seconds: 30 + bytes ~/ 50000);
 
-  /// Download deadline when the size isn't known up front (blobs are at most 16 MiB).
-  static const downloadTimeout = Duration(minutes: 5);
+  /// Download deadline when the size isn't known up front: a 64 MiB video over a slow mobile link
+  /// (about 0.5 Mbit/s) still finishes.
+  static const downloadTimeout = Duration(minutes: 20);
 
   /// Authed POST (or [method]) of raw bytes ([contentType], `Content-Length` set), streamed in
   /// 64 KiB chunks; [onProgress] gets the bytes the network has taken so far. Returns the JSON body.

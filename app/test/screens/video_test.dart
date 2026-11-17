@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,11 +10,13 @@ import 'package:famchat/chat/ulid.dart';
 import 'package:famchat/crypto/media.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/media/photo_picker.dart';
+import 'package:famchat/media/providers.dart';
 import 'package:famchat/router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:material_ui/material_ui.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 import '../support/chat_harness.dart';
@@ -123,7 +126,7 @@ void main() {
     await tester.tap(find.byKey(Key('video-$id')));
     await settle(tester);
     expect(find.byKey(const Key('video-player')), findsOneWidget);
-    expect(platform.created, ['https://video.test/$id.mp4']);
+    expect(platform.created.single, startsWith('https://video.test/$id-'));
     expect(platform.played, isNotEmpty);
 
     await tester.tap(find.byTooltip('Close'));
@@ -135,7 +138,7 @@ void main() {
       await tester.pump();
     }
     expect(platform.disposed, isNotEmpty);
-    expect(released, [Uri.parse('https://video.test/$id.mp4')]);
+    expect(released.map((u) => '$u'), [platform.created.single]);
   });
 
   chatTestWidgets('a video without a poster still shows a tile with its length', (tester) async {
@@ -144,5 +147,51 @@ void main() {
     await settle(tester);
     expect(find.byKey(const Key('video-poster')), findsNothing);
     expect(find.text('1:15'), findsOneWidget);
+  });
+
+  chatTestWidgets('closing while the video is still being written leaves no decrypted file behind', (tester) async {
+    final released = <Uri>[], written = <Uri>[];
+    final gate = Completer<void>();
+    setWindow(tester, const Size(400, 800));
+    await pumpChatApp(tester, alice,
+        videoFiles: VideoFiles(
+          playable: (id, bytes) async {
+            await gate.future;
+            final uri = Uri.parse('https://video.test/$id.mp4');
+            written.add(uri);
+            return uri;
+          },
+          release: (uri) async => released.add(uri),
+          controllerFor: VideoPlayerController.networkUrl,
+        ));
+    final chatId = await inApp(tester, () => ChatSync(db: alice.db, api: alice.api, hub: alice.hub, me: alice.me).openDirect(bob.userId));
+    ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
+    await settle(tester);
+    final (_, id) = await bobsVideo(tester, chatId, photoBytes(100));
+    await settle(tester);
+    await tester.tap(find.byKey(Key('video-$id')));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 50)); // the spinner never settles while it loads
+    }
+    await tester.tap(find.byTooltip('Close'));
+    await settle(tester);
+    gate.complete();
+    await settle(tester);
+    expect(written, hasLength(1));
+    expect(released, written);
+    expect(platform.created, isEmpty, reason: 'no player for a closed viewer');
+  });
+
+  chatTestWidgets('two viewers of one video never share a file', (tester) async {
+    final chatId = await open(tester);
+    final (_, id) = await bobsVideo(tester, chatId, photoBytes(100));
+    await settle(tester);
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.byKey(Key('video-$id')));
+      await settle(tester);
+      await tester.tap(find.byTooltip('Close'));
+      await settle(tester);
+    }
+    expect(platform.created.toSet(), hasLength(2));
   });
 }

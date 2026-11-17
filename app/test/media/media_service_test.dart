@@ -145,6 +145,16 @@ void main() {
       expect(await bob.media.load(b.thumbRef!), v.thumb);
     });
 
+    test('a real-sized video (20 MiB) sends and decrypts', () async {
+      final (alice, bob, chatId) = await pair();
+      final big = Uint8List(20 * 1024 * 1024)..fillRange(0, 1000, 7);
+      final id = await alice.media.sendVideo(
+          chatId, ProcessedVideo(bytes: big, width: 1280, height: 720, duration: const Duration(minutes: 2)));
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent');
+      await until(() async => (await bob.videos(chatId)).isNotEmpty);
+      expect((await bob.media.load((await bob.videos(chatId)).single.ref))!.length, big.length);
+    });
+
     test('a video without a poster frame still sends', () async {
       final (alice, bob, chatId) = await pair();
       await alice.media.sendVideo(chatId, clip(thumb: false));

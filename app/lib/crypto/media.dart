@@ -4,7 +4,7 @@
 //   ct   = XChaCha20-Poly1305(key, nonce, plaintext, aad)
 //   aad  = "famchat-media-v1" ‖ str(purpose)          purpose: "file" | "thumb"
 //
-// Single-shot, not chunked: blobs are capped at 16 MiB (photos ≤ 15 MiB, voice ≤ 8 MiB) and are held
+// Single-shot, not chunked: blobs are capped at 64 MiB (videos; photos ≤ 15 MiB, voice ≤ 8 MiB) and are held
 // in memory whole anyway (hash check before decrypting, then Image.memory / the audio player).
 import 'dart:math';
 import 'dart:typed_data';
@@ -23,8 +23,9 @@ const mediaDomain = domainMedia;
 /// nonce + MAC.
 const mediaOverhead = 24 + 16;
 
-/// Largest blob encrypted or decrypted.
-const maxMediaBlobBytes = 16 * 1024 * 1024;
+/// Largest blob encrypted or decrypted: the largest kind (`video`, 64 MiB). Each kind's own cap
+/// (lib/media/media_api.dart, enforced by the server too) is checked when it's staged.
+const maxMediaBlobBytes = 64 * 1024 * 1024;
 
 /// What a blob is, bound into its AAD so the server can't swap a thumbnail for the file.
 enum MediaPurpose { file, thumb }

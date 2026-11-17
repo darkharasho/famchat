@@ -141,7 +141,10 @@ class VideoViewer extends ConsumerStatefulWidget {
 
 enum _Load { loading, ready, expired, failed }
 
+int _viewers = 0;
+
 class _VideoViewerState extends ConsumerState<VideoViewer> {
+  final _instance = ++_viewers;
   _Load _state = _Load.loading;
   VideoPlayerController? _controller;
   Uri? _uri;
@@ -163,11 +166,23 @@ class _VideoViewerState extends ConsumerState<VideoViewer> {
       final bytes = await media.load(widget.body.ref);
       if (!mounted) return;
       if (bytes == null) return setState(() => _state = _Load.expired);
-      final uri = _uri ??= await _files.playable(widget.messageId, bytes);
-      final c = _files.controllerFor(uri);
-      await c.initialize();
+      // A file of its own per viewer: a viewer closing (and deleting its file) never pulls the file
+      // from under one just opened on the same video.
+      final uri = _uri ??= await _files.playable('${widget.messageId}-$_instance', bytes);
       if (!mounted) {
+        // Closed while the file was written: dispose ran before there was a file to delete.
+        await _files.release(uri);
+        return;
+      }
+      final c = _files.controllerFor(uri);
+      try {
+        await c.initialize();
+      } catch (_) {
         await c.dispose();
+        rethrow;
+      }
+      if (!mounted) {
+        await c.dispose(); // dispose already deleted the file
         return;
       }
       _controller = c..addListener(_changed);

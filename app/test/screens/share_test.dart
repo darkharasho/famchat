@@ -96,4 +96,16 @@ void main() {
     expect(source.finished, 1);
     expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
   });
+
+  chatTestWidgets("shared text joins the chat's draft instead of replacing it; a double tap sends once", (tester) async {
+    final chatId = await start(tester);
+    await inApp(tester, () => alice.db.setDraft(chatId, 'look at'));
+    source.share(IncomingShare(media: [PickedPhoto(png)], text: 'https://x.io'));
+    await settle(tester);
+    await tester.tap(find.byKey(Key('share-to-$chatId')));
+    await tester.tap(find.byKey(Key('share-to-$chatId')), warnIfMissed: false);
+    await settle(tester);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'look at\nhttps://x.io');
+    expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), hasLength(1));
+  });
 }

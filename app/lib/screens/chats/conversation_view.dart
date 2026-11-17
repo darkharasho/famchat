@@ -136,6 +136,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (mounted) _focus.requestFocus();
       });
     }
+    _draftKey = '${ref.read(myUserIdProvider)}|${widget.chatId}';
     _text.addListener(() {
       final empty = _text.text.trim().isEmpty;
       if (empty != _empty && mounted) setState(() => _empty = empty);
@@ -145,7 +146,20 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     unawaited(_loadDraft());
   }
 
+  /// The latest draft of each chat this run (keyed by user and chat), ahead of the database write:
+  /// a view replaced at once (the window crossing the wide layout) starts from it.
+  static final _latestDrafts = <String, String>{};
+
+  late final String _draftKey;
+
   Future<void> _loadDraft() async {
+    if (_latestDrafts[_draftKey] case final latest?) {
+      if (latest.isNotEmpty && _text.text.isEmpty && _editing == null) {
+        _savedDraft = latest;
+        _text.value = TextEditingValue(text: latest, selection: TextSelection.collapsed(offset: latest.length));
+      }
+      return;
+    }
     final draft = await ref.read(chatDbProvider).draftOf(widget.chatId);
     // Typing (or an edit) that began meanwhile wins.
     if (draft == null || !mounted || _text.text.isNotEmpty || _editing != null) return;
@@ -157,6 +171,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   String get _draft => _editing != null ? _stashedDraft : _text.text;
 
   void _scheduleDraftSave() {
+    _latestDrafts[_draftKey] = _draft;
     if (_draft == _savedDraft) return;
     _draftTimer?.cancel();
     _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);

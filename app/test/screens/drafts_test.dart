@@ -88,4 +88,12 @@ void main() {
     await settle(tester);
     expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'half written');
   });
+
+  chatTestWidgets('typing survives the window changing layout at once', (tester) async {
+    await open(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'mid-sentence');
+    setWindow(tester, const Size(1000, 800)); // the conversation moves beside the list: a new state
+    await settle(tester);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'mid-sentence');
+  });
 }

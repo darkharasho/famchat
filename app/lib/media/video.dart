@@ -62,3 +62,13 @@ bool isVideoFile(XFile f) {
   final dot = name.lastIndexOf('.');
   return dot >= 0 && videoExtensions.contains(name.substring(dot + 1).toLowerCase());
 }
+
+/// Whether [f] is a container and codec family every platform's player opens (MP4/QuickTime):
+/// what Windows, Linux and the web may send without converting.
+bool playsEverywhere(XFile f) {
+  final mime = f.mimeType;
+  if (mime != null && mime.isNotEmpty) return mime == 'video/mp4' || mime == 'video/quicktime' || mime == 'video/x-m4v';
+  final name = f.name.isNotEmpty ? f.name : f.path;
+  final dot = name.lastIndexOf('.');
+  return dot >= 0 && const {'mp4', 'm4v', 'mov'}.contains(name.substring(dot + 1).toLowerCase());
+}

@@ -13,8 +13,16 @@ import '../share/share.dart';
 import '../theme/tokens.dart';
 import '../widgets/person_avatar.dart';
 
-class ShareScreen extends ConsumerWidget {
+class ShareScreen extends ConsumerStatefulWidget {
   const ShareScreen({super.key});
+
+  @override
+  ConsumerState<ShareScreen> createState() => _ShareScreenState();
+}
+
+class _ShareScreenState extends ConsumerState<ShareScreen> {
+  /// A chat was picked: further taps (a double tap) do nothing.
+  bool _sending = false;
 
   /// Forgets the share. Call after navigating away: with no share, this screen goes home.
   static void _finish(PendingShare pending, ShareSource source) {
@@ -22,7 +30,9 @@ class ShareScreen extends ConsumerWidget {
     unawaited(source.done());
   }
 
-  Future<void> _sendTo(BuildContext context, WidgetRef ref, IncomingShare share, String chatId) async {
+  Future<void> _sendTo(IncomingShare share, String chatId) async {
+    if (_sending) return;
+    _sending = true;
     // Read everything now: this screen is gone once the chat opens.
     final media = ref.read(mediaServiceProvider);
     final videos = ref.read(videoProcessorProvider);
@@ -30,8 +40,12 @@ class ShareScreen extends ConsumerWidget {
     final messenger = ref.read(rootMessengerKeyProvider).currentState;
     final pending = ref.read(pendingShareProvider.notifier), source = ref.read(shareSourceProvider);
     // Text waits in the composer, to read over (or edit) before sending.
-    if (share.text case final text? when text.trim().isNotEmpty) await db.setDraft(chatId, text);
-    if (context.mounted) context.go('/chats/$chatId');
+    // Added to what's already typed there, never replacing it.
+    if (share.text case final text? when text.trim().isNotEmpty) {
+      final draft = await db.draftOf(chatId);
+      await db.setDraft(chatId, draft == null || draft.trim().isEmpty ? text : '$draft\n$text');
+    }
+    if (mounted) context.go('/chats/$chatId');
     _finish(pending, source);
     if (media == null || share.media.isEmpty) return;
     final report = await sendMedia(media, videos, chatId, share.media);
@@ -39,7 +53,7 @@ class ShareScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final share = ref.watch(pendingShareProvider);
     if (share == null) {
       // Opened with nothing to send (a stale link): home. Not while leaving for the chat it went to.
@@ -94,7 +108,7 @@ class ShareScreen extends ConsumerWidget {
                           group: group,
                         ),
                         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        onTap: () => _sendTo(context, ref, share, i.chat.id),
+                        onTap: () => _sendTo(share, i.chat.id),
                       );
                     }),
                 ]),

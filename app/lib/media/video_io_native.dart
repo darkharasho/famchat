@@ -61,6 +61,7 @@ class PlatformVideoProcessor implements VideoProcessor {
   }
 
   Future<ProcessedVideo> _asIs(XFile file) async {
+    if (!playsEverywhere(file)) throw const UnsupportedVideoException('only MP4 and MOV');
     final size = await file.length();
     if (size > maxVideoBytes) throw VideoTooLargeException(size);
     final player = Player(configuration: const PlayerConfiguration(muted: true));
