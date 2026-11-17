@@ -98,7 +98,7 @@ void main() {
     await pumpApp(tester, server: server, kv: kv);
     await signInDirectly(tester, server, name: 'Michael', admin: true);
     final momId = await addMember(tester, 'Mom');
-    appRouter(tester).go('/family');
+    appRouter(tester).go('/settings/family');
     await tester.pumpAndSettle();
     expect(find.text('Mom'), findsOneWidget);
 

@@ -18,11 +18,26 @@ import 'account_providers.dart';
 import 'delete_account.dart';
 import 'sign_out.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // The chats stay open under Settings, keeping their /me; opening Settings reads it again (an
+    // admin who was just promoted sees the family pages).
+    Future.microtask(() {
+      if (mounted) ref.invalidate(meProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final s = theme.colorScheme;
     ref.watch(meProvider); // keeps the name and admin flag current, as the home screen does
@@ -72,18 +87,18 @@ class SettingsScreen extends ConsumerWidget {
             ),
             SettingsGroup(title: 'You', children: [
               const ProfilePhotoTile(),
-              row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/devices',
+              row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/settings/devices',
                   key: const Key('settings-devices')),
             ]),
             const NotificationSettingsGroup(),
             if (admin)
               SettingsGroup(title: 'Family', children: [
-                row(Icons.diversity_3_rounded, 'Family members', 'Admins, account resets, recovery code', '/family',
+                row(Icons.diversity_3_rounded, 'Family members', 'Admins, account resets, recovery code', '/settings/family',
                     key: const Key('settings-family')),
-                row(Icons.person_add_alt_rounded, 'Invite someone', 'A one-time link to join', '/invite',
+                row(Icons.person_add_alt_rounded, 'Invite someone', 'A one-time link to join', '/settings/invite',
                     key: const Key('settings-invite')),
                 row(Icons.photo_library_outlined, 'Media storage', 'Space used by photos and voice',
-                    '/storage',
+                    '/settings/storage',
                     key: const Key('settings-storage')),
               ]),
             const AppVersionGroup(),

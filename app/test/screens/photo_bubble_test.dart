@@ -177,7 +177,7 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
     expect(find.text('Media storage'), findsNothing);
-    go(tester, '/storage');
+    go(tester, '/settings/storage');
     await settle(tester);
     expect(find.text('Media storage'), findsNothing);
   });

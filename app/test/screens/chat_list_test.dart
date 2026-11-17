@@ -2,7 +2,10 @@ import 'package:drift/drift.dart' show Value;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/screens/chats/conversation_view.dart';
+import 'package:famchat/main.dart';
+import 'package:famchat/router.dart';
 import 'package:famchat/screens/chats/new_chat_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -99,6 +102,20 @@ void main() {
     await settle(tester);
     expect(find.byType(ConversationView), findsOneWidget);
     expect(find.text('Cousins'), findsNothing);
+  });
+
+  chatTestWidgets('a chat opens on top of the list: back (or the swipe) pops to it', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await seed(tester);
+    await pumpChatApp(tester, alice);
+    await tester.tap(find.text('Bob'));
+    await settle(tester);
+    final router = ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider);
+    expect(router.canPop(), isTrue);
+    await tester.binding.handlePopRoute(); // the system back gesture
+    await settle(tester);
+    expect(find.byType(ConversationView), findsNothing);
+    expect(find.text('Cousins'), findsOneWidget);
   });
 
   chatTestWidgets('wide windows show the conversation beside the list', (tester) async {

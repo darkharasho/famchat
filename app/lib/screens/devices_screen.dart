@@ -71,7 +71,7 @@ class DevicesScreen extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('add-device'),
-        onPressed: () => context.go('/devices/add'),
+        onPressed: () => context.go('/settings/devices/add'),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Add a device'),
       ),

@@ -156,7 +156,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                 subtitle: group ? null : const Text('Starts a new group; this chat stays between you two'),
                 enabled: !_busy,
                 onTap: () => group
-                    ? context.go('/chats/$chatId/add')
+                    ? context.go('/chats/$chatId/info/add')
                     : context.go('/new?with=${otherMember(chat, members, me) ?? ''}'),
               ),
             ]),

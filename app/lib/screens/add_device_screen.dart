@@ -236,7 +236,7 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        leading: BackButton(onPressed: () => context.go('/devices')),
+        leading: BackButton(onPressed: () => context.go('/settings/devices')),
         title: const Text('Add a device'),
       ),
       body: SafeArea(
@@ -412,7 +412,7 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
         Text('"${_pending!.deviceName}" was approved. Finish on the new device.',
             textAlign: TextAlign.center, style: theme.textTheme.titleMedium),
         const SizedBox(height: 24),
-        FilledButton(onPressed: () => context.go('/devices'), child: const Text('Done')),
+        FilledButton(onPressed: () => context.go('/settings/devices'), child: const Text('Done')),
       ];
 }
 
