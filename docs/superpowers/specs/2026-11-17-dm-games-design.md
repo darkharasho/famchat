@@ -99,7 +99,7 @@ A small pure-Dart `GameRules` interface per game (initial state, legal moves, ap
   mandatory**, multi-jumps must be completed, a man reaching the far row is crowned and the move
   ends, kings move one square any diagonal direction; win when the opponent has no legal move)
   are written in-house.
-- Chess uses the pub.dev `chess` package, **pinned at exactly 0.8.1** (BSD, a port of chess.js;
+- Chess uses the pub.dev `chess` package, **pinned at exactly 0.8.1** (MIT, a port of chess.js;
   resolves under Dart 3). `dartchess` was ruled out: it is GPL-3, which doesn't fit store-distributed
   apps. It provides legality, check/mate/stalemate, castling, en passant, promotion,
   threefold repetition and the 50-move rule.
