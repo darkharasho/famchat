@@ -155,8 +155,9 @@ class CheckersBoard implements Board {
     final raw = move['path'];
     if (raw is! List || raw.length < 2) return null;
     final path = <int>[];
-    for (final e in raw) {
-      if (e is! int || e < 0 || e > 31) return null;
+    for (final x in raw) {
+      final e = wireInt(x);
+      if (e == null || e < 0 || e > 31) return null;
       path.add(e);
     }
     List<int>? match;

@@ -63,6 +63,9 @@ void main() {
     expect(decode(ok), isA<MoveBody>());
     expect(() => decode({...ok}..remove('ply')), throwsFormatException);
     expect(() => decode({...ok, 'ply': -1}), throwsFormatException);
+    expect(() => decode({...ok, 'ply': 1.5}), throwsFormatException);
+    expect(() => decode({...ok, 'ply': '1'}), throwsFormatException);
+    expect((decode({...ok, 'ply': 2.0}) as MoveBody).ply, 2);
     expect(() => decode({...ok, 'action': <String, Object?>{}}), throwsFormatException);
     expect(() => decode({...ok, 'action': 'resign'}), throwsFormatException);
     expect(() => decode({...ok, 'target': ''}), throwsFormatException);

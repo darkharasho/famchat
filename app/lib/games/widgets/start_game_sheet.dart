@@ -16,6 +16,8 @@ import 'game_screen.dart';
 Future<void> showStartGameSheet(BuildContext context, String chatId) async {
   final choice = await showModalBottomSheet<Object>(
     context: context,
+    // Taller than the default 9/16 of the screen when the games need it.
+    isScrollControlled: true,
     builder: (context) => StartGameSheet(chatId: chatId),
   );
   if (choice == null || !context.mounted) return;
@@ -83,27 +85,37 @@ class StartGameSheet extends ConsumerWidget {
               ),
             )
           else
-            for (final t in GameType.values)
-              ListTile(
-                leading: SizedBox.square(
-                  dimension: 24,
-                  child: Center(
-                    child: Text(
-                      gameGlyph(t),
-                      style: TextStyle(
-                        fontSize: 20,
-                        height: 1,
-                        fontFamily: t == GameType.tictactoe
-                            ? null
-                            : 'NotoSansSymbols2',
-                        color: theme.colorScheme.onSurfaceVariant,
+            // Scrolls when the games don't fit (short or landscape screens).
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final t in GameType.values)
+                      ListTile(
+                        leading: SizedBox.square(
+                          dimension: 24,
+                          child: Center(
+                            child: Text(
+                              gameGlyph(t),
+                              style: TextStyle(
+                                fontSize: 20,
+                                height: 1,
+                                fontFamily: t == GameType.tictactoe
+                                    ? null
+                                    : 'NotoSansSymbols2',
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ),
+                        title: Text(t.title),
+                        onTap: () => Navigator.pop(context, t),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
-                title: Text(t.title),
-                onTap: () => Navigator.pop(context, t),
               ),
+            ),
           const SizedBox(height: Space.sm),
         ],
       ),

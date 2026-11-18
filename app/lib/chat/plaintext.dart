@@ -94,10 +94,10 @@ sealed class Plaintext {
         final type = GameType.fromWire(game);
         return type == null ? UnknownBody(kind, j) : GameBody(type, first);
       case 'move':
-        final target = j['target'], game = j['game'], ply = j['ply'], action = j['action'];
+        final target = j['target'], game = j['game'], ply = wireInt(j['ply']), action = j['action'];
         if (target is! String || target.isEmpty) throw const FormatException('bad move target');
         if (game is! String) throw const FormatException('bad game');
-        if (ply is! int || ply < 0) throw const FormatException('bad ply');
+        if (ply == null || ply < 0) throw const FormatException('bad ply');
         if (action is! Map<String, Object?> || action['type'] is! String) throw const FormatException('bad action');
         final type = GameType.fromWire(game);
         return type == null ? UnknownBody(kind, j) : MoveBody(target, type, ply, action);
