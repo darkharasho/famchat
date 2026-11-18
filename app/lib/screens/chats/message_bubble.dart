@@ -508,7 +508,6 @@ class _MessageBubbleState extends State<MessageBubble> {
           crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             row,
-            if (showTime) timeLine,
             if (widget.reactions.isNotEmpty && !widget.deleted)
               Padding(
                 padding: indent.add(EdgeInsets.only(top: Space.xs, left: mine ? 0 : Space.sm, right: mine ? Space.sm : 0)),
@@ -522,6 +521,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ),
                 ]),
               ),
+            // Below the reactions, so a reaction stays next to its bubble.
+            if (showTime) timeLine,
             if (m.state == 'failed')
               Padding(
                 padding: indent,

@@ -29,6 +29,7 @@ Future<void> pumpBubble(
   bool edited = false,
   double avatarSpace = 0,
   bool h24 = false,
+  Map<String, Set<String>> reactions = const {},
 }) async {
   await tester.pumpWidget(MaterialApp(
     theme: buildTheme(Brightness.light),
@@ -39,7 +40,7 @@ Future<void> pumpBubble(
           message: textRow(state: state),
           mine: mine,
           senderName: null,
-          reactions: const {},
+          reactions: reactions,
           myUserId: 'u1',
           onReact: (_) {},
           onRetry: () {},
@@ -109,5 +110,13 @@ void main() {
   testWidgets('mine: time right-aligned with the bubble', (tester) async {
     await pumpBubble(tester);
     expect((tester.getTopRight(time).dx - tester.getTopRight(bubble).dx).abs(), lessThanOrEqualTo(8));
+  });
+
+  testWidgets('with reactions: the time sits below the reaction pill', (tester) async {
+    await pumpBubble(tester, reactions: {'❤️': {'me'}});
+    final pill = find.text('❤️ 1');
+    expect(pill, findsOneWidget);
+    expect(time, findsOneWidget);
+    expect(tester.getTopLeft(time).dy, greaterThanOrEqualTo(tester.getBottomLeft(pill).dy));
   });
 }
