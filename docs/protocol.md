@@ -96,6 +96,7 @@ Edits and deletes are messages too, and count only when their sender is the targ
 
 ```
 {"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages; the latest edit wins
+                                                        (with "previewOnly": true, a late link preview: "Link previews")
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
@@ -110,6 +111,18 @@ A text may carry a card for its first link, made by the sender:
 "image"?: {"mediaKey", "key", "sha256", "width", "height"}}}`. The image is one encrypted `thumb`
 blob (its own media key, purpose `thumb`), uploaded before the message is sent, so receivers never
 contact the site. A preview that doesn't check out is dropped and the text shows as usual.
+
+A text sent before its preview was ready (say, a link pasted and sent at once) gets it afterwards:
+the sender's app keeps the fetch going after the send (it doesn't survive a restart) and, when a
+preview comes, sends a preview-only edit:
+`{"kind":"edit", "target":"<messageId>", "text":"<the text as it stands>", "previewOnly": true,
+"preview": {…as above}}`. Its image is a `thumb` blob uploaded under the edit's message id. It counts
+only when sent by the target's sender, while `text` equals the text the target shows at that point
+(original or latest edit) and that text still has the preview's link; otherwise it's ignored. It
+doesn't change the text or mark the message edited. Nothing is attached when the user removed the
+preview in the composer, or the message was deleted, edited to drop the link, or already has a
+preview. It's sent `silent` like any edit. Clients from before this read it as a plain edit to the
+same text (an "edited" mark, no card).
 
 - `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?}`,
   or 404 when there's nothing to show. The app asks while a link is being typed. YouTube links use

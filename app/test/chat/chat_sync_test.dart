@@ -263,6 +263,32 @@ void main() {
     expect(list.single.last?.id, reply);
   });
 
+  test('a late link preview reaches the others, silently, without an "edited" mark; only for the sender', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    const card = LinkPreview(url: 'https://youtu.be/cat', title: 'Cat jumps');
+    final hi = await alice.sync.sendText(chatId, 'look https://youtu.be/cat');
+    final gone = await alice.sync.sendText(chatId, 'https://youtu.be/cat');
+    final changed = await alice.sync.sendText(chatId, 'https://youtu.be/cat');
+    await until(() async => (await bob.rows(chatId)).length == 3);
+    expect(await bob.sync.attachPreview(chatId, hi, card), isNull, reason: "not Bob's message");
+    await alice.sync.deleteMessage(chatId, gone);
+    await alice.sync.editText(chatId, changed, 'no link now');
+    expect(await alice.sync.attachPreview(chatId, gone, card), isNull);
+    expect(await alice.sync.attachPreview(chatId, changed, card), isNull);
+    final edit = await alice.sync.attachPreview(chatId, hi, card);
+    expect(edit, isNotNull);
+    expect(await alice.sync.attachPreview(chatId, hi, card), isNull, reason: 'it has one now');
+    await until(() async => (await carol.rows(chatId)).length == 6);
+    final rows = await carol.rows(chatId);
+    final changes = messageChanges(rows);
+    final m = rows.firstWhere((r) => r.id == hi);
+    expect(changes.previewOf(m)?.title, 'Cat jumps');
+    expect(changes.textOf(m), 'look https://youtu.be/cat');
+    expect(changes.edited, {changed});
+    expect(backend.silentIds, contains(edit));
+  });
+
   test('a text with mentions carries them in the send frame and the plaintext', () async {
     final (alice, bob, carol) = await trio();
     final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);

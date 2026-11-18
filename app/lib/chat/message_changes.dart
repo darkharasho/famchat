@@ -10,10 +10,13 @@ const changeKinds = {'reaction', 'edit', 'delete'};
 
 /// The edits and deletes in force over a chat's messages.
 class MessageChanges {
-  MessageChanges._(this._texts, this._deleted);
+  MessageChanges._(this._texts, this._deleted, this._previews);
 
   final Map<String, String> _texts;
   final Set<String> _deleted;
+
+  /// Link previews attached after sending (preview-only edits), by message id.
+  final Map<String, LinkPreview> _previews;
 
   /// Ids of messages showing edited text.
   Set<String> get edited => _texts.keys.toSet();
@@ -25,6 +28,18 @@ class MessageChanges {
     if (_deleted.contains(m.id) || m.kind != 'text') return null;
     return _texts[m.id] ?? _field(m, 'text');
   }
+
+  /// [m]'s link preview (sent with it, or attached later), while the text it shows still has that
+  /// link.
+  LinkPreview? previewOf(MessageRow m) {
+    final shown = textOf(m);
+    if (shown == null) return null;
+    final late = _previews[m.id];
+    if (late != null && previewFits(shown, late.url)) return late;
+    final p = _decode(m);
+    final own = p is TextBody ? p.preview : null;
+    return own != null && previewFits(shown, own.url) ? own : null;
+  }
 }
 
 /// [rows] in display order (as `watchMessages` gives them). A change may come before its target
@@ -33,6 +48,7 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
   final byId = {for (final r in rows) r.id: r};
   final texts = <String, String>{};
   final deleted = <String>{};
+  final previews = <String, LinkPreview>{};
   for (final r in rows) {
     if ((r.kind != 'edit' && r.kind != 'delete') || r.state == 'failed' || r.targetId == null) continue;
     final target = byId[r.targetId!];
@@ -40,24 +56,37 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
     if (r.kind == 'delete') {
       deleted.add(target.id);
       texts.remove(target.id);
+      previews.remove(target.id);
     } else if (target.kind == 'text') {
-      final text = _field(r, 'text');
-      if (text != null) texts[target.id] = text;
+      final edit = _decode(r);
+      if (edit is! EditBody) continue;
+      if (!edit.previewOnly) {
+        texts[target.id] = edit.text;
+        continue;
+      }
+      // A preview-only edit: it attaches its preview to the text as it stands (not marking it
+      // edited); one made for other text is stale and ignored.
+      final preview = edit.preview;
+      if (preview != null &&
+          edit.text == (texts[target.id] ?? _field(target, 'text')) &&
+          previewFits(edit.text, preview.url)) {
+        previews[target.id] = preview;
+      }
     }
   }
-  return MessageChanges._(texts, deleted);
+  return MessageChanges._(texts, deleted, previews);
 }
 
 /// The id [m] replies to, or null.
 String? replyTargetOf(MessageRow m) => m.kind == 'text' ? _field(m, 'replyTo') : null;
 
-/// [m]'s link preview, while its text (after edits, [shownText]) still has that link.
-LinkPreview? previewOf(MessageRow m, String? shownText) {
-  if (m.kind != 'text' || m.body == null || shownText == null) return null;
+/// Whether a preview of [url] belongs with [text]: the text still has that link.
+bool previewFits(String text, String url) => text.contains(url.replaceFirst(RegExp(r'/$'), ''));
+
+Plaintext? _decode(MessageRow m) {
+  if (m.body == null) return null;
   try {
-    final p = Plaintext.decode(utf8.encode(m.body!));
-    final preview = p is TextBody ? p.preview : null;
-    return preview != null && shownText.contains(preview.url.replaceFirst(RegExp(r'/$'), '')) ? preview : null;
+    return Plaintext.decode(utf8.encode(m.body!));
   } on FormatException {
     return null;
   }
