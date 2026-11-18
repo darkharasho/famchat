@@ -13,7 +13,7 @@ import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/link_text.dart';
-import 'chat_list.dart' show clockTime;
+import '../../settings/time_format.dart' show clockTime;
 import 'photo_view.dart';
 import 'link_preview_card.dart';
 import 'video_view.dart';
@@ -365,7 +365,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       ],
       if (showTime)
         Text(
-          clockTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
+          clockTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt), h24: MediaQuery.alwaysUse24HourFormatOf(context)),
           style: theme.textTheme.labelSmall?.copyWith(
             fontFamily: kDisplayFont, // plain zeros in times
             color: meta,
