@@ -8,8 +8,11 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../theme/tokens.dart';
 import '../chess_board.dart';
+import '../dots_and_boxes.dart';
 import '../game_state.dart';
 import '../providers.dart';
+import '../reversi.dart';
+import '../rules.dart';
 import 'board_view.dart';
 
 /// Who is looking at a chat's games: me, names, and whether the chat is
@@ -103,6 +106,18 @@ const _reasons = {
   'no_moves': 'No moves left',
   'agreed': 'Draw agreed',
 };
+
+/// The final score of a game won or drawn on points, winner's first ("32–28").
+String? _finalScore(Board b, Outcome o) {
+  final (int, int)? s = switch (b) {
+    ReversiBoard() => b.counts,
+    DotsAndBoxesBoard() => b.scores,
+    _ => null,
+  };
+  if (s == null) return null;
+  final (a, c) = o.winner == Side.second ? (s.$2, s.$1) : s;
+  return '$a–$c';
+}
 
 /// A game's board, live: plays, resignation and draw offers.
 class GameScreen extends ConsumerStatefulWidget {
@@ -240,6 +255,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (outcome != null) {
       final reason = outcome.reason == 'resigned'
           ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} resigned'
+          : outcome.reason == 'discs' || outcome.reason == 'boxes'
+          ? _finalScore(g.board, outcome)
           : _reasons[outcome.reason];
       if (reason != null) status = '$status · $reason';
     } else if (!g.inert) {
@@ -401,6 +418,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                           initials: (
                             viewer.initialOf(g.firstUserId),
                             viewer.initialOf(g.secondUserId),
+                          ),
+                          names: (
+                            viewer.nameOf(g.firstUserId),
+                            viewer.nameOf(g.secondUserId),
                           ),
                           onPlay: (m) => _send(g, {'type': 'play', ...m}),
                         ),

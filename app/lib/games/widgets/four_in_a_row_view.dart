@@ -6,8 +6,9 @@ import 'board_parts.dart';
 
 /// Four in a Row: a blue-tinted frame of 7 columns by 6 rows with drawn discs,
 /// red for the first player and yellow for the second. Tap anywhere in a
-/// column to drop a disc; the winning four are ringed and the last disc is
-/// tinted.
+/// column (gaps included) to drop a disc; the winning four are ringed and the
+/// last disc is tinted. Above the board (not in thumbnails) each player's name
+/// sits by their colour.
 class FourInARowView extends StatelessWidget {
   const FourInARowView({
     super.key,
@@ -16,12 +17,16 @@ class FourInARowView extends StatelessWidget {
     required this.onPlay,
     required this.interactive,
     required this.thumbnail,
+    this.names,
   });
 
   final FourInARowBoard board;
   final Side? mySide;
   final void Function(Map<String, Object?> move) onPlay;
   final bool interactive, thumbnail;
+
+  /// (first, second) players' display names, or null for no legend.
+  final (String, String)? names;
 
   static Color discColor(BuildContext context, Side side) {
     final dark = Theme.of(context).colorScheme.brightness == Brightness.dark;
@@ -31,6 +36,8 @@ class FourInARowView extends StatelessWidget {
     return dark ? const Color(0xFFFFD84D) : const Color(0xFFF2B600);
   }
 
+  static String _colour(Side side) => side == Side.first ? 'red' : 'yellow';
+
   @override
   Widget build(BuildContext context) {
     final colors = BoardColors.of(context);
@@ -39,7 +46,7 @@ class FourInARowView extends StatelessWidget {
     final line = board.winningLine ?? const <(int, int)>[];
     final lastRow = _lastRow();
     final cols = FourInARowBoard.columns, rows = FourInARowBoard.rows;
-    return AspectRatio(
+    final frame = AspectRatio(
       aspectRatio: cols / rows,
       child: LayoutBuilder(
         builder: (context, box) {
@@ -54,18 +61,15 @@ class FourInARowView extends StatelessWidget {
                   children: [
                     for (var c = 0; c < cols; c++)
                       Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(left: c == 0 ? 0 : gap),
-                          child: _column(
-                            context,
-                            c,
-                            gap,
-                            colors,
-                            line,
-                            lastRow,
-                            canPlay && board.play({'col': c}) != null,
-                            rows,
-                          ),
+                        child: _column(
+                          context,
+                          c,
+                          gap,
+                          colors,
+                          line,
+                          lastRow,
+                          canPlay && board.play({'col': c}) != null,
+                          rows,
                         ),
                       ),
                   ],
@@ -75,6 +79,27 @@ class FourInARowView extends StatelessWidget {
           );
         },
       ),
+    );
+    final n = names;
+    if (thumbnail || n == null) return frame;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ScoreRow(
+          mySide: mySide,
+          names: n,
+          swatch: (side) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: discColor(context, side),
+              shape: BoxShape.circle,
+            ),
+          ),
+          describe: (side, name) => name == null
+              ? '${_colour(side)} discs'
+              : '$name: ${_colour(side)} discs',
+        ),
+        Flexible(child: frame),
+      ],
     );
   }
 
@@ -98,24 +123,34 @@ class FourInARowView extends StatelessWidget {
     int rows,
   ) {
     final move = {'col': c};
+    var free = 0;
+    while (free < rows && board.at(c, rows - 1 - free) == null) {
+      free++;
+    }
     return Semantics(
-      label: thumbnail ? null : 'column ${c + 1}',
+      label: thumbnail
+          ? null
+          : 'column ${c + 1}, ${free == 0 ? 'full' : '$free free'}',
       button: playable,
       container: true,
       child: GestureDetector(
         key: Key('col-$c'),
         behavior: HitTestBehavior.opaque,
         onTap: playable ? () => onPlay(move) : null,
-        child: Column(
-          children: [
-            for (var r = rows - 1; r >= 0; r--)
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(top: r == rows - 1 ? 0 : gap),
-                  child: _cell(context, c, r, colors, line, lastRow),
+        // The gap to the left belongs to this column, so every tap lands.
+        child: Padding(
+          padding: EdgeInsets.only(left: c == 0 ? 0 : gap),
+          child: Column(
+            children: [
+              for (var r = rows - 1; r >= 0; r--)
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: r == rows - 1 ? 0 : gap),
+                    child: _cell(context, c, r, colors, line, lastRow),
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

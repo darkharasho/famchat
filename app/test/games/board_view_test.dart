@@ -1,8 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:famchat/games/checkers.dart';
 import 'package:famchat/games/chess_board.dart';
 import 'package:famchat/games/dots_and_boxes.dart';
+import 'package:famchat/games/four_in_a_row.dart';
+import 'package:famchat/games/reversi.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
+import 'package:famchat/games/widgets/reversi_view.dart';
 import 'package:famchat/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -27,6 +32,7 @@ void main() {
     bool enabled = true,
     bool thumbnail = false,
     (String, String)? initials,
+    (String, String)? names,
   }) => host(
     BoardView(
       board: board,
@@ -35,6 +41,7 @@ void main() {
       enabled: enabled,
       thumbnail: thumbnail,
       initials: initials,
+      names: names,
     ),
   );
 
@@ -192,9 +199,10 @@ void main() {
   ) async {
     // Each replay of the same moves makes a new Board instance, as
     // gamesProvider does whenever the chat's messages change.
-    Board chess() => initialBoard(
-      GameType.chess,
-    ).play({'uci': 'e2e4'})!.play({'uci': 'e7e5'})!;
+    Board chess() =>
+        initialBoard(GameType.chess)
+            .play({'uci': 'e2e4'})!
+            .play({'uci': 'e7e5'})!;
     await tester.pumpWidget(view(chess()));
     await tester.tap(find.byKey(const Key('sq-g1')));
     await tester.pump();
@@ -205,11 +213,13 @@ void main() {
     ]);
 
     played.clear();
-    Board checkers() => initialBoard(GameType.checkers).play({
-      'path': [9, 13],
-    })!.play({
-      'path': [23, 19],
-    })!;
+    Board checkers() => initialBoard(GameType.checkers)
+        .play({
+          'path': [9, 13],
+        })!
+        .play({
+          'path': [23, 19],
+        })!;
     await tester.pumpWidget(view(checkers()));
     await tester.tap(find.byKey(const Key('sq-10')));
     await tester.pump();
@@ -256,9 +266,7 @@ void main() {
     ]);
   });
 
-  testWidgets('thumbnail renders all three games without labels', (
-    tester,
-  ) async {
+  testWidgets('thumbnail renders all games without labels', (tester) async {
     for (final t in GameType.values) {
       await tester.pumpWidget(view(initialBoard(t), thumbnail: true));
       expect(tester.takeException(), isNull);
@@ -304,6 +312,70 @@ void main() {
     expect(played, isEmpty);
   });
 
+  testWidgets('four in a row: a tap in the gap between columns drops a disc', (
+    tester,
+  ) async {
+    await tester.pumpWidget(view(initialBoard(GameType.fourinarow)));
+    // Just right of column 2's last cell: the gap belongs to column 3.
+    final left = tester.getRect(find.byKey(const Key('sq-37')));
+    final right = tester.getRect(find.byKey(const Key('sq-38')));
+    expect(right.left, greaterThan(left.right));
+    await tester.tapAt(Offset((left.right + right.left) / 2, left.center.dy));
+    expect(played, [
+      {'col': 3},
+    ]);
+  });
+
+  testWidgets('four in a row: the winning four are ringed', (tester) async {
+    // First plays 0..3 on the bottom row, second stacks on 0..2.
+    var b = initialBoard(GameType.fourinarow);
+    for (final c in [0, 0, 1, 1, 2, 2, 3]) {
+      b = b.play({'col': c})!;
+    }
+    expect((b as FourInARowBoard).winningLine, isNotNull);
+    await tester.pumpWidget(view(b));
+    bool ringed(int sq) => tester
+        .widgetList<DecoratedBox>(
+          find.descendant(
+            of: find.byKey(Key('sq-$sq')),
+            matching: find.byType(DecoratedBox),
+          ),
+        )
+        .any((d) {
+          final dec = d.decoration;
+          return dec is BoxDecoration &&
+              dec.shape == BoxShape.circle &&
+              dec.border != null;
+        });
+    // Bottom row is display row 5: sq-35..38 win; the discs above don't.
+    for (final sq in [35, 36, 37, 38]) {
+      expect(ringed(sq), isTrue, reason: 'sq-$sq');
+    }
+    for (final sq in [28, 29, 30]) {
+      expect(ringed(sq), isFalse, reason: 'sq-$sq');
+    }
+  });
+
+  testWidgets('four in a row: names each player\'s colour, mine first; '
+      'columns say how full they are', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final b = initialBoard(GameType.fourinarow).play({'col': 2})!;
+    await tester.pumpWidget(
+      view(b, mySide: Side.second, names: ('Mom', 'You')),
+    );
+    expect(find.bySemanticsLabel('You: yellow discs'), findsOneWidget);
+    expect(find.bySemanticsLabel('Mom: red discs'), findsOneWidget);
+    expect(
+      tester.getCenter(find.byKey(const Key('name-second'))).dx,
+      lessThan(tester.getCenter(find.byKey(const Key('name-first'))).dx),
+    );
+    expect(find.bySemanticsLabel('column 3, 5 free'), findsOneWidget);
+    expect(find.bySemanticsLabel('column 1, 6 free'), findsOneWidget);
+    await tester.pumpWidget(view(b, thumbnail: true, names: ('Mom', 'You')));
+    expect(find.text('You'), findsNothing);
+    semantics.dispose();
+  });
+
   testWidgets('reversi: tapping a legal cell sends {cell: n}', (tester) async {
     await tester.pumpWidget(view(initialBoard(GameType.reversi)));
     await tester.tap(find.byKey(const Key('sq-29')));
@@ -335,6 +407,59 @@ void main() {
     expect(find.byKey(const Key('count-first')), findsNothing);
     await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
     expect(played, isEmpty);
+  });
+
+  testWidgets('reversi: scores are labelled with names, mine first; '
+      'cells say what is on them', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final b = ReversiBoard.initial().play({'cell': 29})!;
+    await tester.pumpWidget(
+      view(b, mySide: Side.second, names: ('Mom', 'You')),
+    );
+    expect(find.bySemanticsLabel('You: 1 light disc'), findsOneWidget);
+    expect(find.bySemanticsLabel('Mom: 4 dark discs'), findsOneWidget);
+    expect(find.text('You'), findsOneWidget);
+    expect(
+      tester.getCenter(find.byKey(const Key('count-second'))).dx,
+      lessThan(tester.getCenter(find.byKey(const Key('count-first'))).dx),
+    );
+    // 27 is d5 and 35 d4 (row 0 is rank 8).
+    expect(find.bySemanticsLabel('d5, dark disc'), findsOneWidget);
+    expect(find.bySemanticsLabel('d4, light disc'), findsOneWidget);
+    expect(find.bySemanticsLabel('a8, empty'), findsOneWidget);
+    expect(ReversiView.cellName(56), 'a1');
+    semantics.dispose();
+  });
+
+  testWidgets('reversi: both disc colours contrast with the squares', (
+    tester,
+  ) async {
+    for (final brightness in Brightness.values) {
+      late (Color, Color) surface;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(brightness),
+          home: Builder(
+            builder: (context) {
+              surface = ReversiView.surface(context);
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      double contrast(Color a, Color b) {
+        final x = a.computeLuminance(), y = b.computeLuminance();
+        return (math.max(x, y) + 0.05) / (math.min(x, y) + 0.05);
+      }
+
+      for (final side in Side.values) {
+        expect(
+          contrast(ReversiView.discColor(side), surface.$1),
+          greaterThan(2.5),
+          reason: '$brightness $side',
+        );
+      }
+    }
   });
 
   testWidgets('dots and boxes: tapping a line sends {line: n}', (tester) async {
@@ -392,6 +517,34 @@ void main() {
     await tester.pumpWidget(view(b, mySide: Side.second, enabled: false));
     await tester.tap(find.byKey(const Key('line-1')), warnIfMissed: false);
     expect(played, isEmpty);
+  });
+
+  testWidgets('dots and boxes: scores are labelled with names; lines say '
+      'which edge they are and whether drawn', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final b = DotsAndBoxesBoard.custom(
+      {0, 4, 20, 21},
+      {0: Side.second},
+      Side.second,
+    );
+    await tester.pumpWidget(view(b, mySide: Side.first, names: ('You', 'Dad')));
+    expect(find.bySemanticsLabel('You: 0 boxes, red'), findsOneWidget);
+    expect(find.bySemanticsLabel('Dad: 1 box, blue'), findsOneWidget);
+    expect(find.bySemanticsLabel('top edge of box 1, drawn'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('top edge of box 2, not drawn'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('bottom edge of box 16, not drawn'),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('left edge of box 2, drawn'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('right edge of box 16, not drawn'),
+      findsOneWidget,
+    );
+    semantics.dispose();
   });
 
   testWidgets('dots and boxes: a tap inside a box picks its nearest side', (

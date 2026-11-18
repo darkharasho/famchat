@@ -496,6 +496,52 @@ void main() {
     expect(find.widgetWithText(TextButton, 'Rematch'), findsNothing);
   });
 
+  chatTestWidgets('a game won on points shows the score and both names', (
+    tester,
+  ) async {
+    // A random playout: Alice (first) draws the last line but loses 7-9.
+    final lines =
+        'f31,s23,f32,s13,f39,s9,s38,f14,s36,f37,s19,f1,s0,f6,s8,f15,f5,s12,'
+                'f30,f35,s28,f27,s21,f16,f20,s11,f34,s24,f22,f29,s7,s2,s26,'
+                's10,s18,s33,s3,s25,f4,f17'
+            .split(',');
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.dotsandboxes, alice.userId),
+        for (var i = 0; i < lines.length; i++)
+          move(
+            lines[i][0] == 'f' ? alice.userId : bob.userId,
+            'g1',
+            GameType.dotsandboxes,
+            i,
+            {'type': 'play', 'line': int.parse(lines[i].substring(1))},
+          ),
+      ],
+    );
+    await openBoard(tester);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('game-status'))).data,
+      'Bob won · 9–7',
+    );
+    final screen = find.byType(GameScreen);
+    expect(
+      find.descendant(
+        of: screen,
+        matching: find.byKey(const Key('name-first')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('name-first'))).data,
+      'You',
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('name-second'))).data,
+      'Bob',
+    );
+  });
+
   chatTestWidgets('inert game card says Game not started', (tester) async {
     await open(
       tester,

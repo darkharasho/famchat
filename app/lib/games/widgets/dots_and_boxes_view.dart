@@ -8,8 +8,8 @@ import 'board_parts.dart';
 /// colour (red-ish for the first player, blue-ish for the second), claimed
 /// boxes are filled with the owner's colour and initial, and the last line is
 /// highlighted. Each undrawn line has an invisible diamond-shaped tap target,
-/// so a tap anywhere in a box picks its nearest side. Both scores sit above
-/// the board (not in thumbnails).
+/// so a tap anywhere in a box picks its nearest side. Each player's name and
+/// score sit above the board (not in thumbnails).
 class DotsAndBoxesView extends StatelessWidget {
   const DotsAndBoxesView({
     super.key,
@@ -19,6 +19,7 @@ class DotsAndBoxesView extends StatelessWidget {
     required this.interactive,
     required this.thumbnail,
     this.initials,
+    this.names,
   });
 
   final DotsAndBoxesBoard board;
@@ -29,6 +30,9 @@ class DotsAndBoxesView extends StatelessWidget {
   /// (first player's, second player's) initial, shown in claimed boxes.
   final (String, String)? initials;
 
+  /// (first, second) players' display names for the scores, or null.
+  final (String, String)? names;
+
   static Color sideColor(BuildContext context, Side side) {
     final dark = Theme.of(context).colorScheme.brightness == Brightness.dark;
     if (side == Side.first) {
@@ -36,6 +40,8 @@ class DotsAndBoxesView extends StatelessWidget {
     }
     return dark ? const Color(0xFF6FA8FF) : const Color(0xFF2F6FDE);
   }
+
+  static String _colour(Side side) => side == Side.first ? 'red' : 'blue';
 
   static const _n = DotsAndBoxesBoard.size;
   static const _h = DotsAndBoxesBoard.horizontalCount;
@@ -49,6 +55,23 @@ class DotsAndBoxesView extends StatelessWidget {
     final v = line - _h;
     final r = v ~/ (_n + 1), c = v % (_n + 1);
     return ((r, c), (r + 1, c));
+  }
+
+  /// [line] as a box edge, e.g. "top edge of box 1" (boxes numbered from 1,
+  /// row by row); an edge shared by two boxes is named from the lower or
+  /// right one.
+  static String lineName(int line) {
+    if (line < _h) {
+      final r = line ~/ _n, c = line % _n;
+      return r < _n
+          ? 'top edge of box ${r * _n + c + 1}'
+          : 'bottom edge of box ${(r - 1) * _n + c + 1}';
+    }
+    final v = line - _h;
+    final r = v ~/ (_n + 1), c = v % (_n + 1);
+    return c < _n
+        ? 'left edge of box ${r * _n + c + 1}'
+        : 'right edge of box ${r * _n + c}';
   }
 
   String? _initial(Side side) {
@@ -122,15 +145,21 @@ class DotsAndBoxesView extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _count(context, Side.first, a, first),
-              _count(context, Side.second, b, second),
-            ],
+        ScoreRow(
+          mySide: mySide,
+          names: names,
+          swatch: (side) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: side == Side.first ? first : second,
+              borderRadius: BorderRadius.circular(4),
+            ),
           ),
+          score: (side) => side == Side.first ? a : b,
+          describe: (side, name) {
+            final n = side == Side.first ? a : b;
+            final what = '$n ${n == 1 ? 'box' : 'boxes'}, ${_colour(side)}';
+            return name == null ? what : '$name: $what';
+          },
         ),
         Flexible(child: grid),
       ],
@@ -188,7 +217,8 @@ class DotsAndBoxesView extends StatelessWidget {
       width: cell,
       height: cell,
       child: Semantics(
-        label: 'line ${line + 1}',
+        label:
+            '${lineName(line)}, ${board.drawn(line) ? 'drawn' : 'not drawn'}',
         button: playable,
         excludeSemantics: true,
         child: ClipPath(
@@ -203,32 +233,6 @@ class DotsAndBoxesView extends StatelessWidget {
       ),
     );
   }
-
-  Widget _count(BuildContext context, Side side, int n, Color color) =>
-      Semantics(
-        label: '${side == Side.first ? 'first' : 'second'} $n',
-        excludeSemantics: true,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              '$n',
-              key: Key('count-${side.name}'),
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      );
 }
 
 class _Diamond extends CustomClipper<Path> {

@@ -28,6 +28,7 @@ class BoardView extends StatefulWidget {
     this.enabled = true,
     this.thumbnail = false,
     this.initials,
+    this.names,
   });
 
   final Board board;
@@ -42,6 +43,11 @@ class BoardView extends StatefulWidget {
   /// The (first, second) players' initials, shown where a game marks
   /// ownership (Dots and Boxes). Null shows colours only.
   final (String, String)? initials;
+
+  /// The (first, second) players' display names ("You" for the viewer), shown
+  /// by each player's colour and score (not in thumbnails). Null shows colours
+  /// and scores only.
+  final (String, String)? names;
 
   @override
   State<BoardView> createState() => _BoardViewState();
@@ -81,6 +87,7 @@ class _BoardViewState extends State<BoardView> {
         onPlay: widget.onPlay,
         interactive: interactive,
         thumbnail: widget.thumbnail,
+        names: widget.names,
       ),
       ReversiBoard() => ReversiView(
         board: b,
@@ -88,6 +95,7 @@ class _BoardViewState extends State<BoardView> {
         onPlay: widget.onPlay,
         interactive: interactive,
         thumbnail: widget.thumbnail,
+        names: widget.names,
       ),
       DotsAndBoxesBoard() => DotsAndBoxesView(
         board: b,
@@ -96,6 +104,7 @@ class _BoardViewState extends State<BoardView> {
         interactive: interactive,
         thumbnail: widget.thumbnail,
         initials: widget.initials,
+        names: widget.names,
       ),
       _ => const SizedBox.shrink(),
     };

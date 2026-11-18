@@ -197,3 +197,88 @@ class BoardSquare extends StatelessWidget {
     ),
   );
 }
+
+/// Above a board: each player's colour [swatch], name and optional score, the
+/// viewer's own side ([mySide]) on the left (first's for spectators).
+/// [names] are the (first, second) display names ("You" for the viewer); null
+/// shows colours and scores only. [describe] is the spoken label of a side,
+/// given its name (if any).
+class ScoreRow extends StatelessWidget {
+  const ScoreRow({
+    super.key,
+    required this.mySide,
+    required this.names,
+    required this.swatch,
+    required this.describe,
+    this.score,
+  });
+
+  final Side? mySide;
+  final (String, String)? names;
+  final Widget Function(Side side) swatch;
+  final String Function(Side side, String? name) describe;
+  final int? Function(Side side)? score;
+
+  String? _name(Side side) {
+    final n = names;
+    if (n == null) return null;
+    final s = side == Side.first ? n.$1 : n.$2;
+    return s.isEmpty ? null : s;
+  }
+
+  Widget _entry(BuildContext context, Side side) {
+    final theme = Theme.of(context);
+    final name = _name(side);
+    final n = score?.call(side);
+    return Semantics(
+      label: describe(side, name),
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox.square(dimension: 16, child: swatch(side)),
+          if (name != null) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                name,
+                key: Key('name-${side.name}'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: side == mySide ? FontWeight.w700 : null,
+                ),
+              ),
+            ),
+          ],
+          if (n != null) ...[
+            const SizedBox(width: 6),
+            Text(
+              '$n',
+              key: Key('count-${side.name}'),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final left = mySide ?? Side.first;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Flexible(child: _entry(context, left)),
+          const SizedBox(width: 12),
+          Flexible(child: _entry(context, left.other)),
+        ],
+      ),
+    );
+  }
+}
