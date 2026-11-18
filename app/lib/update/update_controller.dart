@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -21,7 +22,9 @@ class UpdateConfig {
     required this.newClient,
     required this.openUrl,
     this.firstCheckDelay = const Duration(seconds: 3),
-    this.checkEvery = const Duration(hours: 6),
+    this.checkEvery = const Duration(minutes: 30),
+    this.resumeCheckEvery = const Duration(minutes: 5),
+    this.now = DateTime.now,
   });
 
   final String currentVersion;
@@ -30,6 +33,10 @@ class UpdateConfig {
   final Future<bool> Function(Uri) openUrl;
   final Duration firstCheckDelay;
   final Duration checkEvery;
+
+  /// Coming back to the foreground checks too, but no more often than this.
+  final Duration resumeCheckEvery;
+  final DateTime Function() now;
 }
 
 /// Null where updates don't apply: the web, phones (the stores update those), and builds without a
@@ -84,6 +91,7 @@ class UpdateReady extends UpdateState {
 class UpdateController extends Notifier<UpdateState> {
   Timer? _timer;
   bool _checking = false;
+  DateTime? _lastCheck;
 
   /// The version whose banner was dismissed; a later one shows again.
   String? _dismissed;
@@ -96,7 +104,11 @@ class UpdateController extends Notifier<UpdateState> {
         unawaited(check());
         _timer = Timer.periodic(config.checkEvery, (_) => unawaited(check()));
       });
-      ref.onDispose(() => _timer?.cancel());
+      final lifecycle = AppLifecycleListener(onResume: () => unawaited(checkOnResume()));
+      ref.onDispose(() {
+        _timer?.cancel();
+        lifecycle.dispose();
+      });
     }
     return const UpdateIdle();
   }
@@ -105,9 +117,17 @@ class UpdateController extends Notifier<UpdateState> {
 
   /// Whether the home screen should show the update banner.
   bool get showBanner => switch (state) {
-        UpdateReady(:final release) || UpdateAvailable(:final release) => release.version != _dismissed,
-        _ => false,
-      };
+    UpdateReady(:final release) || UpdateAvailable(:final release) => release.version != _dismissed,
+    _ => false,
+  };
+
+  /// A check when the app returns to the foreground, throttled to [UpdateConfig.resumeCheckEvery].
+  Future<void> checkOnResume() async {
+    final config = ref.read(updateConfigProvider);
+    final last = _lastCheck;
+    if (config == null || (last != null && config.now().difference(last) < config.resumeCheckEvery)) return;
+    await check();
+  }
 
   Future<void> check() async {
     final config = ref.read(updateConfigProvider);
@@ -115,6 +135,7 @@ class UpdateController extends Notifier<UpdateState> {
     // A download in flight or waiting for a restart is already the newest we know of.
     if (state is UpdateDownloading || state is UpdateReady) return;
     _checking = true;
+    _lastCheck = config.now();
     final client = config.newClient();
     try {
       final res = await client.get(latestReleaseUrl, headers: {'Accept': 'application/vnd.github+json'});
