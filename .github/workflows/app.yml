@@ -6,6 +6,8 @@ on:
     paths: ["app/**", ".github/workflows/app.yml"]
   pull_request:
     paths: ["app/**", ".github/workflows/app.yml"]
+    # labeled: adding the mac-ci label reruns the PR with the Mac jobs.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +21,9 @@ defaults:
 
 # Every platform job starts the local WebSocket echo server, runs the spike integration
 # test, and copies its `SPIKE <name> <platform> <result>` lines into the job summary.
+#
+# The Mac jobs (ios-preview-core, macos, ios) skip PRs: GitHub's few Mac runners queued behind
+# each other and timed out. They run on main and on demand; label a PR mac-ci to run them there.
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
@@ -33,6 +38,7 @@ jobs:
       - run: flutter test --platform chrome test/crypto/ test/theme/person_colors_test.dart
 
   ios-preview-core:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'mac-ci')
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
@@ -122,6 +128,7 @@ jobs:
         with: { name: spikes-windows, path: "app/*.log" }
 
   macos:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'mac-ci')
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -142,6 +149,7 @@ jobs:
         with: { name: spikes-macos, path: "app/*.log" }
 
   ios:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'mac-ci')
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
