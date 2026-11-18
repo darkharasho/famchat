@@ -1,5 +1,6 @@
 import 'package:famchat/games/checkers.dart';
 import 'package:famchat/games/chess_board.dart';
+import 'package:famchat/games/dots_and_boxes.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
 import 'package:famchat/theme/app_theme.dart';
@@ -25,6 +26,7 @@ void main() {
     Side? mySide = Side.first,
     bool enabled = true,
     bool thumbnail = false,
+    (String, String)? initials,
   }) => host(
     BoardView(
       board: board,
@@ -32,6 +34,7 @@ void main() {
       onPlay: played.add,
       enabled: enabled,
       thumbnail: thumbnail,
+      initials: initials,
     ),
   );
 
@@ -332,5 +335,100 @@ void main() {
     expect(find.byKey(const Key('count-first')), findsNothing);
     await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
     expect(played, isEmpty);
+  });
+
+  testWidgets('dots and boxes: tapping a line sends {line: n}', (tester) async {
+    await tester.pumpWidget(view(initialBoard(GameType.dotsandboxes)));
+    for (final n in [0, 19, 20, 39, 26]) {
+      await tester.tap(find.byKey(Key('line-$n')));
+    }
+    expect(played, [
+      {'line': 0},
+      {'line': 19},
+      {'line': 20},
+      {'line': 39},
+      {'line': 26},
+    ]);
+  });
+
+  testWidgets('dots and boxes: a drawn line can\'t be tapped', (tester) async {
+    final b = initialBoard(GameType.dotsandboxes)
+        .play({'line': 5})!
+        .play({'line': 9})!;
+    // First to move again.
+    await tester.pumpWidget(view(b));
+    await tester.tap(find.byKey(const Key('line-5')), warnIfMissed: false);
+    await tester.tap(find.byKey(const Key('line-9')), warnIfMissed: false);
+    expect(played, isEmpty);
+    await tester.tap(find.byKey(const Key('line-6')));
+    expect(played, [
+      {'line': 6},
+    ]);
+  });
+
+  testWidgets('dots and boxes: claimed boxes show initials and scores; '
+      'thumbnail, spectator and disabled ignore taps', (tester) async {
+    final b = DotsAndBoxesBoard.custom(
+      {0, 4, 20, 21},
+      {0: Side.second},
+      Side.second,
+    );
+    await tester.pumpWidget(view(b, mySide: Side.second, initials: ('M', 'D')));
+    expect(find.text('D'), findsOneWidget);
+    expect(find.text('M'), findsNothing);
+    expect(find.byKey(const Key('count-second')), findsOneWidget);
+    await tester.pumpWidget(view(b, mySide: Side.second));
+    expect(find.text('D'), findsNothing);
+    await tester.pumpWidget(
+      view(b, mySide: Side.second, thumbnail: true, initials: ('M', 'D')),
+    );
+    expect(find.text('D'), findsNothing);
+    expect(find.byKey(const Key('count-second')), findsNothing);
+    await tester.tap(find.byKey(const Key('line-1')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: Side.first));
+    await tester.tap(find.byKey(const Key('line-1')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: null));
+    await tester.tap(find.byKey(const Key('line-1')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: Side.second, enabled: false));
+    await tester.tap(find.byKey(const Key('line-1')), warnIfMissed: false);
+    expect(played, isEmpty);
+  });
+
+  testWidgets('dots and boxes: a tap inside a box picks its nearest side', (
+    tester,
+  ) async {
+    await tester.pumpWidget(view(initialBoard(GameType.dotsandboxes)));
+    final r = tester.getRect(find.byKey(const Key('line-0')));
+    // Below the top line's midpoint, inside box 0: still line 0.
+    await tester.tapAt(r.center + Offset(0, r.height * 0.3));
+    // Towards box 0's right side: line 21.
+    await tester.tapAt(r.center + Offset(r.width * 0.3, r.height * 0.3));
+    expect(played, [
+      {'line': 0},
+      {'line': 21},
+    ]);
+  });
+
+  testWidgets('dots and boxes renders in dark mode', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(Brightness.dark),
+        home: Scaffold(
+          body: SizedBox(
+            width: 300,
+            height: 300,
+            child: BoardView(
+              board: initialBoard(GameType.dotsandboxes).play({'line': 3})!,
+              mySide: Side.second,
+              onPlay: played.add,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('line-38')));
+    expect(played, [
+      {'line': 38},
+    ]);
   });
 }

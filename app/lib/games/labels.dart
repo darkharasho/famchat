@@ -73,6 +73,10 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
     return '♟ Moved in $title';
   }
   final outcome = after.outcome;
+  // An extra turn (a box closed, or the opponent passed): still the sender's.
+  if (outcome == null && after.toMoveUserId == m.senderUserId) {
+    return '♟ Moved in $title';
+  }
   if (outcome == null) return '♟ Your turn in $title';
   return outcome.winner == null ? '🤝 Draw in $title' : '♟ You lost at $title';
 }

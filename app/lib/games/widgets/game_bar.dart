@@ -6,13 +6,14 @@ import '../game_state.dart';
 import '../rules.dart';
 import 'game_screen.dart';
 
-/// The glyph for [t]; chess and checkers carry U+FE0E and need the
+/// The glyph for [t]; all but tic-tac-toe carry U+FE0E and need the
 /// NotoSansSymbols2 family, so they never render as emoji.
 String gameGlyph(GameType t) => switch (t) {
   GameType.chess => '\u265F\uFE0E',
   GameType.checkers => '\u26C0\uFE0E',
   GameType.fourinarow => '\u25CF\uFE0E',
   GameType.reversi => '\u25D0\uFE0E',
+  GameType.dotsandboxes => '\u2B1A\uFE0E',
   GameType.tictactoe => '\u2715',
 };
 

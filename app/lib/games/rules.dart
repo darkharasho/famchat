@@ -1,5 +1,6 @@
 import 'checkers.dart';
 import 'chess_board.dart';
+import 'dots_and_boxes.dart';
 import 'four_in_a_row.dart';
 import 'reversi.dart';
 import 'tictactoe.dart';
@@ -16,7 +17,8 @@ enum GameType {
   checkers('checkers', 'Checkers'),
   chess('chess', 'Chess'),
   fourinarow('fourinarow', 'Four in a Row'),
-  reversi('reversi', 'Reversi');
+  reversi('reversi', 'Reversi'),
+  dotsandboxes('dotsandboxes', 'Dots and Boxes');
 
   const GameType(this.wire, this.title);
 
@@ -31,8 +33,8 @@ enum GameType {
 }
 
 /// [winner] null means a draw. [reason] is one of 'line', 'full', 'no_moves',
-/// 'checkmate', 'stalemate', 'threefold', 'fifty_moves', 'insufficient',
-/// 'resigned' or 'agreed'.
+/// 'checkmate', 'stalemate', 'discs', 'boxes', 'threefold', 'fifty_moves',
+/// 'insufficient', 'resigned' or 'agreed'.
 class Outcome {
   const Outcome(this.winner, this.reason);
 
@@ -68,5 +70,7 @@ Board initialBoard(GameType t) {
       return FourInARowBoard.initial();
     case GameType.reversi:
       return ReversiBoard.initial();
+    case GameType.dotsandboxes:
+      return DotsAndBoxesBoard.initial();
   }
 }

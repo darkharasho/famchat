@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`) and Reversi (`reversi`). All are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`) and Dots and Boxes (`dotsandboxes`). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi", "first":"<userId>"}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes", "first":"<userId>"}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -143,6 +143,12 @@ Move fields of `play`:
   flip at least one opposing disc, and every bracketed line flips. A side with no legal move is passed over
   automatically (no message), and the game ends when neither side can move: most discs wins (reason `discs`), equal
   counts draw. No draw offers.
+- Dots and Boxes: `{"line": 0..39}` on 4x4 boxes (5x5 dots). Horizontal lines are `0..19` = `row * 4 + col` (dot
+  rows 0-4 top to bottom, cols 0-3); vertical lines are `20..39` = `20 + row * 5 + col` (box rows 0-3, dot cols
+  0-4). Box `row * 4 + col` is bounded by lines `row * 4 + col`, `(row + 1) * 4 + col`, `20 + row * 5 + col` and
+  `21 + row * 5 + col`. An already drawn line is illegal. The first player moves first; completing one or two boxes
+  claims them for the mover, who moves again (the next `play` comes from the same player), otherwise the turn
+  passes. The game ends when all 40 lines are drawn: most boxes wins (reason `boxes`), 8-8 draws. No draw offers.
 
 ### Link previews
 A text may carry a card for its first link, made by the sender:

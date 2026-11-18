@@ -29,6 +29,12 @@ class GameViewer {
   String nameOf(String userId) =>
       userId == me ? 'You' : users[userId]?.name ?? 'Someone';
 
+  /// The first letter of [userId]'s display name (also for me), or empty.
+  String initialOf(String userId) {
+    final name = users[userId]?.name.trim() ?? '';
+    return name.isEmpty ? '' : name.characters.first.toUpperCase();
+  }
+
   /// `Your turn`, `Mom's turn`, `You won`, `Mom won`, `Draw`,
   /// `Game not started`, or `Game paused` for an unfinished game in a
   /// read-only chat.
@@ -392,6 +398,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                           board: g.board,
                           mySide: mySide,
                           enabled: myTurn,
+                          initials: (
+                            viewer.initialOf(g.firstUserId),
+                            viewer.initialOf(g.secondUserId),
+                          ),
                           onPlay: (m) => _send(g, {'type': 'play', ...m}),
                         ),
                       ),

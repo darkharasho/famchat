@@ -193,5 +193,31 @@ void main() {
         '♟ Moved in Tic-tac-toe',
       );
     });
+    test('a play that keeps the sender\'s turn says ♟ Moved in Dots and '
+        'Boxes', () async {
+      await db.insertMessageIfAbsent(
+        row('A', const GameBody(GameType.dotsandboxes, 'A'), id: 'g'),
+      );
+      var ply = 0;
+      for (final (who, line) in [('A', 0), ('B', 4), ('A', 20)]) {
+        await db.insertMessageIfAbsent(
+          mv(who, GameType.dotsandboxes, ply++, {'type': 'play', 'line': line}),
+        );
+      }
+      // B closes box 0 and goes again.
+      final close = mv('B', GameType.dotsandboxes, 3, {
+        'type': 'play',
+        'line': 21,
+      });
+      expect(await push(close), '♟ Moved in Dots and Boxes');
+      await db.insertMessageIfAbsent(close);
+      // A plain line passes the turn.
+      expect(
+        await push(
+          mv('B', GameType.dotsandboxes, 4, {'type': 'play', 'line': 10}),
+        ),
+        '♟ Your turn in Dots and Boxes',
+      );
+    });
   });
 }

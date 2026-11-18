@@ -2,12 +2,14 @@ import 'package:material_ui/material_ui.dart';
 
 import '../checkers.dart';
 import '../chess_board.dart';
+import '../dots_and_boxes.dart';
 import '../four_in_a_row.dart';
 import '../reversi.dart';
 import '../rules.dart';
 import '../tictactoe.dart';
 import 'checkers_view.dart';
 import 'chess_view.dart';
+import 'dots_and_boxes_view.dart';
 import 'four_in_a_row_view.dart';
 import 'reversi_view.dart';
 import 'tictactoe_view.dart';
@@ -25,6 +27,7 @@ class BoardView extends StatefulWidget {
     required this.onPlay,
     this.enabled = true,
     this.thumbnail = false,
+    this.initials,
   });
 
   final Board board;
@@ -35,6 +38,10 @@ class BoardView extends StatefulWidget {
   /// Only called with moves `board.play()` accepts.
   final void Function(Map<String, Object?> move) onPlay;
   final bool enabled, thumbnail;
+
+  /// The (first, second) players' initials, shown where a game marks
+  /// ownership (Dots and Boxes). Null shows colours only.
+  final (String, String)? initials;
 
   @override
   State<BoardView> createState() => _BoardViewState();
@@ -81,6 +88,14 @@ class _BoardViewState extends State<BoardView> {
         onPlay: widget.onPlay,
         interactive: interactive,
         thumbnail: widget.thumbnail,
+      ),
+      DotsAndBoxesBoard() => DotsAndBoxesView(
+        board: b,
+        mySide: widget.mySide,
+        onPlay: widget.onPlay,
+        interactive: interactive,
+        thumbnail: widget.thumbnail,
+        initials: widget.initials,
       ),
       _ => const SizedBox.shrink(),
     };
