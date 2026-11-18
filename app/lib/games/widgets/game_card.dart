@@ -11,15 +11,25 @@ import 'board_view.dart';
 import 'game_screen.dart';
 
 /// A game in the timeline, where its `game` message landed: a live thumbnail,
-/// the game's name and status, and Rematch on the chat's newest game once it
-/// is over. Tap to open the board.
-class GameCard extends ConsumerWidget {
+/// the game's name and status, and Rematch on the chat's newest game that
+/// started (inert ones never did) once it is over. Tap to open the board.
+class GameCard extends ConsumerStatefulWidget {
   const GameCard({super.key, required this.chatId, required this.gameId});
 
   final String chatId, gameId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GameCard> createState() => _GameCardState();
+}
+
+class _GameCardState extends ConsumerState<GameCard> {
+  var _starting = false;
+
+  String get chatId => widget.chatId;
+  String get gameId => widget.gameId;
+
+  @override
+  Widget build(BuildContext context) {
     final games = ref.watch(gamesProvider(chatId));
     final g = games.where((x) => x.id == gameId).firstOrNull;
     if (g == null) return const SizedBox.shrink();
@@ -28,9 +38,10 @@ class GameCard extends ConsumerWidget {
     final s = theme.colorScheme;
     final me = viewer.me;
     final mine = g.firstUserId == me || g.secondUserId == me;
-    final rematch = g.over && !viewer.readOnly && mine && games.last.id == g.id;
+    final newest = games.lastWhere((x) => !x.inert, orElse: () => g);
+    final rematch = g.over && !viewer.readOnly && mine && newest.id == g.id;
     final status = viewer.status(g);
-    final myTurn = !g.inert && g.toMoveUserId == me;
+    final myTurn = !g.inert && !viewer.readOnly && g.toMoveUserId == me;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: Space.xs),
       child: Center(
@@ -89,7 +100,7 @@ class GameCard extends ConsumerWidget {
                                   ),
                                   visualDensity: VisualDensity.compact,
                                 ),
-                                onPressed: () => _rematch(context, ref, g),
+                                onPressed: _starting ? null : () => _rematch(g),
                                 child: const Text('Rematch'),
                               ),
                             ),
@@ -106,15 +117,23 @@ class GameCard extends ConsumerWidget {
     );
   }
 
-  /// A new game of the same kind; whoever went second goes first.
-  Future<void> _rematch(
-    BuildContext context,
-    WidgetRef ref,
-    GameState g,
-  ) async {
+  /// A new game of the same kind; whoever went second goes first. If a game
+  /// is already running (the other player's rematch got there first), opens
+  /// that one instead.
+  Future<void> _rematch(GameState g) async {
     final sync = ref.read(chatSyncProvider);
-    if (sync == null) return;
-    final id = await sync.startGame(chatId, g.type, first: g.secondUserId);
-    if (context.mounted) unawaited(openGame(context, chatId, id));
+    if (sync == null || _starting) return;
+    final active = activeGame(ref.read(gamesProvider(chatId)));
+    if (active != null) {
+      unawaited(openGame(context, chatId, active.id));
+      return;
+    }
+    setState(() => _starting = true);
+    try {
+      final id = await sync.startGame(chatId, g.type, first: g.secondUserId);
+      if (mounted) unawaited(openGame(context, chatId, id));
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
   }
 }

@@ -1011,7 +1011,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final others = members.where((m) => m.userId != me).toList();
-    final lastMineSent = visible.lastWhere((m) => m.senderUserId == me && m.seq != null, orElse: () => _none).id;
+    // Game cards carry no footer, so a game row never takes the Seen line.
+    final lastMineSent =
+        visible.lastWhere((m) => m.senderUserId == me && m.seq != null && m.kind != 'game', orElse: () => _none).id;
     String? seenFooter(MessageRow m) {
       if (m.id != lastMineSent || others.isEmpty) return null;
       final seen = others.where((o) => o.lastReadSeq >= m.seq!).length;

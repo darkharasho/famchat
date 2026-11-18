@@ -29,8 +29,9 @@ class GameViewer {
   String nameOf(String userId) =>
       userId == me ? 'You' : users[userId]?.name ?? 'Someone';
 
-  /// `Your turn`, `Mom's turn`, `You won`, `Mom won`, `Draw` or
-  /// `Game not started`.
+  /// `Your turn`, `Mom's turn`, `You won`, `Mom won`, `Draw`,
+  /// `Game not started`, or `Game paused` for an unfinished game in a
+  /// read-only chat.
   String status(GameState g) {
     if (g.inert) return 'Game not started';
     final outcome = g.outcome;
@@ -39,6 +40,7 @@ class GameViewer {
       if (winner == null) return 'Draw';
       return winner == me ? 'You won' : '${nameOf(winner)} won';
     }
+    if (readOnly) return 'Game paused';
     final next = g.toMoveUserId!;
     return next == me ? 'Your turn' : "${nameOf(next)}'s turn";
   }
@@ -107,6 +109,13 @@ class GameScreen extends ConsumerStatefulWidget {
 }
 
 class _GameScreenState extends ConsumerState<GameScreen> {
+  /// The game shown: [GameScreen.gameId] until the user opens the running
+  /// game from an inert one.
+  late String _gameId = widget.gameId;
+
+  /// A draw answer, resignation or draw offer is being confirmed or sent.
+  var _busy = false;
+
   @override
   void initState() {
     super.initState();
@@ -125,13 +134,36 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
+  /// Runs [f] unless another action is running, disabling the action buttons
+  /// meanwhile so a double tap sends one move.
+  Future<void> _guard(Future<void> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await f();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Answers a draw offer.
+  Future<void> _answer(GameState g, String type) => _guard(() async {
+    await ref.read(chatSyncProvider)?.sendMove(
+      widget.chatId,
+      g.id,
+      g.type,
+      g.ply,
+      {'type': type},
+    );
+  });
+
   Future<void> _confirm(
     GameState g, {
     required String title,
     required String body,
     required String action,
     required Map<String, Object?> move,
-  }) async {
+  }) => _guard(() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -156,28 +188,40 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         .where((x) => x.id == g.id)
         .firstOrNull;
     if (now == null || now.over) return;
-    _send(now, move);
-  }
+    await ref
+        .read(chatSyncProvider)
+        ?.sendMove(widget.chatId, now.id, now.type, now.ply, move);
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final g = ref
-        .watch(gamesProvider(widget.chatId))
-        .where((x) => x.id == widget.gameId)
-        .firstOrNull;
+    final games = ref.watch(gamesProvider(widget.chatId));
+    final g = games.where((x) => x.id == _gameId).firstOrNull;
     final viewer = watchGameViewer(ref, widget.chatId);
     if (g == null) {
+      // Loaded but missing: the game row failed or isn't a game.
+      final loaded =
+          ref.watch(chatProvider(widget.chatId)).hasValue &&
+          ref.watch(messagesProvider(widget.chatId)).hasValue &&
+          ref.watch(membersProvider(widget.chatId)).hasValue;
       return Scaffold(
         appBar: AppBar(),
-        body: const Center(
-          child: SizedBox.square(
-            dimension: 32,
-            child: CircularProgressIndicator(),
-          ),
+        body: Center(
+          child: loaded
+              ? Text(
+                  "This game isn't available",
+                  key: const Key('game-unavailable'),
+                  style: theme.textTheme.bodyLarge,
+                )
+              : const SizedBox.square(
+                  dimension: 32,
+                  child: CircularProgressIndicator(),
+                ),
         ),
       );
     }
+    final running = g.inert ? activeGame(games) : null;
     final me = viewer.me;
     final mySide = me == null ? null : g.sideOf(me);
     final live = !g.inert && !g.over && !viewer.readOnly && mySide != null;
@@ -206,6 +250,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         actions: [
           if (live)
             PopupMenuButton<String>(
+              enabled: !_busy,
               tooltip: 'Game options',
               onSelected: (v) => switch (v) {
                 'resign' => _confirm(
@@ -264,14 +309,54 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                           ),
                         ),
                         TextButton(
-                          onPressed: () =>
-                              _send(g, const {'type': 'draw_decline'}),
+                          onPressed: _busy
+                              ? null
+                              : () => _answer(g, 'draw_decline'),
                           child: const Text('Decline'),
                         ),
                         TextButton(
-                          onPressed: () =>
-                              _send(g, const {'type': 'draw_accept'}),
+                          onPressed: _busy
+                              ? null
+                              : () => _answer(g, 'draw_accept'),
                           child: const Text('Accept'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            if (running != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.lg,
+                  Space.sm,
+                  Space.lg,
+                  0,
+                ),
+                child: Material(
+                  key: const Key('game-running'),
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      Space.lg,
+                      Space.xs,
+                      Space.xs,
+                      Space.xs,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'A game is already running',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() => _gameId = running.id),
+                          child: const Text('Open'),
                         ),
                       ],
                     ),

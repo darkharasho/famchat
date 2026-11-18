@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:famchat/chat/db/chat_db.dart';
@@ -271,6 +272,191 @@ void main() {
       'game': 'tictactoe',
       'first': bob.userId,
     });
+  });
+
+  chatTestWidgets('a double-tapped rematch starts one game', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    final rematch = find.widgetWithText(TextButton, 'Rematch');
+    await tester.tap(rematch);
+    await tester.tap(rematch);
+    await settle(tester);
+    expect(
+      (await outbox(tester)).where((m) => m['kind'] == 'game'),
+      hasLength(1),
+    );
+    expect(find.byType(GameScreen), findsOneWidget);
+  });
+
+  chatTestWidgets('rematch opens the game already running', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    // Rematch is tapped just as Bob's rematch lands.
+    final onPressed = tester
+        .widget<TextButton>(find.widgetWithText(TextButton, 'Rematch'))
+        .onPressed!;
+    await inApp(
+      tester,
+      () => alice.db.insertMessageIfAbsent(
+        game('g2', GameType.tictactoe, bob.userId),
+      ),
+    );
+    await settle(tester);
+    expect(find.widgetWithText(TextButton, 'Rematch'), findsNothing);
+    onPressed();
+    await settle(tester);
+    expect(await outbox(tester), isEmpty);
+    expect(
+      find.descendant(
+        of: find.byType(GameScreen),
+        matching: find.text("Bob's turn"),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  chatTestWidgets('an inert newer game leaves Rematch on the real one', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        // Bob's simultaneous rematch: never started.
+        game('g2', GameType.tictactoe, bob.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    expect(find.text('Game not started'), findsOneWidget);
+    final card = find.ancestor(
+      of: find.text('You won'),
+      matching: find.byType(GameCard),
+    );
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.widgetWithText(TextButton, 'Rematch'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  chatTestWidgets('an inert game offers to open the running one', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.chess, alice.userId),
+        game('g2', GameType.checkers, bob.userId),
+      ],
+    );
+    await tester.tap(
+      find.ancestor(
+        of: find.text('Game not started'),
+        matching: find.byType(GameCard),
+      ),
+    );
+    await settle(tester);
+    final screen = find.byType(GameScreen);
+    expect(
+      find.descendant(of: screen, matching: find.text('Checkers')),
+      findsOneWidget,
+    );
+    expect(find.text('A game is already running'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Open'));
+    await settle(tester);
+    expect(
+      find.descendant(of: screen, matching: find.text('Chess')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: screen, matching: find.text('Your turn')),
+      findsOneWidget,
+    );
+    expect(find.text('A game is already running'), findsNothing);
+  });
+
+  chatTestWidgets('a game that never resolves says it is not available', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    unawaited(
+      Navigator.of(tester.element(find.byType(GameCard))).push<void>(
+        MaterialPageRoute(
+          builder: (_) => const GameScreen(chatId: chatId, gameId: 'gone'),
+        ),
+      ),
+    );
+    await settle(tester);
+    expect(find.text("This game isn't available"), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  chatTestWidgets('a double-tapped draw accept sends one move', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.chess, alice.userId),
+        move(bob.userId, 'g1', GameType.chess, 0, {'type': 'draw_offer'}),
+      ],
+    );
+    await openBoard(tester);
+    final accept = find.widgetWithText(TextButton, 'Accept');
+    await tester.tap(accept);
+    await tester.tap(accept, warnIfMissed: false);
+    await settle(tester);
+    expect(await outbox(tester), hasLength(1));
+  });
+
+  chatTestWidgets('my game row keeps the Seen footer on my last message', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        msg(alice.userId, const TextBody('want to play?')),
+        game('g1', GameType.chess, alice.userId),
+      ],
+    );
+    await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 2));
+    await settle(tester);
+    expect(find.text('Seen'), findsOneWidget);
+  });
+
+  chatTestWidgets('a read-only chat says Game paused', (tester) async {
+    backend.markFormer(bob.userId);
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    expect(find.text('Your turn'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(GameCard),
+        matching: find.text('Game paused'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('game-bar')),
+        matching: find.textContaining('Game paused', findRichText: true),
+      ),
+      findsOneWidget,
+    );
+    await openBoard(tester);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('game-status'))).data,
+      'Game paused',
+    );
   });
 
   chatTestWidgets('read-only chat shows board without controls', (

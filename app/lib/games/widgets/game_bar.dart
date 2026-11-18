@@ -31,7 +31,7 @@ class GameBar extends ConsumerWidget {
     final opponent = viewer.me == g.firstUserId
         ? g.secondUserId
         : g.firstUserId;
-    final myTurn = g.toMoveUserId == viewer.me;
+    final myTurn = !viewer.readOnly && g.toMoveUserId == viewer.me;
     final style = theme.textTheme.bodyMedium?.copyWith(color: s.onSurface);
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
