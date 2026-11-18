@@ -43,7 +43,7 @@
 - Dart writes it with flutter_secure_storage:
   - `IOSOptions(groupId: 'group.dev.famchat.app', accountName: 'dev.famchat.preview', accessibility: KeychainAccessibility.first_unlock_this_device, synchronizable: false)`;
   - key `preview_keyring`.
-  - This becomes a `kSecClassGenericPassword` item with `kSecAttrService = dev.famchat.preview`, `kSecAttrAccount = preview_keyring`, `kSecAttrAccessGroup = group.dev.famchat.app` and `kSecAttrAccessible = AfterFirstUnlock`. The value is UTF-8 JSON.
+  - This becomes a `kSecClassGenericPassword` item with `kSecAttrService = dev.famchat.preview`, `kSecAttrAccount = preview_keyring`, `kSecAttrAccessGroup = group.dev.famchat.app` and `kSecAttrAccessible = AfterFirstUnlockThisDevice`. The value is UTF-8 JSON.
 - No method channel is needed. On iOS the app group is a valid keychain access group, so no keychain-sharing capability is added.
 - Schema `v: 1` is one JSON item, rewritten whole:
   ```json
