@@ -65,7 +65,8 @@ people, not a separate app.
 
 - `game` — starts a game. `{kind:"game", game:"tictactoe"|"checkers"|"chess", first:<userId>}`.
   `first` is who moves first (X / dark / white). The game's id is this message's id.
-- `move` — one action in a game. `{kind:"move", target:<game message id>, ply:<int>, action:...}`
+- `move` — one action in a game. `{kind:"move", target:<game message id>, game:<same game name>, ply:<int>, action:...}`
+  (`game` is repeated so labels and previews don't need to look up the game message.)
   - `ply` is the 0-based index of this move in the game; it lets clients drop stale/duplicate moves.
   - `action` is one of:
     - `{"type":"play", ...game-specific move}`:
@@ -98,8 +99,9 @@ A small pure-Dart `GameRules` interface per game (initial state, legal moves, ap
   mandatory**, multi-jumps must be completed, a man reaching the far row is crowned and the move
   ends, kings move one square any diagonal direction; win when the opponent has no legal move)
   are written in-house.
-- Chess uses a maintained pub.dev chess rules package (builder picks; the `chess` port of chess.js is
-  the expected candidate) for legality, check/mate/stalemate, castling, en passant, promotion,
+- Chess uses the pub.dev `chess` package, **pinned at exactly 0.8.1** (BSD, a port of chess.js;
+  resolves under Dart 3). `dartchess` was ruled out: it is GPL-3, which doesn't fit store-distributed
+  apps. It provides legality, check/mate/stalemate, castling, en passant, promotion,
   threefold repetition and the 50-move rule.
 - Engines are thoroughly unit-tested; they're the part that must never disagree between devices.
 
@@ -118,16 +120,22 @@ A small pure-Dart `GameRules` interface per game (initial state, legal moves, ap
   draw-offer actions behind a menu with confirmation, promotion picker for chess. Board updates live
   as the other person moves.
 - Visual style follows the app's existing theme (light/dark), with clean flat boards and pieces;
-  chess pieces from a free-licensed SVG set bundled in assets (license file alongside, like fonts).
+  chess pieces drawn as the Unicode chess glyphs from a bundled **Noto Sans Symbols 2** font (OFL,
+  license file alongside the other fonts), so they look identical on every platform.
 
 ### Notifications, unread, chat list
 
 - `game` and `move` (play, resign, draw actions) are **sent non-silent**, so they push and count as
   unread like a message. (They do not stay "change" kinds for unread counting.)
-- Notification preview labels (with previews on): `game` → `🎲 Started a game of Chess`;
-  `move` → `♟ Your move in Chess` (game end: `♟ Mom won at Chess` / `Draw in Chess`). With previews
-  off, the generic text, as today.
-- Chat list "last message" line shows the same labels instead of a raw move.
+- Notification preview labels (with previews on), worked out on the device from the stored game:
+  `game` → `🎲 Started a game of Chess`; a play → `♟ Your turn in Chess`, or when it ends the game
+  `♟ You lost at Chess` / `🤝 Draw in Chess`; resign → `🏳 Resigned at Chess` (you win); draw offer →
+  `🤝 Offered a draw in Chess`; accept → `🤝 Draw in Chess`; decline → `Declined a draw in Chess`.
+  If the game message isn't stored on the device yet, a play falls back to `♟ Moved in Chess`. With
+  previews off, the generic text, as today.
+- The chat list's "last message" line uses short labels that don't depend on game state:
+  `🎲 Started a game of Chess`, `♟ Moved in Chess`, `🏳 Resigned at Chess`, `🤝 Offered a draw in Chess`,
+  `🤝 Accepted a draw in Chess`, `Declined a draw in Chess` (prefixed `You: ` for your own, as today).
 - Opening the board marks the chat read.
 
 ### Older app versions
@@ -165,7 +173,6 @@ auto-update. No version gate.
 ## Left to the builder
 
 - Exact board/piece visuals within the app's theme, animations, drag vs tap-only.
-- Which chess package (must be maintained and pure Dart, work on all six platforms incl. web).
 - Where derived game state is cached (recompute from messages vs. a memoized provider); recompute is
   fine at these sizes.
 - Wording of labels beyond the examples above.
