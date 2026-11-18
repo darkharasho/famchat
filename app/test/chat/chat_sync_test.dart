@@ -132,6 +132,24 @@ void main() {
     await until(() async => (await bob.texts(chatId)).contains('later'));
   });
 
+  test('a message sent during a slow reconnect catch-up goes out without waiting for it', () async {
+    final (alice, bob, carol) = await trio();
+    final slow = await alice.sync.openDirect(carol.d.userId);
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await pump();
+    await alice.sync.idle;
+    alice.d.hub.drop();
+    final hold = Completer<void>();
+    alice.d.api.holds['GET /chats/$slow/messages'] = hold;
+    await alice.d.hub.connect();
+    final id = await alice.sync.sendText(chatId, 'now');
+    await until(() async => backend.storedMessages(chatId).isNotEmpty, reason: 'the send reaches the hub');
+    expect(hold.isCompleted, isFalse);
+    hold.complete();
+    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
+    await until(() async => (await bob.texts(chatId)).contains('now'));
+  });
+
   test('a gap triggers a catch-up fetch', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

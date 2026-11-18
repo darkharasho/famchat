@@ -563,8 +563,13 @@ class FakeChatApi implements ChatApi {
   /// When set, the next call throws this instead of running.
   Object? failNext;
 
+  /// Calls (by name, e.g. `GET /chats/<id>/messages`) that wait for their completer: a slow network.
+  final holds = <String, Completer<void>>{};
+
   Future<T> _run<T>(String call, T Function() f) async {
     await Future<void>.delayed(Duration.zero);
+    final h = holds[call];
+    if (h != null) await h.future;
     b.calls.add(call);
     final fail = failNext;
     if (fail != null) {
