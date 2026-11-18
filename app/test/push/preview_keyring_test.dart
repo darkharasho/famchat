@@ -122,4 +122,98 @@ void main() {
     await m.wipe();
     expect(m.value, isNull);
   });
+
+  group('PreviewKeyringSync', () {
+    Future<void> pump([Duration d = Duration.zero]) => Future<void>.delayed(d);
+
+    (MemoryPreviewKeyringStore, PreviewKeyringSync) make({Duration debounce = Duration.zero}) {
+      final store = MemoryPreviewKeyringStore();
+      final sync = PreviewKeyringSync(db: db, store: store, debounce: debounce);
+      addTearDown(sync.dispose);
+      return (store, sync);
+    }
+
+    test('setOn true writes the keyring now', () async {
+      final (store, sync) = make();
+      await sync.setOn(true);
+      expect(store.value, '{"v":1,"keys":{},"devices":{},"groups":[],"names":{}}');
+    });
+
+    test('a new chat key rewrites', () async {
+      final (store, sync) = make();
+      await sync.setOn(true);
+      await db.putKey('C1', 7, key(1));
+      await pump(const Duration(milliseconds: 20));
+      expect(store.value, contains('"7":"${b64url(key(1))}"'));
+    });
+
+    test('a device revoked rewrites', () async {
+      final (store, sync) = make();
+      await addDevice('d1');
+      await sync.setOn(true);
+      expect(store.value, contains('"revoked":false'));
+      await addDevice('d1', revoked: true);
+      await pump(const Duration(milliseconds: 20));
+      expect(store.value, contains('"revoked":true'));
+    });
+
+    test('a renamed user rewrites', () async {
+      final (store, sync) = make();
+      UserRow user(String name) => UserRow(
+          id: 'bob', name: name, isAdmin: false, identityPub: 'x', trustedIdentityPub: 'x', knownIdentityPubs: '[]', pinnedAdmin: false, familyIds: '[]');
+      await db.putUser(user('Bob'));
+      await sync.setOn(true);
+      expect(store.value, contains('"bob":"Bob"'));
+      await db.putUser(user('Robert'));
+      await pump(const Duration(milliseconds: 20));
+      expect(store.value, contains('"bob":"Robert"'));
+    });
+
+    test('turning previews off wipes', () async {
+      final (store, sync) = make();
+      await sync.setOn(true);
+      await sync.setOn(false);
+      expect(store.value, isNull);
+      final writes = store.writes;
+      await db.putKey('C1', 1, key(1));
+      await pump(const Duration(milliseconds: 20));
+      expect(store.value, isNull);
+      expect(store.writes, writes);
+    });
+
+    test('stop cancels a pending rewrite', () async {
+      final (store, sync) = make(debounce: const Duration(milliseconds: 50));
+      await sync.setOn(true);
+      await db.putKey('C1', 1, key(1));
+      await pump();
+      await sync.setOn(false);
+      await pump(const Duration(milliseconds: 100));
+      expect(store.value, isNull);
+    });
+
+    test('a rebuild still in flight when previews turn off is dropped', () async {
+      final store = MemoryPreviewKeyringStore();
+      final sync = PreviewKeyringSync(db: db, store: store, debounce: Duration.zero);
+      addTearDown(sync.dispose);
+      final on = sync.setOn(true);
+      final off = sync.setOn(false);
+      await Future.wait([on, off]);
+      await pump(const Duration(milliseconds: 20));
+      expect(store.value, isNull);
+    });
+
+    test('a throwing store does not throw out of setOn', () async {
+      final sync = PreviewKeyringSync(db: db, store: _ThrowingStore(), debounce: Duration.zero);
+      addTearDown(sync.dispose);
+      await sync.setOn(true);
+      await sync.setOn(false);
+    });
+  });
+}
+
+class _ThrowingStore implements PreviewKeyringStore {
+  @override
+  Future<void> write(String json) async => throw StateError('no entitlement');
+  @override
+  Future<void> wipe() async => throw StateError('no entitlement');
 }

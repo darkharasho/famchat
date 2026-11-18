@@ -15,6 +15,7 @@ import '../chat/ulid.dart';
 import '../crypto/keys.dart';
 import '../crypto/reset.dart';
 import '../platform_info.dart';
+import '../push/preview_keyring.dart';
 import '../push/preview_setting.dart';
 import 'invite_link.dart';
 import 'secure_kv.dart';
@@ -357,6 +358,11 @@ class SessionController extends Notifier<SessionState> {
           await writePreviewsOn(false).timeout(_timeout);
         } catch (_) {
           // Best effort: the server resets it when the token is cleared.
+        }
+        try {
+          await ref.read(previewKeyringStoreProvider)?.wipe().timeout(_timeout);
+        } catch (_) {
+          // Best effort: the extension also shows no text once the session is gone.
         }
         // The switch must not keep showing the old value for the next sign-in.
         if (ref.mounted) ref.invalidate(previewsOnProvider);

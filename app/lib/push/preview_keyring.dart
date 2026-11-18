@@ -12,13 +12,19 @@
 //    "groups":["<chatId of each group chat>"],
 //    "names":{"<userId>":"<name>"}}
 // Only devices that are trusted and have a valid cert are listed; revoked ones stay, flagged.
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show TableUpdateQuery;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../chat/db/chat_db.dart';
+import '../chat/providers.dart';
 import '../crypto/encoding.dart';
+import 'preview_setting.dart';
 
 const previewKeyringGroup = 'group.dev.famchat.app',
     previewKeyringService = 'dev.famchat.preview',
@@ -82,3 +88,87 @@ class MemoryPreviewKeyringStore implements PreviewKeyringStore {
   @override
   Future<void> wipe() async => value = null;
 }
+
+/// Keeps the store in step with the database while previews are on: writes now, rewrites
+/// (debounced) when keys, devices, chats or users change, wipes on off. Writes are serialised, and
+/// a generation counter drops any rebuild that finishes after off or dispose, so a late rewrite
+/// can never bring the keyring back. Store errors are swallowed (a simulator has no entitlement).
+class PreviewKeyringSync {
+  // ignore_for_file: prefer_initializing_formals
+  PreviewKeyringSync({
+    required ChatDb db,
+    required PreviewKeyringStore store,
+    Duration debounce = const Duration(milliseconds: 300),
+  })  : _db = db,
+        _store = store,
+        _debounce = debounce;
+
+  final ChatDb _db;
+  final PreviewKeyringStore _store;
+  final Duration _debounce;
+
+  int _gen = 0;
+  bool _on = false;
+  StreamSubscription<Set<Object>>? _sub;
+  Timer? _timer;
+  Future<void> _chain = Future.value();
+
+  Future<void> setOn(bool on) {
+    if (on == _on) return _chain;
+    _on = on;
+    final gen = ++_gen;
+    _stopListening();
+    if (!on) return _enqueue(() => _store.wipe());
+    _sub = _db
+        .tableUpdates(TableUpdateQuery.onAllTables([_db.localKeys, _db.localDevices, _db.localChats, _db.localUsers]))
+        .listen((_) {
+      _timer?.cancel();
+      _timer = Timer(_debounce, () => _enqueue(() => _rewrite(gen)));
+    });
+    return _enqueue(() => _rewrite(gen));
+  }
+
+  Future<void> dispose() async {
+    _on = false;
+    _gen++;
+    _stopListening();
+    await _chain;
+  }
+
+  void _stopListening() {
+    _timer?.cancel();
+    _timer = null;
+    _sub?.cancel();
+    _sub = null;
+  }
+
+  Future<void> _rewrite(int gen) async {
+    if (gen != _gen) return;
+    final json = await buildPreviewKeyring(_db);
+    if (gen != _gen) return;
+    await _store.write(json);
+  }
+
+  Future<void> _enqueue(Future<void> Function() job) {
+    final next = _chain.then((_) async {
+      try {
+        await job();
+      } catch (_) {
+        // Best effort; never log keyring contents.
+      }
+    });
+    return _chain = next;
+  }
+}
+
+final previewKeyringStoreProvider = Provider<PreviewKeyringStore?>(
+    (ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? SecurePreviewKeyringStore() : null);
+
+/// iOS only: mirrors the previews setting and the local database into the shared keychain item.
+final previewKeyringSyncProvider = Provider<void>((ref) {
+  final store = ref.watch(previewKeyringStoreProvider);
+  if (store == null) return;
+  final sync = PreviewKeyringSync(db: ref.watch(chatDbProvider), store: store);
+  ref.onDispose(sync.dispose);
+  unawaited(sync.setOn(ref.watch(previewsOnProvider).value ?? false));
+});
