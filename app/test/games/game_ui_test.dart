@@ -442,7 +442,7 @@ void main() {
     expect(await outbox(tester), hasLength(1));
   });
 
-  chatTestWidgets('my game row keeps the Seen footer on my last message', (
+  chatTestWidgets('a game row after my message leaves its read ticks', (
     tester,
   ) async {
     await open(
@@ -454,7 +454,7 @@ void main() {
     );
     await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 2));
     await settle(tester);
-    expect(find.text('Seen'), findsOneWidget);
+    expect(find.byKey(const Key('read-icon')), findsOneWidget);
   });
 
   chatTestWidgets('a read-only chat says Game paused', (tester) async {

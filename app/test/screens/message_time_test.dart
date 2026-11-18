@@ -30,6 +30,7 @@ Future<void> pumpBubble(
   double avatarSpace = 0,
   bool h24 = false,
   Map<String, Set<String>> reactions = const {},
+  ReadReceipt? receipt,
 }) async {
   await tester.pumpWidget(MaterialApp(
     theme: buildTheme(Brightness.light),
@@ -47,6 +48,7 @@ Future<void> pumpBubble(
           lastInGroup: lastInGroup,
           edited: edited,
           avatarSpace: avatarSpace,
+          receipt: receipt,
         ),
       ),
     ),
@@ -118,5 +120,50 @@ void main() {
     expect(pill, findsOneWidget);
     expect(time, findsOneWidget);
     expect(tester.getTopLeft(time).dy, greaterThanOrEqualTo(tester.getBottomLeft(pill).dy));
+  });
+
+  group('ticks', () {
+    final sentIcon = find.byKey(const Key('sent-icon'));
+    final readIcon = find.byKey(const Key('read-icon'));
+
+    testWidgets('one tick under a sent message nobody has read', (tester) async {
+      await pumpBubble(tester, receipt: const ReadReceipt(readBy: 0, of: 1));
+      expect(sentIcon, findsOneWidget);
+      expect(readIcon, findsNothing);
+      expect(find.descendant(of: bubble, matching: sentIcon), findsNothing);
+    });
+
+    testWidgets('two ticks once read', (tester) async {
+      await pumpBubble(tester, receipt: const ReadReceipt(readBy: 1, of: 1));
+      expect(readIcon, findsOneWidget);
+      expect(find.bySemanticsLabel('Read'), findsOneWidget);
+    });
+
+    testWidgets('groups: two ticks once anyone read it, labelled with how many', (tester) async {
+      await pumpBubble(tester, receipt: const ReadReceipt(readBy: 2, of: 3));
+      expect(readIcon, findsOneWidget);
+      expect(find.bySemanticsLabel('Read by 2 of 3'), findsOneWidget);
+    });
+
+    testWidgets('pending shows the clock, failed shows no tick', (tester) async {
+      await pumpBubble(tester, state: 'pending', receipt: const ReadReceipt(readBy: 0, of: 1));
+      expect(find.byKey(const Key('pending-icon')), findsOneWidget);
+      expect(sentIcon, findsNothing);
+      await pumpBubble(tester, state: 'failed', receipt: const ReadReceipt(readBy: 0, of: 1));
+      expect(sentIcon, findsNothing);
+      expect(readIcon, findsNothing);
+    });
+
+    testWidgets('every one of my sent messages shows its time and ticks, mid-run too', (tester) async {
+      await pumpBubble(tester, lastInGroup: false, receipt: const ReadReceipt(readBy: 0, of: 1));
+      expect(time, findsOneWidget);
+      expect(sentIcon, findsOneWidget);
+    });
+
+    testWidgets("others' messages carry no ticks", (tester) async {
+      await pumpBubble(tester, mine: false);
+      expect(sentIcon, findsNothing);
+      expect(readIcon, findsNothing);
+    });
   });
 }
