@@ -19,6 +19,7 @@ import 'screens/loading_screen.dart';
 import 'screens/pair_screen.dart';
 import 'screens/operator_screen.dart';
 import 'screens/settings_screen.dart';
+import 'settings/appearance_screen.dart';
 import 'screens/share_screen.dart';
 import 'screens/spikes_screen.dart';
 import 'screens/storage_screen.dart';
@@ -119,6 +120,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [GoRoute(path: 'add', builder: (context, state) => const AddDeviceScreen())],
               ),
               GoRoute(path: 'storage', builder: (context, state) => const StorageScreen()),
+              GoRoute(path: 'appearance', builder: (context, state) => const AppearanceScreen()),
               GoRoute(
                 path: 'families',
                 builder: (context, state) => const FamiliesScreen(),
