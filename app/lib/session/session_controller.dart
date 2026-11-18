@@ -15,6 +15,7 @@ import '../chat/ulid.dart';
 import '../crypto/keys.dart';
 import '../crypto/reset.dart';
 import '../platform_info.dart';
+import '../push/preview_keyring.dart';
 import '../push/preview_setting.dart';
 import 'invite_link.dart';
 import 'secure_kv.dart';
@@ -358,8 +359,10 @@ class SessionController extends Notifier<SessionState> {
         } catch (_) {
           // Best effort: the server resets it when the token is cleared.
         }
-        // The switch must not keep showing the old value for the next sign-in.
+        // The switch must not keep showing the old value for the next sign-in. Invalidated before
+        // the wipe so a live keyring sync sees "off" (a reloading value counts as off) first.
         if (ref.mounted) ref.invalidate(previewsOnProvider);
+        await _wipePreviewKeyring();
         if (s is SignedIn) {
           try {
             final stored = await _store.load().timeout(_timeout);
@@ -371,5 +374,16 @@ class SessionController extends Notifier<SessionState> {
           }
         }
         if (ref.mounted) state = next;
+        // Once signed out the keyring sync is gone (it only exists while signed in); wipe again so
+        // nothing it had in flight can survive.
+        await _wipePreviewKeyring();
       });
+
+  Future<void> _wipePreviewKeyring() async {
+    try {
+      await ref.read(previewKeyringStoreProvider)?.wipe().timeout(_timeout);
+    } catch (_) {
+      // Best effort: the extension also shows no text once the session is gone.
+    }
+  }
 }

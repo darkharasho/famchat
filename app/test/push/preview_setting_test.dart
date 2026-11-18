@@ -29,12 +29,12 @@ void main() {
     expect(previewsPrefKey, 'notification_previews');
   });
 
-  test('supported on android and desktop, not iOS or web', () {
+  test('supported on android, iOS and desktop, not web', () {
     expect(previewsSupported(platform: TargetPlatform.android), isTrue);
     expect(previewsSupported(platform: TargetPlatform.macOS), isTrue);
     expect(previewsSupported(platform: TargetPlatform.windows), isTrue);
     expect(previewsSupported(platform: TargetPlatform.linux), isTrue);
-    expect(previewsSupported(platform: TargetPlatform.iOS), isFalse);
+    expect(previewsSupported(platform: TargetPlatform.iOS), isTrue);
     expect(previewsSupported(platform: TargetPlatform.fuchsia), isFalse);
     expect(
       previewsSupported(web: true, platform: TargetPlatform.android),
