@@ -2,6 +2,8 @@
 // in server seq order, so every device derives the same positions.
 import 'dart:convert';
 
+import 'package:meta/meta.dart';
+
 import '../chat/db/chat_db.dart';
 import '../chat/plaintext.dart';
 import 'rules.dart';
@@ -93,6 +95,150 @@ List<GameState> deriveGames(
   return [for (final g in games) g.freeze()];
 }
 
+/// [deriveGames] for one chat, reusing work across emissions of the same
+/// chat's rows: a game whose inputs (its `game` row, its players, whether it
+/// is inert, and its `move` rows in order) are unchanged keeps its
+/// [GameState] object, and a game whose move rows only grew at the end
+/// resumes from where it stopped instead of replaying from the start. The
+/// result always equals a fresh [deriveGames] over the same input.
+class GameCache {
+  final _entries = <String, _Entry>{};
+  List<GameState> _last = const [];
+
+  /// How many times [derive] ran; for tests.
+  @visibleForTesting
+  int derives = 0;
+
+  /// How many move rows were applied to boards; for tests.
+  @visibleForTesting
+  int applied = 0;
+
+  List<GameState> derive(
+    List<MessageRow> rows,
+    List<String> memberIds, {
+    bool direct = true,
+  }) {
+    derives++;
+    // The same walk as [deriveGames]: a move counts toward a game only when
+    // it comes after that game's row.
+    final slots = <_Slot>[];
+    final byId = <String, _Slot>{};
+    for (var i = 0; i < rows.length; i++) {
+      final r = rows[i];
+      if (r.state == 'failed') continue;
+      if (r.kind == 'game') {
+        final body = _decode(r);
+        if (body is! GameBody || byId.containsKey(r.id)) continue;
+        final s = _Slot(r, body, i);
+        slots.add(s);
+        byId[r.id] = s;
+      } else if (r.kind == 'move') {
+        final body = _decode(r);
+        if (body is! MoveBody) continue;
+        byId[body.target]?.moves.add((r, body, i));
+      }
+    }
+    final done = <(_Slot, _Entry)>[];
+    for (final s in slots) {
+      final first = s.body.first;
+      final second = memberIds.where((m) => m != first).firstOrNull;
+      // As in [deriveGames]: inert if another game was running when this
+      // game's row came, i.e. not inert and not ended by a move before it.
+      final inert =
+          !direct ||
+          memberIds.length != 2 ||
+          !memberIds.contains(first) ||
+          second == null ||
+          done.any((d) => !d.$2.game.inert && !_endedBefore(d, s.pos));
+      done.add((s, _entryFor(s, second ?? '', inert)));
+    }
+    _entries
+      ..clear()
+      ..addEntries([for (final d in done) MapEntry(d.$1.row.id, d.$2)]);
+    final out = [for (final d in done) d.$2.state];
+    if (out.length == _last.length &&
+        Iterable.generate(out.length)
+            .every((i) => identical(out[i], _last[i]))) {
+      return _last;
+    }
+    return _last = out;
+  }
+
+  static bool _endedBefore((_Slot, _Entry) d, int pos) {
+    final end = d.$2.end;
+    return end != null && d.$1.moves[end].$3 < pos;
+  }
+
+  _Entry _entryFor(_Slot s, String second, bool inert) {
+    final r = s.row;
+    final moves = [
+      for (final m in s.moves) (m.$1.id, m.$1.senderUserId, m.$1.body),
+    ];
+    final old = _entries[r.id];
+    final _Game g;
+    int? end;
+    var from = 0;
+    if (old != null &&
+        old.body == r.body &&
+        old.game.type == s.body.game &&
+        old.game.second == second &&
+        old.game.inert == inert &&
+        old.moves.length <= moves.length &&
+        Iterable.generate(old.moves.length)
+            .every((i) => old.moves[i] == moves[i])) {
+      if (old.moves.length == moves.length && old.state.startedSeq == r.seq) {
+        return old;
+      }
+      g = old.game;
+      end = old.end;
+      from = old.moves.length;
+    } else {
+      g = _Game(r.id, s.body.game, s.body.first, second, inert, r.seq);
+    }
+    for (var i = from; i < moves.length; i++) {
+      applied++;
+      g.apply(moves[i].$2, s.moves[i].$2);
+      if (end == null && g.outcome != null) end = i;
+    }
+    g.startedSeq = r.seq;
+    return _Entry(r.body, g, moves, end, g.freeze());
+  }
+}
+
+class _Slot {
+  _Slot(this.row, this.body, this.pos);
+
+  final MessageRow row;
+  final GameBody body;
+
+  /// Index in the derive's rows.
+  final int pos;
+
+  /// (row, body, index in rows) of this game's moves, in order.
+  final moves = <(MessageRow, MoveBody, int)>[];
+}
+
+class _Entry {
+  _Entry(this.body, this.game, this.moves, this.end, this.state);
+
+  /// The game row's body.
+  final String? body;
+
+  /// Advanced through [moves]. Only the newest entry for a game is kept, so
+  /// resuming it in place is safe.
+  final _Game game;
+
+  /// (id, sender, body) of the moves applied, in order. A move's seq and
+  /// state don't change what it does, so a pending move turning sent keeps
+  /// the entry.
+  final List<(String, String, String?)> moves;
+
+  /// Index in [moves] of the move that ended the game.
+  final int? end;
+
+  final GameState state;
+}
+
 /// The unfinished, non-inert game, if any.
 GameState? activeGame(List<GameState> games) =>
     games.where((g) => !g.inert && !g.over).firstOrNull;
@@ -121,7 +267,7 @@ class _Game {
   final GameType type;
   final String first, second;
   final bool inert;
-  final int? startedSeq;
+  int? startedSeq;
   Board board;
   int ply = 0;
   Outcome? outcome;
