@@ -108,7 +108,12 @@ class ChatSync {
     db.myUserId = me.userId;
     await db.bindDevice(me.deviceId);
     unawaited(_enqueue(_reclassifyUnknown));
-    _subs.add(hub.events.listen((e) => _enqueue(() => _onEvent(e))));
+    _subs.add(hub.events.listen((e) {
+      // A send's ack is recorded at once: the chain may be busy with a slow sync, and the
+      // message should stop "sending" (and let the app sleep) as soon as the server has it.
+      if (e['type'] == 'ack') unawaited(_onSendLane(() => _recordAck(e)).catchError((_) {}));
+      _enqueue(() => _onEvent(e));
+    }));
     _subs.add(hub.connection.listen((up) {
       if (up) {
         // Waiting messages go out now; the sync after them can take a while on a slow network.
@@ -462,13 +467,20 @@ class ChatSync {
     }
   }
 
-  Future<void> _onAck(Map<String, Object?> e) async {
+  /// Marks the acked row sent (also run early, on the send lane: see [start]).
+  Future<MessageRow?> _recordAck(Map<String, Object?> e) async {
     final id = e['id'] as String, seq = e['seq'] as int, at = e['createdAt'] as int;
     _inflight.remove(id);
     _staleRetries.remove(id);
     final row = await db.messageById(id);
+    if (row != null && row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
+    return row;
+  }
+
+  Future<void> _onAck(Map<String, Object?> e) async {
+    final seq = e['seq'] as int, at = e['createdAt'] as int;
+    final row = await _recordAck(e);
     if (row == null) return;
-    if (row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
     final chat = await db.chatById(row.chatId);
     if (chat == null) return;
     if (seq == chat.syncedSeq + 1) {

@@ -144,9 +144,11 @@ void main() {
     await alice.d.hub.connect();
     final id = await alice.sync.sendText(chatId, 'now');
     await until(() async => backend.storedMessages(chatId).isNotEmpty, reason: 'the send reaches the hub');
-    expect(hold.isCompleted, isFalse);
+    // The ack counts too: the row stops "sending" (and the app may go to sleep) before the
+    // catch-up is done.
+    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent', reason: 'the ack, during the catch-up');
+    expect(await alice.sync.hasUnsent(), isFalse);
     hold.complete();
-    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
     await until(() async => (await bob.texts(chatId)).contains('now'));
   });
 
@@ -444,6 +446,27 @@ void main() {
     final stored = backend.storedMessages(chatId).single;
     expect((stored.id, stored.envelope['epoch']), (id, 2));
     await until(() async => (await bob.texts(chatId)).contains('stale'));
+  });
+
+  test('flushes while a stale_epoch is being handled do not resend it under the old epoch', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    await until(() async => await bob.d.db.key(chatId, 1) != null);
+    alice.d.hub.dropEventTypes.addAll(['chat', 'keys']);
+    await carol.sync.leave(chatId);
+    await until(() async => backend.chatDto(chatId).epochReady, reason: 'bob creates epoch 2');
+    final hold = Completer<void>();
+    alice.d.api.holds['GET /chats/$chatId'] = hold;
+    final id = await alice.sync.sendText(chatId, 'stale');
+    await until(() => backend.calls.contains('GET /chats/$chatId'), reason: 'the stale_epoch refresh');
+    // Uploads finishing, other sends: each flushes the outbox meanwhile.
+    for (var i = 0; i < ChatSync.maxStaleRetries + 1; i++) {
+      alice.sync.flushSoon();
+      await pump();
+    }
+    hold.complete();
+    await until(() async => (await alice.d.db.messageById(id))!.state != 'pending', reason: 'resent under epoch 2');
+    expect((await alice.d.db.messageById(id))!.state, 'sent');
   });
 
   test("removed member's send fails", () async {

@@ -96,7 +96,7 @@ final socketLifecycleProvider = Provider<void>((ref) {
   final send = BackgroundSend(
     hub: sync.hub,
     unsent: sync.hasUnsent,
-    task: defaultTargetPlatform == TargetPlatform.iOS ? const IosBackgroundTask() : const NoBackgroundTask(),
+    task: defaultTargetPlatform == TargetPlatform.iOS ? IosBackgroundTask() : const NoBackgroundTask(),
   );
   final listener = AppLifecycleListener(
     onPause: () => unawaited(send.paused()),

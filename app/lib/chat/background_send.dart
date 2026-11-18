@@ -7,9 +7,11 @@ import 'package:flutter/services.dart';
 import 'hub_link.dart';
 
 /// Extra running time the OS grants an app that just went to the background (iOS:
-/// `beginBackgroundTask`). [begin] returns a handle for [end], or null if none was granted.
+/// `beginBackgroundTask`). [begin] returns a handle for [end], or null if none was granted;
+/// `onExpired` is called if the OS takes the time back before [end]; the OS waits (briefly) for
+/// its future before suspending the app.
 abstract interface class BackgroundTask {
-  Future<Object?> begin();
+  Future<Object?> begin({required Future<void> Function() onExpired});
   Future<void> end(Object? id);
 }
 
@@ -17,20 +19,28 @@ abstract interface class BackgroundTask {
 class NoBackgroundTask implements BackgroundTask {
   const NoBackgroundTask();
   @override
-  Future<Object?> begin() async => null;
+  Future<Object?> begin({required Future<void> Function() onExpired}) async => null;
   @override
   Future<void> end(Object? id) async {}
 }
 
-/// iOS: the `famchat/background_task` channel in AppDelegate.swift.
+/// iOS: the `famchat/background_task` channel in AppDelegate.swift, which calls `expired` back
+/// with the task's id when iOS ends it early.
 class IosBackgroundTask implements BackgroundTask {
-  const IosBackgroundTask();
+  IosBackgroundTask() {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'expired') await _expired.remove(call.arguments)?.call();
+    });
+  }
   static const _channel = MethodChannel('famchat/background_task');
+  final _expired = <Object?, Future<void> Function()>{};
 
   @override
-  Future<Object?> begin() async {
+  Future<Object?> begin({required Future<void> Function() onExpired}) async {
     try {
-      return await _channel.invokeMethod<int>('begin');
+      final id = await _channel.invokeMethod<int>('begin');
+      if (id != null) _expired[id] = onExpired;
+      return id;
     } catch (_) {
       return null;
     }
@@ -39,6 +49,7 @@ class IosBackgroundTask implements BackgroundTask {
   @override
   Future<void> end(Object? id) async {
     if (id == null) return;
+    _expired.remove(id);
     try {
       await _channel.invokeMethod<void>('end', id);
     } catch (_) {
@@ -74,14 +85,20 @@ class BackgroundSend {
       if (gen == _generation) await hub.stop();
       return;
     }
-    final id = await task.begin();
+    final expired = Completer<void>(), done = Completer<void>();
+    final id = await task.begin(onExpired: () {
+      if (!expired.isCompleted) expired.complete();
+      return done.future;
+    });
     try {
       for (var waited = Duration.zero; waited < grace; waited += poll) {
-        await Future<void>.delayed(poll);
-        if (gen != _generation || !await _unsent()) break;
+        await Future.any([Future<void>.delayed(poll), expired.future]);
+        // Out of time: a suspended app with its socket open would look online (no pushes).
+        if (expired.isCompleted || gen != _generation || !await _unsent()) break;
       }
       if (gen == _generation) await hub.stop();
     } finally {
+      done.complete();
       await task.end(id);
     }
   }

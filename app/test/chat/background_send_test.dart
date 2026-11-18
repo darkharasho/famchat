@@ -24,8 +24,10 @@ class _Hub implements HubLink {
 class _Task implements BackgroundTask {
   final log = <String>[];
   var next = 0;
+  Future<void> Function()? expire;
   @override
-  Future<Object?> begin() async {
+  Future<Object?> begin({required Future<void> Function() onExpired}) async {
+    expire = onExpired;
     log.add('begin ${++next}');
     return next;
   }
@@ -99,6 +101,36 @@ void main() {
       t.elapse(const Duration(seconds: 30));
       expect(hub.running, isTrue);
       expect(task.log, ['begin 1', 'end 1']);
+    });
+  });
+
+  test('the OS taking the background time back early stops the hub then', () {
+    fakeAsync((t) {
+      unsent = true;
+      make().paused();
+      t.elapse(const Duration(seconds: 5));
+      expect(hub.running, isTrue);
+      var answered = false;
+      // The OS gets its answer (and suspends the app) only once the socket is closed: a suspended
+      // app with its socket open would look online, and get no pushes.
+      task.expire!().then((_) => answered = hub.running == false);
+      t.flushMicrotasks();
+      expect(answered, isTrue);
+      expect(task.log, ['begin 1', 'end 1']);
+    });
+  });
+
+  test('an expiry from an earlier pause does not stop the hub after coming back', () {
+    fakeAsync((t) {
+      unsent = true;
+      final b = make();
+      b.paused();
+      t.elapse(const Duration(seconds: 2));
+      b.resumed();
+      t.flushMicrotasks();
+      task.expire!();
+      t.elapse(const Duration(seconds: 1));
+      expect(hub.running, isTrue);
     });
   });
 
