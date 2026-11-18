@@ -166,8 +166,41 @@ void main() {
         ..startResize(ResizeEdge.topRight)
         ..close();
       await pumpEventQueue();
-      expect(calls.map((c) => c.method), ['state', 'startResize', 'close']);
+      expect(calls.map((c) => c.method), ['state', 'startResize', 'quit']);
       expect(calls[1].arguments, 'topRight');
+    });
+
+    test('close hides to the tray with Close to tray on, and quits with it off', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      final controls = ChannelWindowControls();
+      controls
+        ..setCloseToTray(true)
+        ..close()
+        ..setCloseToTray(false)
+        ..close();
+      await pumpEventQueue();
+      expect(calls.map((c) => c.method), ['state', 'setCloseToTray', 'hide', 'setCloseToTray', 'quit']);
+      expect(calls[1].arguments, isTrue);
+      expect(calls[3].arguments, isFalse);
+    });
+
+    test('follows the tray host and the hidden state from the window', () async {
+      final controls = ChannelWindowControls();
+      await pumpEventQueue();
+      expect(controls.trayAvailable.value, isFalse);
+      await messenger.handlePlatformMessage(
+        ChannelWindowControls.channelName,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('stateChanged', {'trayAvailable': true, 'hidden': true}),
+        ),
+        (_) {},
+      );
+      expect(controls.trayAvailable.value, isTrue);
+      expect(controls.hidden.value, isTrue);
     });
 
     test('follows state changes from the window', () async {

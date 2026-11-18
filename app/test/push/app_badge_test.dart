@@ -12,11 +12,13 @@ import '../chat/unread_total_test.dart' show item, t0;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('only the Android and iOS apps have a badge', () {
+  test('app_badge_plus sets the badge on Android, iOS and the macOS Dock', () {
     expect(isBadgePlatform(web: false, platform: TargetPlatform.android), isTrue);
     expect(isBadgePlatform(web: false, platform: TargetPlatform.iOS), isTrue);
+    expect(isBadgePlatform(web: false, platform: TargetPlatform.macOS), isTrue);
     expect(isBadgePlatform(web: true, platform: TargetPlatform.android), isFalse);
-    for (final p in [TargetPlatform.macOS, TargetPlatform.windows, TargetPlatform.linux]) {
+    // Windows and Linux go through the window channel (lib/window/desktop_badges.dart).
+    for (final p in [TargetPlatform.windows, TargetPlatform.linux]) {
       expect(isBadgePlatform(web: false, platform: p), isFalse);
     }
   });

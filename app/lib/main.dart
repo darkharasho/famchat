@@ -25,6 +25,7 @@ import 'settings/appearance.dart';
 import 'settings/time_format_tile.dart';
 import 'share/share_inbox.dart';
 import 'voice/voice_io.dart';
+import 'window/desktop_tray.dart';
 import 'window/title_bar.dart';
 
 Future<void> main() async {
@@ -67,7 +68,8 @@ class FamChatApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(appBadgeProvider); // phones: the app-icon unread badge
+    ref.watch(appBadgeProvider); // the unread badge: app icon, Dock, taskbar or launcher
+    ref.watch(desktopTrayProvider); // desktop: close to tray and the tray icon
     final appearance = ref.watch(appearanceProvider);
     return MaterialApp.router(
       title: 'FamChat',

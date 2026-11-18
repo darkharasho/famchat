@@ -60,64 +60,98 @@ class _MarkPainter extends CustomPainter {
 
   final bool rim;
 
-  static final _house = Path()
-    ..moveTo(512, 212)
-    ..lineTo(780, 432)
-    ..lineTo(780, 740)
-    ..quadraticBezierTo(780, 780, 740, 780)
-    ..lineTo(470, 780)
-    ..lineTo(318, 884)
-    ..lineTo(352, 780)
-    ..lineTo(284, 780)
-    ..quadraticBezierTo(244, 780, 244, 740)
-    ..lineTo(244, 432)
-    ..close();
-
-  static const _houseColor = Color(0xFFF6F1FF);
-
   @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.scale(size.width / 1024, size.height / 1024);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 1024, 1024), const Radius.circular(232)),
-      Paint()..color = Palette.dusk,
-    );
-    if (rim) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(const Rect.fromLTWH(16, 16, 992, 992), const Radius.circular(220)),
-        Paint()
-          ..color = const Color(0x40FFFFFF)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 32,
-      );
-    }
-    canvas
-      ..translate(512, 512)
-      ..scale(0.78)
-      ..translate(-512, -548);
-    canvas.drawPath(_house, Paint()..color = _houseColor);
-    canvas.drawPath(
-      _house,
-      Paint()
-        ..color = _houseColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 56
-        ..strokeJoin = StrokeJoin.round,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(398, 462, 228, 200), const Radius.circular(24)),
-      Paint()..color = Palette.amber,
-    );
-    final mullion = Paint()
-      ..color = Palette.dusk
-      ..strokeWidth = 20;
-    canvas
-      ..drawLine(const Offset(512, 462), const Offset(512, 662), mullion)
-      ..drawLine(const Offset(398, 562), const Offset(626, 562), mullion);
-    canvas.restore();
-  }
+  void paint(Canvas canvas, Size size) => paintBrandMark(canvas, size, rim: rim);
 
   @override
   bool shouldRepaint(_MarkPainter oldDelegate) => oldDelegate.rim != rim;
+}
+
+final _house = Path()
+  ..moveTo(512, 212)
+  ..lineTo(780, 432)
+  ..lineTo(780, 740)
+  ..quadraticBezierTo(780, 780, 740, 780)
+  ..lineTo(470, 780)
+  ..lineTo(318, 884)
+  ..lineTo(352, 780)
+  ..lineTo(284, 780)
+  ..quadraticBezierTo(244, 780, 244, 740)
+  ..lineTo(244, 432)
+  ..close();
+
+const _houseColor = Color(0xFFF6F1FF);
+
+/// Paints the mark, tile and all, filling [size]. Also draws the desktop tray icon
+/// (lib/window/unread_badge_art.dart).
+void paintBrandMark(Canvas canvas, Size size, {bool rim = false}) {
+  canvas.save();
+  canvas.scale(size.width / 1024, size.height / 1024);
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 1024, 1024), const Radius.circular(232)),
+    Paint()..color = Palette.dusk,
+  );
+  if (rim) {
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(const Rect.fromLTWH(16, 16, 992, 992), const Radius.circular(220)),
+      Paint()
+        ..color = const Color(0x40FFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 32,
+    );
+  }
+  canvas
+    ..translate(512, 512)
+    ..scale(0.78)
+    ..translate(-512, -548);
+  _paintHouse(canvas, _houseColor);
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(const Rect.fromLTWH(398, 462, 228, 200), const Radius.circular(24)),
+    Paint()..color = Palette.amber,
+  );
+  final mullion = Paint()
+    ..color = Palette.dusk
+    ..strokeWidth = 20;
+  canvas
+    ..drawLine(const Offset(512, 462), const Offset(512, 662), mullion)
+    ..drawLine(const Offset(398, 562), const Offset(626, 562), mullion);
+  canvas.restore();
+}
+
+void _paintHouse(Canvas canvas, Color color) {
+  canvas.drawPath(_house, Paint()..color = color);
+  canvas.drawPath(
+    _house,
+    Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 56
+      ..strokeJoin = StrokeJoin.round,
+  );
+}
+
+/// The mark without its tile: the house-shaped bubble in [color] with its window cut out, filling
+/// [size]. For one-colour places such as the macOS menu bar.
+void paintBrandGlyph(Canvas canvas, Size size, Color color) {
+  // The house with its stroke spans x 216..808 and y 184..912 on the 1024 artboard.
+  const left = 216.0, top = 184.0, w = 592.0, h = 728.0;
+  final scale = size.height / h;
+  canvas.save();
+  canvas.saveLayer(Offset.zero & size, Paint());
+  canvas
+    ..translate((size.width - w * scale) / 2, 0)
+    ..scale(scale)
+    ..translate(-left, -top);
+  _paintHouse(canvas, color);
+  final hole = Paint()..blendMode = BlendMode.clear;
+  for (final pane in const [
+    Rect.fromLTWH(398, 462, 104, 90),
+    Rect.fromLTWH(522, 462, 104, 90),
+    Rect.fromLTWH(398, 572, 104, 90),
+    Rect.fromLTWH(522, 572, 104, 90),
+  ]) {
+    canvas.drawRRect(RRect.fromRectAndRadius(pane, const Radius.circular(16)), hole);
+  }
+  canvas.restore();
+  canvas.restore();
 }
