@@ -137,7 +137,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
             const SizedBox(width: Space.sm),
             Text(
-              shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt)),
+              shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt), h24: MediaQuery.alwaysUse24HourFormatOf(context)),
               style: theme.textTheme.labelSmall?.copyWith(color: s.onSurfaceVariant),
             ),
           ]),

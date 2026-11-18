@@ -6,7 +6,7 @@ import '../../api/models.dart' show Family;
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../sign_out.dart' show apiErrorMessage;
-import 'chat_list.dart' show clockTime;
+import '../../settings/time_format.dart' show clockTime;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
@@ -15,14 +15,14 @@ import '../../widgets/person_avatar.dart';
 const muteForever = 253402300799000;
 
 /// How long notifications from a chat stay off.
-String muteLabel(int? until, DateTime now) {
+String muteLabel(int? until, DateTime now, {required bool h24}) {
   if (until == null || until <= now.millisecondsSinceEpoch) return 'Off';
   if (until >= muteForever) return 'Until you turn them back on';
   final t = DateTime.fromMillisecondsSinceEpoch(until);
   final today = DateTime(now.year, now.month, now.day);
   final day = DateTime(t.year, t.month, t.day);
-  if (day == today) return 'Until ${clockTime(t)}';
-  if (day == DateTime(today.year, today.month, today.day + 1)) return 'Until tomorrow, ${clockTime(t)}';
+  if (day == today) return 'Until ${clockTime(t, h24: h24)}';
+  if (day == DateTime(today.year, today.month, today.day + 1)) return 'Until tomorrow, ${clockTime(t, h24: h24)}';
   return 'Until ${t.month}/${t.day}';
 }
 
@@ -182,7 +182,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                       : Icons.notifications_none_rounded,
                 ),
                 title: const Text('Mute notifications'),
-                subtitle: Text(muteLabel(chat.mutedUntil, DateTime.now())),
+                subtitle: Text(muteLabel(chat.mutedUntil, DateTime.now(), h24: MediaQuery.alwaysUse24HourFormatOf(context))),
                 enabled: !_busy && sync != null,
                 onTap: () => _mute(chat),
               ),
