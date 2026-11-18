@@ -62,7 +62,13 @@ sealed class Plaintext {
         if (target is! String || target.isEmpty || text is! String || text.isEmpty) {
           throw const FormatException('bad edit');
         }
-        return EditBody(target, text);
+        // A preview-only edit whose preview doesn't check out changes nothing.
+        return EditBody(
+          target,
+          text,
+          preview: LinkPreview.tryParse(j['preview']),
+          previewOnly: j['previewOnly'] == true,
+        );
       case 'delete':
         final target = j['target'];
         if (target is! String || target.isEmpty) throw const FormatException('bad delete');
@@ -179,13 +185,25 @@ class PreviewImage {
 }
 
 /// New text for the sender's own text message [target]; the latest edit wins.
+///
+/// [previewOnly]: not an edit but a link [preview] that wasn't ready when [target] was sent. [text]
+/// repeats the text in force (older clients read it as a plain edit); it counts only while it still
+/// matches, and doesn't mark the message edited (docs/protocol.md "Link previews").
 class EditBody extends Plaintext {
-  const EditBody(this.target, this.text);
+  const EditBody(this.target, this.text, {this.preview, this.previewOnly = false});
   final String target, text;
+  final LinkPreview? preview;
+  final bool previewOnly;
   @override
   String get kind => 'edit';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'text': text};
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'target': target,
+        'text': text,
+        if (preview != null) 'preview': preview!.toJson(),
+        if (previewOnly) 'previewOnly': true,
+      };
 }
 
 /// Unsends the sender's own message [target].

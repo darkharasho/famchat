@@ -579,6 +579,8 @@ class ChatDb extends _$ChatDb {
   Future<List<DeviceRow>> devicesOf(Iterable<String> userIds) =>
       (select(localDevices)..where((d) => d.userId.isIn(userIds))).get();
 
+  Future<List<DeviceRow>> allDevices() => select(localDevices).get();
+
   Future<void> putDevice(DeviceRow d) => into(localDevices).insertOnConflictUpdate(d);
 
   // --- admin pins ---

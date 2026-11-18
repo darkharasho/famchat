@@ -51,12 +51,13 @@ void main() {
 
   test('muteLabel', () {
     final now = DateTime(2026, 11, 16, 9, 30);
-    expect(muteLabel(null, now), 'Off');
-    expect(muteLabel(DateTime(2026, 11, 16, 9).millisecondsSinceEpoch, now), 'Off', reason: 'expired');
-    expect(muteLabel(DateTime(2026, 11, 16, 10, 30).millisecondsSinceEpoch, now), 'Until 10:30');
-    expect(muteLabel(DateTime(2026, 11, 17, 8, 5).millisecondsSinceEpoch, now), 'Until tomorrow, 08:05');
-    expect(muteLabel(DateTime(2026, 11, 23, 9, 30).millisecondsSinceEpoch, now), 'Until 11/23');
-    expect(muteLabel(muteForever, now), 'Until you turn them back on');
+    expect(muteLabel(null, now, h24: true), 'Off');
+    expect(muteLabel(DateTime(2026, 11, 16, 9).millisecondsSinceEpoch, now, h24: true), 'Off', reason: 'expired');
+    expect(muteLabel(DateTime(2026, 11, 16, 10, 30).millisecondsSinceEpoch, now, h24: true), 'Until 10:30');
+    expect(muteLabel(DateTime(2026, 11, 17, 8, 5).millisecondsSinceEpoch, now, h24: true), 'Until tomorrow, 08:05');
+    expect(muteLabel(DateTime(2026, 11, 17, 8, 5).millisecondsSinceEpoch, now, h24: false), 'Until tomorrow, 8:05 AM');
+    expect(muteLabel(DateTime(2026, 11, 23, 9, 30).millisecondsSinceEpoch, now, h24: true), 'Until 11/23');
+    expect(muteLabel(muteForever, now, h24: true), 'Until you turn them back on');
   });
 
   chatTestWidgets('muting a chat for a while, then unmuting', (tester) async {

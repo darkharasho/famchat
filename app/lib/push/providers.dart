@@ -8,12 +8,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../chat/background_send.dart';
 import '../chat/providers.dart';
 import '../router.dart';
 import '../session/session_controller.dart';
 import 'android_previews.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
+import 'preview_keyring.dart';
 import 'preview_setting.dart';
 import 'push_messaging.dart';
 
@@ -86,15 +88,20 @@ final messageNotifierProvider = Provider<MessageNotifier?>((ref) {
 });
 
 /// Phones: close the socket while the app is in the background, so the server counts this device
-/// as offline and pushes right away; reconnect (and sync) on return.
+/// as offline and pushes right away; reconnect (and sync) on return. A message still sending gets
+/// a little time to go out first.
 final socketLifecycleProvider = Provider<void>((ref) {
   if (kIsWeb || !(defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) return;
   final sync = ref.watch(chatSyncProvider);
   if (sync == null) return;
-  final hub = sync.hub;
+  final send = BackgroundSend(
+    hub: sync.hub,
+    unsent: sync.hasUnsent,
+    task: defaultTargetPlatform == TargetPlatform.iOS ? IosBackgroundTask() : const NoBackgroundTask(),
+  );
   final listener = AppLifecycleListener(
-    onPause: () => unawaited(hub.stop()),
-    onResume: () => unawaited(hub.start()),
+    onPause: () => unawaited(send.paused()),
+    onResume: () => unawaited(send.resumed()),
   );
   ref.onDispose(listener.dispose);
 });
@@ -104,6 +111,7 @@ final notificationsProvider = Provider<void>((ref) {
   ref.watch(pushControllerProvider);
   ref.watch(messageNotifierProvider);
   ref.watch(socketLifecycleProvider);
+  ref.watch(previewKeyringSyncProvider);
 });
 
 /// Web only: whether to offer "Turn on notifications" (browsers only ask from a click).

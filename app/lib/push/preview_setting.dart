@@ -13,16 +13,16 @@ Future<bool> readPreviewsOn([SharedPreferencesAsync? prefs]) async =>
 Future<void> writePreviewsOn(bool on, [SharedPreferencesAsync? prefs]) =>
     (prefs ?? SharedPreferencesAsync()).setBool(previewsPrefKey, on);
 
-/// Stage 1: Android and desktop. Not iOS, not the web.
+/// Android, iOS and desktop. Not the web.
 bool previewsSupported({bool web = kIsWeb, TargetPlatform? platform}) {
   if (web) return false;
   switch (platform ?? defaultTargetPlatform) {
     case TargetPlatform.android:
+    case TargetPlatform.iOS:
     case TargetPlatform.macOS:
     case TargetPlatform.windows:
     case TargetPlatform.linux:
       return true;
-    case TargetPlatform.iOS:
     case TargetPlatform.fuchsia:
       return false;
   }

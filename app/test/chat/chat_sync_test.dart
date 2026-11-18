@@ -133,6 +133,40 @@ void main() {
     await until(() async => (await bob.texts(chatId)).contains('later'));
   });
 
+  test('a message sent during a slow reconnect catch-up goes out without waiting for it', () async {
+    final (alice, bob, carol) = await trio();
+    final slow = await alice.sync.openDirect(carol.d.userId);
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await pump();
+    await alice.sync.idle;
+    alice.d.hub.drop();
+    final hold = Completer<void>();
+    alice.d.api.holds['GET /chats/$slow/messages'] = hold;
+    await alice.d.hub.connect();
+    final id = await alice.sync.sendText(chatId, 'now');
+    await until(() async => backend.storedMessages(chatId).isNotEmpty, reason: 'the send reaches the hub');
+    // The ack counts too: the row stops "sending" (and the app may go to sleep) before the
+    // catch-up is done.
+    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent', reason: 'the ack, during the catch-up');
+    expect(await alice.sync.hasUnsent(), isFalse);
+    hold.complete();
+    await until(() async => (await bob.texts(chatId)).contains('now'));
+  });
+
+  test('hasUnsent is true from send until the ack', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await alice.sync.idle;
+    expect(await alice.sync.hasUnsent(), isFalse);
+    alice.d.hub.drop();
+    final id = await alice.sync.sendText(chatId, 'wait');
+    expect(await alice.sync.hasUnsent(), isTrue);
+    await alice.d.hub.connect();
+    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
+    expect(await alice.sync.hasUnsent(), isFalse);
+  });
+
   test('a gap triggers a catch-up fetch', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));
@@ -228,6 +262,32 @@ void main() {
     final list = await carol.d.db.watchChatList(carol.d.userId).first;
     expect(list.single.unread, 1);
     expect(list.single.last?.id, reply);
+  });
+
+  test('a late link preview reaches the others, silently, without an "edited" mark; only for the sender', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    const card = LinkPreview(url: 'https://youtu.be/cat', title: 'Cat jumps');
+    final hi = await alice.sync.sendText(chatId, 'look https://youtu.be/cat');
+    final gone = await alice.sync.sendText(chatId, 'https://youtu.be/cat');
+    final changed = await alice.sync.sendText(chatId, 'https://youtu.be/cat');
+    await until(() async => (await bob.rows(chatId)).length == 3);
+    expect(await bob.sync.attachPreview(chatId, hi, card), isNull, reason: "not Bob's message");
+    await alice.sync.deleteMessage(chatId, gone);
+    await alice.sync.editText(chatId, changed, 'no link now');
+    expect(await alice.sync.attachPreview(chatId, gone, card), isNull);
+    expect(await alice.sync.attachPreview(chatId, changed, card), isNull);
+    final edit = await alice.sync.attachPreview(chatId, hi, card);
+    expect(edit, isNotNull);
+    expect(await alice.sync.attachPreview(chatId, hi, card), isNull, reason: 'it has one now');
+    await until(() async => (await carol.rows(chatId)).length == 6);
+    final rows = await carol.rows(chatId);
+    final changes = messageChanges(rows);
+    final m = rows.firstWhere((r) => r.id == hi);
+    expect(changes.previewOf(m)?.title, 'Cat jumps');
+    expect(changes.textOf(m), 'look https://youtu.be/cat');
+    expect(changes.edited, {changed});
+    expect(backend.silentIds, contains(edit));
   });
 
   test('a text with mentions carries them in the send frame and the plaintext', () async {
@@ -413,6 +473,27 @@ void main() {
     final stored = backend.storedMessages(chatId).single;
     expect((stored.id, stored.envelope['epoch']), (id, 2));
     await until(() async => (await bob.texts(chatId)).contains('stale'));
+  });
+
+  test('flushes while a stale_epoch is being handled do not resend it under the old epoch', () async {
+    final (alice, bob, carol) = await trio();
+    final chatId = await alice.sync.createGroup('G', [bob.d.userId, carol.d.userId]);
+    await until(() async => await bob.d.db.key(chatId, 1) != null);
+    alice.d.hub.dropEventTypes.addAll(['chat', 'keys']);
+    await carol.sync.leave(chatId);
+    await until(() async => backend.chatDto(chatId).epochReady, reason: 'bob creates epoch 2');
+    final hold = Completer<void>();
+    alice.d.api.holds['GET /chats/$chatId'] = hold;
+    final id = await alice.sync.sendText(chatId, 'stale');
+    await until(() => backend.calls.contains('GET /chats/$chatId'), reason: 'the stale_epoch refresh');
+    // Uploads finishing, other sends: each flushes the outbox meanwhile.
+    for (var i = 0; i < ChatSync.maxStaleRetries + 1; i++) {
+      alice.sync.flushSoon();
+      await pump();
+    }
+    hold.complete();
+    await until(() async => (await alice.d.db.messageById(id))!.state != 'pending', reason: 'resent under epoch 2');
+    expect((await alice.d.db.messageById(id))!.state, 'sent');
   });
 
   test("removed member's send fails", () async {

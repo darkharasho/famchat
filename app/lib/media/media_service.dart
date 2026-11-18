@@ -235,6 +235,55 @@ class MediaService {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
     final messageId = newUlid();
+    return sync.enqueueMessage(
+      chatId,
+      TextBody(
+        t,
+        replyTo: replyTo,
+        mentions: mentions.take(maxMentions).toList(),
+        preview: await _linkPreview(chatId, messageId, fetched),
+      ),
+      id: messageId,
+    );
+  }
+
+  /// A text sent before its link's preview was ready: once [fetch] finds one (within [wait]), it's
+  /// attached with a preview-only edit (docs/protocol.md "Link previews"), its image uploaded like
+  /// any message's. Nothing happens when the message was deleted or edited to drop the link
+  /// meanwhile. Returns the edit's id, or null. Not kept across restarts.
+  Future<String?> attachLatePreview(
+    String chatId,
+    String messageId,
+    Future<FetchedPreview?> fetch, {
+    Duration wait = const Duration(seconds: 15),
+  }) async {
+    final FetchedPreview? fetched;
+    try {
+      fetched = await fetch.timeout(wait);
+    } catch (_) {
+      return null; // offline, the site said no, or too slow
+    }
+    // Signing out (which closes the databases) may have happened during the wait.
+    if (fetched == null || _stopped) return null;
+    try {
+      if (!await sync.canAttachPreview(chatId, messageId, fetched.url)) return null;
+      final editId = newUlid();
+      final preview = await _linkPreview(chatId, editId, fetched);
+      // attachPreview checks the message again (in the sync queue) just before queueing the edit.
+      final sent = _stopped ? null : await sync.attachPreview(chatId, messageId, preview, id: editId);
+      if (sent == null && !_stopped) await db.deleteUploadsFor(editId); // the message changed meanwhile
+      return sent;
+    } catch (e, st) {
+      // Callers don't wait for this, so nothing else would see the failure.
+      // ignore: avoid_print
+      print('late link preview: $e\n$st');
+      return null;
+    }
+  }
+
+  /// [fetched] as a message's preview: its image (when it decodes) becomes an encrypted thumbnail
+  /// staged for upload with [messageId].
+  Future<LinkPreview> _linkPreview(String chatId, String messageId, FetchedPreview fetched) async {
     PreviewImage? image;
     if (fetched.image case final bytes?) {
       try {
@@ -250,21 +299,12 @@ class MediaService {
         image = null; // too large for a thumbnail
       }
     }
-    return sync.enqueueMessage(
-      chatId,
-      TextBody(
-        t,
-        replyTo: replyTo,
-        mentions: mentions.take(maxMentions).toList(),
-        preview: LinkPreview(
-          url: fetched.url,
-          title: fetched.title,
-          description: fetched.description,
-          siteName: fetched.siteName,
-          image: image,
-        ),
-      ),
-      id: messageId,
+    return LinkPreview(
+      url: fetched.url,
+      title: fetched.title,
+      description: fetched.description,
+      siteName: fetched.siteName,
+      image: image,
     );
   }
 

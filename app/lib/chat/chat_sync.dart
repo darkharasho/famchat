@@ -64,6 +64,9 @@ class ChatSync {
 
   final _subs = <StreamSubscription<Object?>>[];
   Future<void> _chain = Future.value();
+
+  /// Sends run here, one at a time but beside [_chain], so a message doesn't wait for a slow sync.
+  Future<void> _sendLane = Future.value();
   final _inflight = <String>{};
 
   /// Every row handed to the hub since this engine was made (unlike [_inflight], kept across
@@ -94,10 +97,11 @@ class ChatSync {
   /// Completes when the work queued so far (sync, events, sends) is done.
   Future<void> get idle async {
     for (;;) {
-      final c = _chain;
+      final c = _chain, l = _sendLane;
       await c;
+      await l;
       await Future<void>.delayed(Duration.zero);
-      if (identical(c, _chain)) return;
+      if (identical(c, _chain) && identical(l, _sendLane)) return;
     }
   }
 
@@ -105,9 +109,16 @@ class ChatSync {
     db.myUserId = me.userId;
     await db.bindDevice(me.deviceId);
     unawaited(_enqueue(_reclassifyUnknown));
-    _subs.add(hub.events.listen((e) => _enqueue(() => _onEvent(e))));
+    _subs.add(hub.events.listen((e) {
+      // A send's ack is recorded at once: the chain may be busy with a slow sync, and the
+      // message should stop "sending" (and let the app sleep) as soon as the server has it.
+      if (e['type'] == 'ack') unawaited(_onSendLane(() => _recordAck(e)).catchError((_) {}));
+      _enqueue(() => _onEvent(e));
+    }));
     _subs.add(hub.connection.listen((up) {
       if (up) {
+        // Waiting messages go out now; the sync after them can take a while on a slow network.
+        unawaited(_flushOutbox().catchError((_) {}));
         _enqueue(_connectSync);
       } else {
         _syncRetry?.cancel();
@@ -459,13 +470,20 @@ class ChatSync {
     }
   }
 
-  Future<void> _onAck(Map<String, Object?> e) async {
+  /// Marks the acked row sent (also run early, on the send lane: see [start]).
+  Future<MessageRow?> _recordAck(Map<String, Object?> e) async {
     final id = e['id'] as String, seq = e['seq'] as int, at = e['createdAt'] as int;
     _inflight.remove(id);
     _staleRetries.remove(id);
     final row = await db.messageById(id);
+    if (row != null && row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
+    return row;
+  }
+
+  Future<void> _onAck(Map<String, Object?> e) async {
+    final seq = e['seq'] as int, at = e['createdAt'] as int;
+    final row = await _recordAck(e);
     if (row == null) return;
-    if (row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
     final chat = await db.chatById(row.chatId);
     if (chat == null) return;
     if (seq == chat.syncedSeq + 1) {
@@ -496,7 +514,7 @@ class ChatSync {
           return;
         }
         await keys.ensureCurrentEpoch(row.chatId);
-        await _sendRow((await db.messageById(id))!);
+        await _onSendLane(() async => _sendRow((await db.messageById(id))!));
       case 'not_member':
         await db.setMessageState(id, 'failed');
         await _refreshChat(row.chatId);
@@ -534,7 +552,21 @@ class ChatSync {
   // ---------------------------------------------------------------------------------------------
   // Sending
 
-  Future<void> _flushOutbox() async {
+  /// Runs [f] on the send lane, after the sends queued before it. Like [_enqueue], a failure is
+  /// logged, not propagated to the lane; the returned future does carry it.
+  Future<void> _onSendLane(Future<void> Function() f) {
+    final run = _sendLane.then((_) => f());
+    _sendLane = run.catchError((Object e, StackTrace st) {
+      // ignore: avoid_print
+      if (e is! NetworkException && e is! SignedOutException) print('chat send: $e\n$st');
+    });
+    return run;
+  }
+
+  /// Sends every pending message not already in flight (on the send lane).
+  Future<void> _flushOutbox() => _onSendLane(_flushOutboxNow);
+
+  Future<void> _flushOutboxNow() async {
     if (!hub.connected) return;
     for (final row in await db.pendingOutbox(me.deviceId)) {
       if (_inflight.contains(row.id)) continue;
@@ -600,8 +632,12 @@ class ChatSync {
   /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
   static const mediaKinds = {'photo', 'voice', 'video'};
 
-  /// Queues an outbox flush (after work queued before it).
-  void flushSoon() => unawaited(_enqueue(_flushOutbox));
+  /// Whether this device has a message the server hasn't acknowledged yet (sending, or waiting
+  /// for a connection or an upload).
+  Future<bool> hasUnsent() async => (await db.pendingOutbox(me.deviceId)).isNotEmpty;
+
+  /// Queues an outbox flush (on the send lane).
+  void flushSoon() => unawaited(_flushOutbox().catchError((_) {}));
 
   /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
   /// [forwarded] marks a copy of another message (`"forwarded": true`).
@@ -623,7 +659,7 @@ class ChatSync {
       createdAt: _now().millisecondsSinceEpoch,
       state: 'pending',
     ));
-    unawaited(_enqueue(_flushOutbox));
+    unawaited(_flushOutbox().catchError((_) {}));
     return id;
   }
 
@@ -642,6 +678,44 @@ class ChatSync {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
     return _enqueueMessage(chatId, EditBody(messageId, t), targetId: messageId);
+  }
+
+  /// Whether [attachPreview] would attach a preview of [url] to [messageId] now.
+  Future<bool> canAttachPreview(String chatId, String messageId, String url) async {
+    final own = await _ownText(chatId, messageId);
+    return own != null && !own.$2 && previewFits(own.$1, url);
+  }
+
+  /// The text this user's text message [messageId] shows now (after edits) and whether it shows a
+  /// link preview; null when it's gone, deleted, someone else's, or not a text.
+  Future<(String, bool)?> _ownText(String chatId, String messageId) async {
+    final m = await db.messageById(messageId);
+    if (m == null || m.chatId != chatId || m.senderUserId != me.userId) return null;
+    final changes = messageChanges([m, ...await db.changesTo(chatId, messageId)]);
+    final text = changes.textOf(m);
+    return text == null ? null : (text, changes.previewOf(m) != null);
+  }
+
+  /// Attaches [preview] to this user's text [messageId], sent before its link's preview was ready:
+  /// a preview-only edit repeating the text as it stands (docs/protocol.md "Link previews"). [id]
+  /// lets the caller tie the preview's image upload to the edit. Returns the edit's id, or null
+  /// when the message is gone, no longer has the link, or already shows a preview. Runs in the sync
+  /// queue, like deletes, so the check and the enqueue see the same message.
+  Future<String?> attachPreview(String chatId, String messageId, LinkPreview preview, {String? id}) async {
+    String? sent;
+    await _enqueue(() async {
+      final own = await _ownText(chatId, messageId);
+      if (own == null) return;
+      final (text, hasPreview) = own;
+      if (hasPreview || !previewFits(text, preview.url)) return;
+      sent = await _enqueueMessage(
+        chatId,
+        EditBody(messageId, text, preview: preview, previewOnly: true),
+        targetId: messageId,
+        id: id,
+      );
+    });
+    return sent;
   }
 
   /// Unsends this user's message [messageId] for everyone. A message still in this device's outbox
@@ -718,7 +792,7 @@ class ChatSync {
   /// Puts a failed message back in the outbox.
   Future<void> retry(String messageId) async {
     await db.setMessageState(messageId, 'pending');
-    unawaited(_enqueue(_flushOutbox));
+    unawaited(_flushOutbox().catchError((_) {}));
   }
 
   /// Marks everything stored in [chatId] as read (locally and on the server).

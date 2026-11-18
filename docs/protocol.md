@@ -96,6 +96,8 @@ Edits and deletes are messages too, and count only when their sender is the targ
 
 ```
 {"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages; the latest edit wins
+                                                        (with "previewOnly": true, a late link preview: "Link previews";
+                                                        those never count when picking the latest edit)
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
@@ -141,6 +143,22 @@ A text may carry a card for its first link, made by the sender:
 "image"?: {"mediaKey", "key", "sha256", "width", "height"}}}`. The image is one encrypted `thumb`
 blob (its own media key, purpose `thumb`), uploaded before the message is sent, so receivers never
 contact the site. A preview that doesn't check out is dropped and the text shows as usual.
+
+A text sent before its preview was ready (say, a link pasted and sent at once) gets it afterwards:
+the sender's app keeps the fetch going after the send for up to 15 seconds (it doesn't survive a
+restart) and, when a preview comes, checks again that the message isn't deleted and still shows
+that text and link, then sends a preview-only edit:
+`{"kind":"edit", "target":"<messageId>", "text":"<the text as it stands>", "previewOnly": true,
+"preview": {…as above}}`. Its image is a `thumb` blob uploaded under the edit's message id. It counts
+only when sent by the target's sender, while `text` equals the text the target shows at that point
+(original or latest edit) and that text still has the preview's link; otherwise it's ignored. It
+doesn't change the text or mark the message edited. Nothing is attached when the user removed the
+preview in the composer, or the message was deleted, edited to drop the link, or already has a
+preview. It's sent `silent` like any edit. Clients from before this read it as a plain edit to the
+same text (an "edited" mark, no card). Remaining risk for them: if the user edits the message on
+another device while the preview is on its way, a preview edit carrying the old text can still
+arrive after that edit, and an old client (latest edit wins) then shows the old text again. The
+15-second limit and the re-check keep that window small; current clients ignore such a stale edit.
 
 - `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?}`,
   or 404 when there's nothing to show. The app asks while a link is being typed. YouTube links use
@@ -217,6 +235,12 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
     gets `priority: high` and no notification block; iOS gets `aps.alert {title, body}`,
     `mutable-content: 1`, sound and `thread-id`. The app decrypts `env` and shows the text itself,
     falling back to `title`/`body`. The server never sees readable text.
+    On iPhone a `NotificationService` app extension does the decrypting, because the app may not be
+    running. The app keeps a keyring (chat keys per epoch, trusted devices' signing keys, group chat
+    ids and member names) as one JSON item in the shared keychain access group `group.dev.famchat.app`
+    (`AfterFirstUnlockThisDevice`), rewritten when keys or devices change and wiped when previews are
+    turned off or the user signs out. The extension verifies the signature, decrypts, and on any
+    failure delivers the generic alert unchanged.
   - The envelope is attached only when its JSON is at most 3000 bytes (`MAX_PREVIEW_ENVELOPE`);
     larger ones go as the plain shape. A retry after a transient FCM failure keeps the envelope.
 - Who gets one: every device of the other members (except those who muted the chat and weren't

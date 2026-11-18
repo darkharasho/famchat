@@ -136,6 +136,14 @@ jobs:
           app="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app"
           find "$app/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) \
             -exec codesign --force --sign - {} \;
+          # Sign each app extension with its own entitlements (the app group), before the app.
+          for appex in "$app"/PlugIns/*.appex; do
+            [ -e "$appex" ] || continue
+            name="$(basename "$appex" .appex)"
+            ent="ios/$name/$name.entitlements"
+            [ -f "$ent" ] || { echo "::error::No entitlements file $ent for $name.appex."; exit 1; }
+            codesign --force --sign - --entitlements "$ent" "$appex"
+          done
           codesign --force --sign - --entitlements ios/Runner/Runner.entitlements "$app"
           codesign -d --entitlements :- "$app" 2>/dev/null | grep -q aps-environment \
             || { echo "::error::The archive has no aps-environment entitlement."; exit 1; }
@@ -176,6 +184,20 @@ jobs:
             echo "::error::The signed IPA has no aps-environment entitlement: iOS push notifications won't arrive. Check that the App ID has Push Notifications and the profile includes it."
             exit 1
           fi
+          # Both app extensions must carry the app group: the preview keyring and the share queue live there.
+          for name in NotificationService ShareExtension; do
+            appex="$RUNNER_TEMP/ipa-check/Payload/Runner.app/PlugIns/$name.appex"
+            if [ ! -d "$appex" ]; then
+              echo "::error::The signed IPA has no $name.appex."
+              exit 1
+            fi
+            if codesign -d --entitlements :- "$appex" 2>/dev/null | grep -q group.dev.famchat.app; then
+              echo "$name.appex app group entitlement present"
+            else
+              echo "::error::$name.appex in the signed IPA has no group.dev.famchat.app entitlement. Check that its App ID has App Groups and the profile includes it."
+              exit 1
+            fi
+          done
           if [ "$DESTINATION" = upload ]; then
             export_to upload "$RUNNER_TEMP/upload"
             echo "Uploaded FamChat $NAME ($NUMBER) to App Store Connect; it shows in TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"

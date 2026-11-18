@@ -22,6 +22,8 @@ void main() {
     await signInDirectly(tester, server, admin: true);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.byKey(const Key('settings-families')), 100); // the Display group pushed it down
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('settings-families')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('family-tile-1')));
@@ -87,6 +89,8 @@ void main() {
     // The server's `family` event refetches the families (roles included).
     await appContainer(tester).read(familiesProvider.notifier).refresh();
     appRouter(tester).go('/settings');
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.byKey(const Key('settings-families')), 100); // the Display group pushed it down
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('settings-families')));
     await tester.pumpAndSettle();

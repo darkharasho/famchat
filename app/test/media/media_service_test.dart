@@ -202,6 +202,50 @@ void main() {
     expect((t.preview!.title, t.preview!.image), ('X', null));
   });
 
+  group('late link previews', () {
+    const url = 'https://shop.example/hose';
+    FetchedPreview card() => FetchedPreview(url: url, title: 'Hose', siteName: 'Shop', image: photoBytes(900, 4));
+
+    test('attached once the fetch finishes; Bob gets the card and its image', () async {
+      final (alice, bob, chatId) = await pair();
+      final id = await alice.sync.sendText(chatId, 'look $url');
+      final edit = await alice.media.attachLatePreview(chatId, id, Future.value(card()));
+      expect(edit, isNotNull);
+      await until(() async => (await bob.rows(chatId)).length == 2, reason: 'the preview edit after its upload');
+      final rows = await bob.rows(chatId);
+      final c = messageChanges(rows);
+      final m = rows.firstWhere((r) => r.id == id);
+      expect(c.previewOf(m)?.title, 'Hose');
+      expect(c.edited, isEmpty);
+      expect(await bob.media.load(c.previewOf(m)!.image!.ref), photoBytes(900, 4).sublist(0, 16));
+    });
+
+    test('a message deleted while its preview is on the way gets nothing; staged images are dropped', () async {
+      final (alice, _, chatId) = await pair();
+      // Deleted while the fetch is still held.
+      final a = await alice.sync.sendText(chatId, 'look $url');
+      await until(() async => (await alice.row(a))?.state == 'sent');
+      final fetch = Completer<FetchedPreview?>();
+      final lateA = alice.media.attachLatePreview(chatId, a, fetch.future);
+      await alice.sync.deleteMessage(chatId, a);
+      fetch.complete(card());
+      expect(await lateA, isNull);
+
+      // Deleted while its image was being made (after the first check).
+      final b = await alice.sync.sendText(chatId, 'look $url');
+      await until(() async => (await alice.row(b))?.state == 'sent');
+      final before = alice.processor.calls;
+      final hold = alice.processor.hold = Completer<void>();
+      final lateB = alice.media.attachLatePreview(chatId, b, Future.value(card()));
+      await until(() => alice.processor.calls > before, reason: 'image processing started');
+      await alice.sync.deleteMessage(chatId, b);
+      hold.complete();
+      expect(await lateB, isNull);
+      expect(await alice.db.uploadMessageIds(), isEmpty);
+      expect((await alice.rows(chatId)).where((r) => r.kind == 'edit'), isEmpty);
+    });
+  });
+
   group('forwarding', () {
     Future<(Node, Node, Node, String, String)> trio() async {
       final alice = await start(await backend.addUser('Alice'));

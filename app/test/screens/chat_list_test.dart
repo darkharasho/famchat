@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/wire.dart';
+import 'package:famchat/screens/chats/chat_list.dart' show shortTime;
 import 'package:famchat/screens/chats/conversation_view.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
@@ -40,6 +41,19 @@ MessageRow text(String id, String chatId, int seq, String from, String body) => 
     );
 
 void main() {
+  test('shortTime: clock today, weekday this week, else M/D', () {
+    final now = DateTime(2026, 11, 17, 18);
+    final today = DateTime(2026, 11, 17, 14, 5);
+    expect(shortTime(today, h24: false, now: now), '2:05 PM');
+    expect(shortTime(today, h24: true, now: now), '14:05');
+    final three = DateTime(2026, 11, 14, 14, 5);
+    expect(shortTime(three, h24: false, now: now), 'Sat');
+    expect(shortTime(three, h24: true, now: now), 'Sat');
+    final old = DateTime(2026, 10, 18, 14, 5);
+    expect(shortTime(old, h24: false, now: now), '10/18');
+    expect(shortTime(old, h24: true, now: now), '10/18');
+  });
+
   late FakeChatBackend backend;
   late TestDevice alice, bob, carol;
 

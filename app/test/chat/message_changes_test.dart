@@ -111,4 +111,83 @@ void main() {
     expect(changeKinds, containsAll(['reaction', 'edit', 'delete']));
     expect(changeKinds.contains('text'), isFalse);
   });
+
+  group('late link previews (preview-only edits)', () {
+    const link = 'look https://youtu.be/cat';
+    const card = LinkPreview(url: 'https://youtu.be/cat', title: 'Cat jumps');
+    EditBody late(String target, String text, [LinkPreview? p = card]) =>
+        EditBody(target, text, preview: p, previewOnly: true);
+
+    test('round trip; older edits read as plain edits', () {
+      final p = late('t', link);
+      expect(Plaintext.decode(p.encode()).toJson(), p.toJson());
+      expect(const EditBody('t', 'x').toJson().keys, ['kind', 'target', 'text']);
+      final bad = Plaintext.decode(utf8.encode(jsonEncode({...p.toJson(), 'preview': 'nope'}))) as EditBody;
+      expect((bad.previewOnly, bad.preview), (true, null));
+    });
+
+    test("attaches the sender's preview without marking the text edited", () {
+      final rows = [row('a', const TextBody(link), id: 't'), row('a', late('t', link))];
+      final c = messageChanges(rows);
+      expect(c.previewOf(rows.first)?.title, 'Cat jumps');
+      expect(c.edited, isEmpty);
+      expect(c.textOf(rows.first), link);
+    });
+
+    test("someone else's preview is ignored", () {
+      final rows = [row('a', const TextBody(link), id: 't'), row('b', late('t', link))];
+      final c = messageChanges(rows);
+      expect(c.previewOf(rows.first), isNull);
+      expect(c.edited, isEmpty);
+    });
+
+    test('a preview for other text, without its link, or that failed to check out changes nothing', () {
+      final rows = [
+        row('a', const TextBody(link), id: 't'),
+        row('a', late('t', '$link !')),
+        row('a', late('t', link, const LinkPreview(url: 'https://other.io', title: 'Other'))),
+        row('a', late('t', link, null)),
+      ];
+      final c = messageChanges(rows);
+      expect(c.previewOf(rows.first), isNull);
+      expect(c.edited, isEmpty);
+      expect(c.textOf(rows.first), link);
+    });
+
+    test('a stale preview edit (old text) after a real edit is ignored: the edit stands', () {
+      final rows = [
+        row('a', const TextBody(link), id: 't'),
+        row('a', const EditBody('t', '$link wow')),
+        row('a', late('t', link)), // higher seq, carrying the text from before the edit
+      ];
+      expect(rows[2].seq! > rows[1].seq!, isTrue);
+      final c = messageChanges(rows);
+      expect(c.textOf(rows.first), '$link wow');
+      expect(c.previewOf(rows.first), isNull);
+      expect(c.edited, {'t'});
+    });
+
+    test('it follows edits: matches the latest text, and goes when an edit drops the link', () {
+      final edited = [
+        row('a', const TextBody(link), id: 't'),
+        row('a', const EditBody('t', '$link wow')),
+        row('a', late('t', link)), // made for the old text
+        row('a', late('t', '$link wow')),
+      ];
+      var c = messageChanges(edited);
+      expect(c.previewOf(edited.first)?.title, 'Cat jumps');
+      expect(c.edited, {'t'}, reason: 'edited by the real edit only');
+
+      final dropped = [...edited, row('a', const EditBody('t', 'never mind'))];
+      c = messageChanges(dropped);
+      expect(c.previewOf(dropped.first), isNull);
+
+      final deleted = [
+        row('a', const TextBody(link), id: 'd'),
+        row('a', late('d', link)),
+        row('a', const DeleteBody('d')),
+      ];
+      expect(messageChanges(deleted).previewOf(deleted.first), isNull);
+    });
+  });
 }

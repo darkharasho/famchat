@@ -11,6 +11,7 @@ import '../chat/providers.dart';
 import '../dev_tools.dart';
 import '../profile/profile_photo_tile.dart';
 import '../push/notification_settings.dart';
+import '../settings/time_format_tile.dart';
 import '../session/session_controller.dart';
 import '../theme/tokens.dart';
 import '../update/update_banner.dart';
@@ -108,6 +109,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   key: const Key('settings-devices')),
             ]),
             const NotificationSettingsGroup(),
+            const DisplaySettingsGroup(),
             if (!reviewer)
               SettingsGroup(title: 'Families', children: [
                 row(Icons.diversity_3_rounded, 'Families', familyNames.isEmpty ? 'Start or join a family' : familyNames.join(', '),

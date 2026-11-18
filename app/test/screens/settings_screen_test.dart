@@ -45,6 +45,8 @@ void main() {
     await openSettings(tester, admin: true);
     expect(find.textContaining('Family admin'), findsOneWidget);
     expect(find.byKey(const Key('settings-family')), findsNothing, reason: 'the old Family group is gone');
+    await tester.scrollUntilVisible(find.byKey(const Key('settings-families')), 100); // the Display group pushed it down
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('settings-families')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('family-tile-1')));

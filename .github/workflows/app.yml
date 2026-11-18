@@ -32,6 +32,15 @@ jobs:
       - run: flutter test
       - run: flutter test --platform chrome test/crypto/ test/theme/person_colors_test.dart
 
+  ios-preview-core:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test the notification-preview crypto core
+        working-directory: app/ios/PreviewCore
+        run: swift test
+
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 25

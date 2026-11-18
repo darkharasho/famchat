@@ -8,6 +8,7 @@ import '../../chat/providers.dart';
 import '../../games/labels.dart';
 import '../../push/preview.dart';
 import '../../session/session_controller.dart';
+import '../../settings/time_format.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/brand_mark.dart';
@@ -131,7 +132,7 @@ class _ChatTile extends StatelessWidget {
                       ),
                       const SizedBox(width: Space.sm),
                       Text(
-                        shortTime(DateTime.fromMillisecondsSinceEpoch(item.activity)),
+                        shortTime(DateTime.fromMillisecondsSinceEpoch(item.activity), h24: MediaQuery.alwaysUse24HourFormatOf(context)),
                         style: theme.textTheme.labelSmall?.copyWith(
                           fontFamily: kDisplayFont, // plain zeros in times
                           fontSize: 13,
@@ -219,14 +220,10 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
   };
 }
 
-/// "14:05".
-String clockTime(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-
-/// "14:05" today, "Mon" this week, else "3/14".
-String shortTime(DateTime t, [DateTime? now]) {
+/// "14:05" or "2:05 PM" today, "Mon" this week, else "3/14".
+String shortTime(DateTime t, {required bool h24, DateTime? now}) {
   final n = now ?? DateTime.now();
-  String two(int v) => v.toString().padLeft(2, '0');
-  if (t.year == n.year && t.month == n.month && t.day == n.day) return '${two(t.hour)}:${two(t.minute)}';
+  if (t.year == n.year && t.month == n.month && t.day == n.day) return clockTime(t, h24: h24);
   if (n.difference(t).inDays < 7 && !t.isAfter(n)) {
     return const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][t.weekday - 1];
   }
