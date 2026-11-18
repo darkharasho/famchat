@@ -14,6 +14,7 @@ import '../session/session_controller.dart';
 import 'android_previews.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
+import 'preview_keyring.dart';
 import 'preview_setting.dart';
 import 'push_messaging.dart';
 
@@ -104,6 +105,7 @@ final notificationsProvider = Provider<void>((ref) {
   ref.watch(pushControllerProvider);
   ref.watch(messageNotifierProvider);
   ref.watch(socketLifecycleProvider);
+  ref.watch(previewKeyringSyncProvider);
 });
 
 /// Web only: whether to offer "Turn on notifications" (browsers only ask from a click).

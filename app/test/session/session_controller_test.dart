@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:drift/native.dart';
 import 'package:famchat/api/models.dart';
+import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/providers.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/platform_info.dart';
 import 'package:famchat/session/secure_kv.dart';
@@ -10,6 +13,7 @@ import 'package:famchat/session/stored_session.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:famchat/push/preview_keyring.dart';
 import 'package:famchat/push/preview_setting.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
@@ -173,6 +177,35 @@ void main() {
     await c.read(sessionProvider.notifier).signOut();
     expect(await readPreviewsOn(), isFalse);
     expect(await c.read(previewsOnProvider.future), isFalse);
+  });
+
+  test('sign out wipes the preview keyring, with a live sync and keys in the db', () async {
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+    final db = ChatDb(NativeDatabase.memory());
+    addTearDown(db.close);
+    final store = MemoryPreviewKeyringStore()..value = 'x';
+    final c = ProviderContainer(overrides: [
+      ...sessionOverrides(server, kv),
+      storageTimeoutProvider.overrideWithValue(const Duration(seconds: 5)),
+      previewKeyringStoreProvider.overrideWithValue(store),
+      chatDbProvider.overrideWithValue(db),
+    ]);
+    addTearDown(c.dispose);
+    await settledSession(c);
+    await c.read(sessionProvider.notifier).join(token: server.addInvite(), deviceName: 'Pixel');
+    c.listen(previewKeyringSyncProvider, (_, _) {});
+    // What the app does when the session ends (chatSyncProvider): the local chat db is wiped.
+    c.listen(sessionProvider, (p, n) {
+      if (p is SignedIn && n is SignedOut) unawaited(db.wipe());
+    });
+    await db.putKey('C1', 1, Uint8List(32));
+    await c.read(previewsOnProvider.future);
+    await c.read(previewsOnProvider.notifier).set(true);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    expect(store.value, contains('"C1"'));
+    await c.read(sessionProvider.notifier).signOut();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    expect(store.value, isNull);
   });
 
   test('sign out while offline still clears storage', () async {
