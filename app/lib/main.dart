@@ -7,6 +7,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'audio_init.dart';
+import 'push/app_badge.dart';
 import 'push/android_previews.dart';
 import 'push/providers.dart';
 import 'push/push_messaging.dart';
@@ -66,6 +67,7 @@ class FamChatApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(appBadgeProvider); // phones: the app-icon unread badge
     final appearance = ref.watch(appearanceProvider);
     return MaterialApp.router(
       title: 'FamChat',

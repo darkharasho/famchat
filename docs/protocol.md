@@ -258,6 +258,22 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
     failure delivers the generic alert unchanged.
   - The envelope is attached only when its JSON is at most 3000 bytes (`MAX_PREVIEW_ENVELOPE`);
     larger ones go as the plain shape. A retry after a transient FCM failure keeps the envelope.
+- **App-icon badge.** Every message push carries the recipient's unread total, worked out when it is
+  sent: messages of others with `seq > max(last_read_seq, joined_seq)` that weren't sent `silent`
+  (`messages.silent`, migration 0015; older rows count as not silent), across the recipient's chats
+  that aren't muted (`muted_until` null or past). The app counts the same way but also skips messages
+  their sender deleted, which the server can't see, so the pushed number can be a little high until
+  the app runs and sets its own. Plain: `aps.badge`, `android.notification.notification_count` and
+  `data.badge`. Preview: `aps.badge` and `data.badge`. `data.badge` is a decimal string; the Android
+  app sets the launcher badge from it.
+- **Badge updates.** When a `read` frame takes unread messages off a user's badge (others' non-silent
+  messages, in a chat they haven't muted), the hub queues `{kind: "badge", userId, deviceIds}` for
+  that user's *other* `ios`/`android` devices with a token (never the device that read; desktops and
+  the web don't have an icon badge). The consumer counts the total afresh and sends each device a
+  quiet push: `data {type: "badge", badge: "<n>"}`, Android `priority: normal` (the app sets the
+  badge itself and shows nothing), and on iOS `apns-push-type: alert`, `apns-priority: 10` with
+  `aps {badge: n}` only (no alert or sound, so iOS just changes the number). Failed devices are
+  re-queued like message pushes. Off whenever push is off.
 - Who gets one: every device of the other members (except those who muted the chat and weren't
   @mentioned, and none at all for a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
@@ -729,7 +745,8 @@ add wraps you can, then resend the outbox.
 
 ### Hooks for later plans
 - Push (plan 9, done): `FamilyHub.push.notify(job)` puts a job on the `famchat-push` queue; the Worker's
-  `queue()` handler (`src/push/consumer.ts`) sends it through FCM. See "Push" above.
+  `queue()` handler (`src/push/consumer.ts`) sends it through FCM. `FamilyHub.badges.update(job)` queues
+  badge updates on the same queue. See "Push" above.
 - Admin reset (plan 10) reuses plan 6: revoking the user's devices rotates every chat, and the
   `device` event plus missing-wrap repair restores history to the new device ("Account resets").
 

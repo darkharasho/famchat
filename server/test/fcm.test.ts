@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { b64urlDecode } from "../src/lib/encoding";
 import {
   accessToken,
+  fcmBadgeMessage,
   fcmMessage,
   fcmPreviewMessage,
   invalidateAccessToken,
@@ -107,6 +108,42 @@ describe("FCM message", () => {
       alert: { title: "Family", body: "New message from Mom" }, "mutable-content": 1, sound: "default", "thread-id": "01CHAT",
     });
     expect(m.webpush).not.toHaveProperty("notification");
+  });
+
+  it("a badge goes in aps.badge, Android's notification_count and a data value", () => {
+    const m = fcmMessage("tok", { title: "Mom", body: "New message", chatId: "01CHAT" }, "https://famchat.dev", 4).message;
+    expect(m.data).toEqual({ chatId: "01CHAT", badge: "4" });
+    expect(m.android).toEqual({ priority: "high", notification: { channel_id: "messages", tag: "01CHAT", notification_count: 4 } });
+    expect(m.apns.payload.aps).toEqual({ sound: "default", "thread-id": "01CHAT", badge: 4 });
+    // Zero clears the icon, so it is sent too.
+    const zero = fcmMessage("tok", { title: "Mom", body: "New message", chatId: "01CHAT" }, "https://famchat.dev", 0).message;
+    expect(zero.apns.payload.aps).toHaveProperty("badge", 0);
+    expect(zero.android.notification).toHaveProperty("notification_count", 0);
+  });
+
+  it("a preview message carries the badge as a data string and in aps", () => {
+    const m = fcmPreviewMessage(
+      "tok",
+      { title: "Family", body: "New message from Mom", chatId: "01CHAT" },
+      { messageId: "01MSG", senderUserId: "01USER", senderDeviceId: "01DEV", epoch: 3, envelope: '{"v":1}' },
+      "https://famchat.dev",
+      7,
+    ).message as Record<string, any>;
+    expect(m.data.badge).toBe("7");
+    expect(m.android).toEqual({ priority: "high" });
+    expect(m.apns.payload.aps.badge).toBe(7);
+    expect(m.apns.payload.aps.alert).toEqual({ title: "Family", body: "New message from Mom" });
+  });
+
+  it("a badge update shows nothing: badge-only aps, Android data at normal priority", () => {
+    expect(fcmBadgeMessage("tok", 2)).toEqual({
+      message: {
+        token: "tok",
+        data: { type: "badge", badge: "2" },
+        android: { priority: "normal" },
+        apns: { headers: { "apns-push-type": "alert", "apns-priority": "10" }, payload: { aps: { badge: 2 } } },
+      },
+    });
   });
 
   it("classifies FCM answers", async () => {

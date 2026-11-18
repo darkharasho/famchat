@@ -263,6 +263,23 @@ void main() {
       expect(h.shown.map((s) => (s.$1.title, s.$2)), [('Parents', '/chats/$chatB'), ('FamChat', null)]);
     });
 
+    test('a badge update in the foreground shows nothing', () async {
+      final h = Harness();
+      await h.controller.start();
+      h.messaging.foreground.add(PushMessage.fromData({'type': 'badge', 'badge': '3'}));
+      await settle();
+      expect(h.shown, isEmpty);
+    });
+
+    test('PushMessage.fromData reads the badge and badge updates', () {
+      final update = PushMessage.fromData({'type': 'badge', 'badge': '3'});
+      expect((update.isBadgeUpdate, update.badge, update.chatId), (true, 3, null));
+      final plain = PushMessage.fromData({'chatId': chatA, 'badge': '12'}, title: 'Mom', body: 'New message');
+      expect((plain.isBadgeUpdate, plain.badge, plain.withBody('x').badge), (false, 12, 12));
+      expect(PushMessage.fromData({'chatId': chatA}).badge, isNull);
+      expect(PushMessage.fromData({'badge': 'lots'}).badge, isNull);
+    });
+
     test('PushMessage.fromData reads title and body from data', () {
       final m = PushMessage.fromData({
         'chatId': chatA,

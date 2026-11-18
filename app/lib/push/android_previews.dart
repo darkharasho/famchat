@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../chat/db/chat_db.dart';
+import 'app_badge.dart';
 import 'chat_route.dart';
 import 'preview.dart';
 import 'preview_setting.dart';
@@ -75,8 +76,9 @@ Future<FlutterLocalNotificationsPlugin> _androidNotifications({void Function(Str
 }
 
 /// How a push notification for [chatId] shows on Android: one per chat (tag), and expandable to
-/// the whole [body], which a single line would cut off.
-AndroidNotificationDetails previewNotificationDetails(String chatId, String body) => AndroidNotificationDetails(
+/// the whole [body], which a single line would cut off. [badge]: the unread total, which launchers
+/// that count notifications show as the icon number.
+AndroidNotificationDetails previewNotificationDetails(String chatId, String body, {int? badge}) => AndroidNotificationDetails(
       _channel.id,
       _channel.name,
       channelDescription: _channel.description,
@@ -87,13 +89,26 @@ AndroidNotificationDetails previewNotificationDetails(String chatId, String body
       // flutter_local_notifications 23 has no publicVersion; the lock screen's own "contents
       // hidden" redaction stands in for a generic public version.
       visibility: NotificationVisibility.private,
+      number: badge,
     );
 
 /// Shows a preview push in the background or with the app closed. Other pushes carry a
-/// notification block the OS shows itself.
+/// notification block the OS shows itself. Any push's `badge` sets the app-icon number; a badge
+/// update (`type: "badge"`) does only that.
 @pragma('vm:entry-point')
-Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
-  final m = PushMessage.fromData(message.data, title: message.notification?.title, body: message.notification?.body);
+Future<void> firebaseBackgroundHandler(RemoteMessage message) =>
+    handleBackgroundPush(message.data, title: message.notification?.title, body: message.notification?.body);
+
+/// [firebaseBackgroundHandler] on a push's [data] and notification text; [setBadge] is replaced in tests.
+Future<void> handleBackgroundPush(
+  Map<String, Object?> data, {
+  String? title,
+  String? body,
+  SetBadge setBadge = setAppBadge,
+}) async {
+  final m = PushMessage.fromData(data, title: title, body: body);
+  final badge = m.badge;
+  if (badge != null) await setBadge(badge);
   final chatId = m.chatId;
   if (!m.isPreview || chatId == null) return;
   try {
@@ -119,7 +134,7 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
       title: text.title,
       body: text.body,
       payload: chatRoute(chatId),
-      notificationDetails: NotificationDetails(android: previewNotificationDetails(chatId, text.body)),
+      notificationDetails: NotificationDetails(android: previewNotificationDetails(chatId, text.body, badge: badge)),
     );
   } catch (e) {
     // Nothing more to do. Only the error's type: its message could hold message text.

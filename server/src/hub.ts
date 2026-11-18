@@ -24,12 +24,36 @@ export interface PushJob {
   preview?: { senderDeviceId: string; epoch: number; envelope: string };
 }
 
+/**
+ * A quiet app-icon badge update for [userId]'s phones after they read a chat on another device
+ * (src/push/consumer.ts works out the number when it sends).
+ */
+export interface BadgeJob {
+  kind: "badge";
+  userId: string;
+  deviceIds: string[];
+  /** 0 for the first try. */
+  attempt?: number;
+}
+
+/** What goes on the push queue. */
+export type QueueJob = PushJob | BadgeJob;
+
+export const isBadgeJob = (job: QueueJob): job is BadgeJob => (job as BadgeJob).kind === "badge";
+
 /** An envelope longer than this (JSON characters = bytes, it is ASCII) is not attached to a push. */
 export const MAX_PREVIEW_ENVELOPE = 3000;
 
 export interface PushHook {
   notify(job: PushJob): Promise<void>;
 }
+
+export interface BadgeHook {
+  update(job: BadgeJob): Promise<void>;
+}
+
+/** Badge updates go only to phones: their app icon is what shows the number. */
+export const BADGE_PLATFORMS = ["ios", "android"] as const;
 
 /** At most this many @mentions per message (a family is smaller). */
 export const MAX_MENTIONS = 50;
@@ -40,6 +64,15 @@ export const noPush: PushHook = { notify: async () => {} };
 export function queuePush(env: Pick<Env, "PUSH_QUEUE">): PushHook {
   return {
     notify: async (job) => {
+      if (env.PUSH_QUEUE) await env.PUSH_QUEUE.send(job);
+    },
+  };
+}
+
+/** Badge updates share the push queue (and are off with it). */
+export function queueBadges(env: Pick<Env, "PUSH_QUEUE">): BadgeHook {
+  return {
+    update: async (job) => {
       if (env.PUSH_QUEUE) await env.PUSH_QUEUE.send(job);
     },
   };
@@ -70,6 +103,9 @@ export class FamilyHub extends DurableObject<Env> {
   /** Replaced in tests. */
   push: PushHook;
 
+  /** Replaced in tests. */
+  badges: BadgeHook;
+
   /** The clock for stale-socket pruning; replaced in tests. */
   now: () => number = Date.now;
 
@@ -91,6 +127,7 @@ export class FamilyHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.push = queuePush(env);
+    this.badges = queueBadges(env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
   }
 
@@ -313,9 +350,9 @@ export class FamilyHub extends DurableObject<Env> {
         "UPDATE chats SET last_seq = last_seq + 1, last_message_at = CASE WHEN ? THEN last_message_at ELSE ? END WHERE id = ?",
       ).bind(silent ? 1 : 0, now, chatId),
       db.prepare(
-        `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at)
-         SELECT id, last_seq, ?, ?, ?, ?, ? FROM chats WHERE id = ? RETURNING seq`,
-      ).bind(id, att.userId, att.deviceId, JSON.stringify(env), now, chatId),
+        `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at, silent)
+         SELECT id, last_seq, ?, ?, ?, ?, ?, ? FROM chats WHERE id = ? RETURNING seq`,
+      ).bind(id, att.userId, att.deviceId, JSON.stringify(env), now, silent ? 1 : 0, chatId),
     ]);
     const seq = (inserted.results[0] as { seq: number }).seq;
     send(ws, { type: "ack", id, seq, createdAt: now });
@@ -397,6 +434,10 @@ export class FamilyHub extends DurableObject<Env> {
 
   private async handleRead(att: Att, m: Incoming): Promise<void> {
     if (typeof m.chatId !== "string" || !Number.isInteger(m.seq) || (m.seq as number) < 0) return;
+    const before = await this.env.DB.prepare(
+      "SELECT last_read_seq, joined_seq, muted_until FROM chat_members WHERE chat_id = ? AND user_id = ?",
+    ).bind(m.chatId, att.userId).first<{ last_read_seq: number; joined_seq: number; muted_until: number | null }>();
+    if (!before) return;
     const row = await this.env.DB.prepare(
       `UPDATE chat_members SET last_read_seq = MIN(?, (SELECT last_seq FROM chats WHERE id = ?))
        WHERE chat_id = ? AND user_id = ? AND last_read_seq < MIN(?, (SELECT last_seq FROM chats WHERE id = ?))
@@ -406,6 +447,34 @@ export class FamilyHub extends DurableObject<Env> {
     await this.notify(await this.memberIds(m.chatId), {
       type: "read", chatId: m.chatId, userId: att.userId, seq: row.last_read_seq,
     });
+    // Not awaited, like message pushes.
+    this.updateBadges(att, m.chatId, before, row.last_read_seq).catch((e) => console.error("badge hook failed", e));
+  }
+
+  /**
+   * After [att]'s user read [chatId] up to [readSeq]: when that took messages off their badge
+   * (others' non-silent messages after where they joined, in a chat that isn't muted), queues a
+   * badge update for their other phones. The device that read updates its own badge.
+   */
+  private async updateBadges(
+    att: Att,
+    chatId: string,
+    before: { last_read_seq: number; joined_seq: number; muted_until: number | null },
+    readSeq: number,
+  ): Promise<void> {
+    if (before.muted_until !== null && before.muted_until > Date.now()) return;
+    const db = this.env.DB;
+    const cleared = await db.prepare(
+      `SELECT EXISTS (SELECT 1 FROM messages WHERE chat_id = ? AND seq > ? AND seq <= ? AND silent = 0
+       AND sender_user_id <> ?) AS n`,
+    ).bind(chatId, Math.max(before.last_read_seq, before.joined_seq), readSeq, att.userId).first<number>("n");
+    if (!cleared) return;
+    const { results } = await db.prepare(
+      `SELECT id FROM devices WHERE user_id = ? AND id <> ? AND revoked_at IS NULL AND push_token IS NOT NULL
+       AND platform IN (${BADGE_PLATFORMS.map(() => "?").join(",")}) ORDER BY id`,
+    ).bind(att.userId, att.deviceId, ...BADGE_PLATFORMS).all<{ id: string }>();
+    if (results.length === 0) return;
+    await this.badges.update({ kind: "badge", userId: att.userId, deviceIds: results.map((d) => d.id) });
   }
 }
 
