@@ -12,6 +12,8 @@ import '../chat/background_send.dart';
 import '../chat/providers.dart';
 import '../router.dart';
 import '../session/session_controller.dart';
+import '../window/desktop_window.dart';
+import '../window/window_controls.dart';
 import 'android_previews.dart';
 import 'local_notifier.dart';
 import 'notifications.dart';
@@ -25,7 +27,10 @@ final rootMessengerKeyProvider = Provider<GlobalKey<ScaffoldMessengerState>>((re
 /// This platform's own notifier (desktop, web), or null on phones.
 final localNotifierProvider = Provider<LocalNotifier?>((ref) => createLocalNotifier());
 
-bool appInFront() => WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+/// Whether the user is looking at FamChat: resumed, and on the desktop apps not hidden to the tray.
+bool appInFront() =>
+    WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+    (desktopPlatform() == null || !WindowControls.instance.hidden.value);
 
 String _path(GoRouter router) => router.routerDelegate.currentConfiguration.uri.path;
 

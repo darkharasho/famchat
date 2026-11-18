@@ -13,6 +13,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     CreateAndAttachConsole();
   }
 
+  // FamChat runs once: a second launch (the Start menu, a pinned taskbar
+  // button) shows the running one's window, which may be hidden in the tray,
+  // and exits. The mutex goes when the process does.
+  HANDLE instance_mutex =
+      ::CreateMutexW(nullptr, TRUE, L"Local\\dev.famchat.app.instance");
+  if (instance_mutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND running = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"FamChat");
+    if (running != nullptr) {
+      DWORD process = 0;
+      ::GetWindowThreadProcessId(running, &process);
+      // The foreground (this launch) lets the running one come to the front.
+      ::AllowSetForegroundWindow(process);
+      ::PostMessageW(running, FlutterWindow::ShowInstanceMessage(), 0, 0);
+    }
+    ::CloseHandle(instance_mutex);
+    return EXIT_SUCCESS;
+  }
+
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

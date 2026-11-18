@@ -1,6 +1,8 @@
-// The app-icon badge on phones: while the app runs it shows [unreadTotalProvider]; while it doesn't,
-// pushes set it (iOS from `aps.badge`; Android from the `badge` data value, in
-// firebaseBackgroundHandler). Desktop and web have no badge here yet.
+// The app-icon badge: while the app runs it shows [unreadTotalProvider]. On phones, pushes set it
+// while the app doesn't run (iOS from `aps.badge`; Android from the `badge` data value, in
+// firebaseBackgroundHandler). On the desktop apps it's the macOS Dock badge (app_badge_plus), the
+// Windows taskbar overlay and the Linux launcher count (lib/window/desktop_badges.dart). The web
+// has none.
 import 'dart:async';
 
 import 'package:app_badge_plus/app_badge_plus.dart';
@@ -10,15 +12,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/providers.dart';
 import '../chat/unread_total.dart';
+import '../window/desktop_badges.dart';
 
 /// Sets the app-icon number; 0 clears it.
 typedef SetBadge = Future<void> Function(int count);
 
-/// Whether this platform shows an app-icon badge here: the Android and iOS apps.
+/// Whether app_badge_plus sets the badge on this platform: the Android and iOS apps, and the macOS
+/// Dock.
 bool isBadgePlatform({bool web = kIsWeb, TargetPlatform? platform}) {
   if (web) return false;
   final p = platform ?? defaultTargetPlatform;
-  return p == TargetPlatform.android || p == TargetPlatform.iOS;
+  return p == TargetPlatform.android || p == TargetPlatform.iOS || p == TargetPlatform.macOS;
 }
 
 /// Sets the launcher badge to [count] (0 clears it). Never throws: a launcher without badges, or no
@@ -32,7 +36,8 @@ Future<void> setAppBadge(int count) async {
 }
 
 /// How to set the badge on this platform, or null where there is none. Replaced in tests.
-final appBadgeSetterProvider = Provider<SetBadge?>((ref) => isBadgePlatform() ? setAppBadge : null);
+final appBadgeSetterProvider =
+    Provider<SetBadge?>((ref) => ref.watch(desktopBadgeSetterProvider) ?? (isBadgePlatform() ? setAppBadge : null));
 
 /// The number the badge should show: null until the chat list has loaded (so a badge a push set
 /// isn't cleared by an empty first frame), 0 when signed out.

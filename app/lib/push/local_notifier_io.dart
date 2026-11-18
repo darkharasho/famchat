@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../window/window_controls.dart';
 import 'chat_route.dart';
 import 'local_notifier.dart';
 
@@ -36,6 +37,8 @@ class DesktopLocalNotifier implements LocalNotifier {
               ),
             ),
             onDidReceiveNotificationResponse: (r) {
+              // The window may be hidden to the tray: a tap on a notification brings it back.
+              WindowControls.instance.show();
               final route = r.payload;
               if (isChatRoute(route)) onTap(route!);
             },
