@@ -189,7 +189,7 @@ Future<String?> expectedBody(ChatDb db, Map<String, String> u) async {
       envelope: env,
     );
     if (p == null) return null;
-    return previewBody(db: db, chatId: u['chatId']!, senderUserId: u['senderUserId']!, preview: p);
+    return await previewBody(db: db, chatId: u['chatId']!, senderUserId: u['senderUserId']!, preview: p);
   } catch (_) {
     return null;
   }
