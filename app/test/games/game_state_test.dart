@@ -338,4 +338,63 @@ void main() {
     expect(g.winnerUserId, 'A');
     expect(g.ply, 5);
   });
+
+  test("offerer's own play keeps their offer; opponent can still accept", () {
+    final g = deriveGames([
+      game('g', GameType.chess, 'A'),
+      chess('A', 'g', 0, {'type': 'draw_offer'}),
+      uci('A', 'g', 0, 'e2e4'),
+      chess('B', 'g', 1, {'type': 'draw_accept'}),
+    ], members).single;
+    expect(g.ply, 1);
+    expect(g.outcome!.winner, isNull);
+    expect(g.outcome!.reason, 'agreed');
+  });
+
+  test('counter-offer while an offer is pending is ignored', () {
+    final g = deriveGames([
+      game('g', GameType.chess, 'A'),
+      chess('A', 'g', 0, {'type': 'draw_offer'}),
+      chess('B', 'g', 0, {'type': 'draw_offer'}),
+      chess('A', 'g', 0, {'type': 'draw_accept'}),
+    ], members).single;
+    expect(g.drawOfferedBy, 'A');
+    expect(g.over, isFalse);
+  });
+
+  test('games in a group chat are inert even with two members', () {
+    final games = deriveGames(
+      [game('g', GameType.tictactoe, 'A'), ttt('A', 'g', 0, 0)],
+      members,
+      direct: false,
+    );
+    expect(games.single.inert, isTrue);
+    expect(games.single.ply, 0);
+    expect(activeGame(games), isNull);
+  });
+
+  test('resign by a non-player is ignored', () {
+    final g = deriveGames([
+      game('g', GameType.chess, 'A'),
+      chess('C', 'g', 0, {'type': 'resign'}),
+    ], members).single;
+    expect(g.over, isFalse);
+  });
+
+  test('checkers draw offer then accept is a draw', () {
+    MessageRow ck(String s, int ply, Map<String, Object?> a) =>
+        move(s, 'g', GameType.checkers, ply, a);
+    final g = deriveGames([
+      game('g', GameType.checkers, 'A'),
+      ck('A', 0, {
+        'type': 'play',
+        'path': [9, 13],
+      }),
+      ck('B', 1, {'type': 'draw_offer'}),
+      ck('A', 1, {'type': 'draw_accept'}),
+    ], members).single;
+    expect(g.ply, 1);
+    expect(g.outcome!.winner, isNull);
+    expect(g.outcome!.reason, 'agreed');
+  });
 }

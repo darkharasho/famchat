@@ -61,7 +61,12 @@ class GameState {
 
 /// [rows] as `watchMessages` orders them (seq ascending, pending last).
 /// [memberIds] the chat's members. Games come out in the order of their rows.
-List<GameState> deriveGames(List<MessageRow> rows, List<String> memberIds) {
+/// Games only run in direct chats: when [direct] is false every game is inert.
+List<GameState> deriveGames(
+  List<MessageRow> rows,
+  List<String> memberIds, {
+  bool direct = true,
+}) {
   final games = <_Game>[];
   final byId = <String, _Game>{};
   for (final r in rows) {
@@ -71,6 +76,7 @@ List<GameState> deriveGames(List<MessageRow> rows, List<String> memberIds) {
       if (body is! GameBody || byId.containsKey(r.id)) continue;
       final second = memberIds.where((m) => m != body.first).firstOrNull;
       final inert =
+          !direct ||
           memberIds.length != 2 ||
           !memberIds.contains(body.first) ||
           second == null ||
@@ -139,12 +145,13 @@ class _Game {
         if (next == null) return;
         board = next;
         ply++;
-        drawOfferedBy = null;
+        // A play by the offerer's opponent declines a pending offer.
+        if (drawOfferedBy != sender) drawOfferedBy = null;
         outcome = next.outcome;
       case 'resign':
         outcome = Outcome(side.other, 'resigned');
       case 'draw_offer':
-        if (board.drawOffers) drawOfferedBy = sender;
+        if (board.drawOffers && drawOfferedBy == null) drawOfferedBy = sender;
       case 'draw_accept':
         if (drawOfferedBy == other) outcome = const Outcome(null, 'agreed');
       case 'draw_decline':
