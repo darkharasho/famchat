@@ -1,9 +1,11 @@
-// The Settings page's "Display" group (the time format chooser) and the app-wide scope that
-// applies the setting to every clock time.
+// The Settings page's "Display" group (the way to Appearance, and the time format chooser) and
+// the app-wide scope that applies the time format to every clock time.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../widgets/common.dart';
+import 'appearance.dart';
 import 'time_format.dart';
 
 const _labels = {
@@ -65,7 +67,20 @@ class DisplaySettingsGroup extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(timeFormatProvider).value ?? TimeFormat.automatic;
+    final appearance = ref.watch(appearanceProvider);
     return SettingsGroup(title: 'Display', children: [
+      ListTile(
+        key: const Key('settings-appearance'),
+        leading: const TileIcon(Icons.palette_outlined),
+        title: const Text('Appearance'),
+        subtitle: Text('${appearance.preset.name}, ${switch (appearance.mode) {
+          ThemeMode.system => 'follows the system',
+          ThemeMode.light => 'always light',
+          ThemeMode.dark => 'always dark',
+        }}'),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => context.go('/settings/appearance'),
+      ),
       ListTile(
         key: const Key('settings-time-format'),
         leading: const TileIcon(Icons.schedule_rounded),

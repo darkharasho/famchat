@@ -21,8 +21,8 @@ mkdir -p "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/512x5
 cp -R "$bundle/." "$appdir/"
 cp "$here/dev.famchat.app.desktop" "$appdir/dev.famchat.app.desktop"
 cp "$here/dev.famchat.app.desktop" "$appdir/usr/share/applications/"
-cp "$app/web/icons/Icon-512.png" "$appdir/dev.famchat.app.png"
-cp "$app/web/icons/Icon-512.png" "$appdir/usr/share/icons/hicolor/512x512/apps/dev.famchat.app.png"
+cp "$app/assets/brand/famchat-icon-desktop-512.png" "$appdir/dev.famchat.app.png"
+cp "$app/assets/brand/famchat-icon-desktop-512.png" "$appdir/usr/share/icons/hicolor/512x512/apps/dev.famchat.app.png"
 cp "$here/AppRun" "$appdir/AppRun"
 chmod +x "$appdir/AppRun"
 
