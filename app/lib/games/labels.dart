@@ -78,5 +78,10 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
     return '♟ Moved in $title';
   }
   if (outcome == null) return '♟ Your turn in $title';
-  return outcome.winner == null ? '🤝 Draw in $title' : '♟ You lost at $title';
+  final winner = after.winnerUserId;
+  if (winner == null) return '🤝 Draw in $title';
+  // In Reversi and Dots and Boxes the loser can make the final move.
+  return winner == m.senderUserId
+      ? '♟ You lost at $title'
+      : '🏆 You won at $title';
 }

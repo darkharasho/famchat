@@ -68,6 +68,10 @@ The existing labels already apply. One change for extra turns: a push for a play
 still the sender's turn says `♟ Moved in {Title}`, not `♟ Your turn in {Title}`. Accepted: a long
 chain of boxes sends one push per line, like a burst of chat messages.
 
+A play that ends the game is labelled by who won, not who moved: in Reversi and Dots and Boxes the
+loser can make the last move. The sender won → `♟ You lost at {Title}`; the recipient won →
+`🏆 You won at {Title}`; a draw → `🤝 Draw in {Title}`.
+
 ## Older versions
 
 Older versions show the new games as "Unsupported message", and they recover after updating
