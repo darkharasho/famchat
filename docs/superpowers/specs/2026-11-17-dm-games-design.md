@@ -110,11 +110,14 @@ A small pure-Dart `GameRules` interface per game (initial state, legal moves, ap
 - **Starting:** a "Game" entry in the DM composer's attach/plus menu (hidden in groups) opens a
   sheet with the three games. Starter moves first. Only **one unfinished game per DM**: if one
   exists, the sheet says so and offers to open it.
-- **Game card** in the timeline (where the `game` message landed): small live board thumbnail, game
-  name, status line (`Your turn`, `Mom's turn`, `You won`, `Draw`), and Rematch when finished.
-  Tap → board.
+- **Game card** in the timeline (where the `game` message landed), drawn like a link embed (at
+  most 320 wide): glyph and game name, the live board at the card's width, the players with their
+  colours (and score), status line (`Your turn`, `Mom's turn`, `You won`, `Draw`), and Rematch
+  when finished. Tap → board.
 - **Active-game bar** pinned under the DM header while a game is unfinished; tap → board.
-- **Board screen** (full-screen route on phones, a sheet/dialog on wide screens): the board from the
+- **Board screen** (an overlay on every window size, updated 2026-11-18: the app behind is blurred
+  and dimmed, the board sits on a centred panel at most 560 wide; tapping outside, back or the
+  close button closes it): the board from the
   viewer's side (my pieces at the bottom), tap-to-select then tap-to-move with legal targets
   highlighted (drag optional, builder's call), last move highlighted, whose turn, resign and
   draw-offer actions behind a menu with confirmation, promotion picker for chess. Board updates live
