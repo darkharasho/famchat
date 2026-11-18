@@ -14,9 +14,13 @@ import 'router.dart';
 import 'session/invite_link.dart';
 import 'session/session_controller.dart';
 import 'theme/app_theme.dart';
+import 'theme/motion.dart';
+import 'theme/presets.dart';
+import 'theme/system_bars.dart';
 import 'update/update_banner.dart';
 import 'media/video_io.dart';
 import 'session/app_links.dart';
+import 'settings/appearance.dart';
 import 'settings/time_format_tile.dart';
 import 'share/share_inbox.dart';
 import 'voice/voice_io.dart';
@@ -41,36 +45,49 @@ Future<void> main() async {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android && push != null) {
     FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
   }
+  // Read before the first frame so the app opens in the chosen theme, not the default.
+  final appearance = await readAppearance();
   runApp(ProviderScope(
     overrides: [
       initialInviteTokenProvider.overrideWithValue(invite),
       pushMessagingProvider.overrideWithValue(push),
+      initialAppearanceProvider.overrideWithValue(appearance),
     ],
     child: const FamChatApp(),
   ));
 }
 
-final _light = buildTheme(Brightness.light);
-final _dark = buildTheme(Brightness.dark);
+// Built once per preset and brightness, when first shown.
+final _themes = <(String, Brightness), ThemeData>{};
+ThemeData _theme(ThemePreset preset, Brightness b) => _themes.putIfAbsent((preset.id, b), () => buildTheme(b, preset));
 
 class FamChatApp extends ConsumerWidget {
   const FamChatApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final appearance = ref.watch(appearanceProvider);
     return MaterialApp.router(
       title: 'FamChat',
       debugShowCheckedModeBanner: false,
-      theme: _light,
-      darkTheme: _dark,
+      theme: _theme(appearance.preset, Brightness.light),
+      darkTheme: _theme(appearance.preset, Brightness.dark),
+      themeMode: appearance.mode,
+      // A short cross-fade when the theme changes; none when motion is reduced.
+      themeAnimationStyle: Motion.reduced(context)
+          ? AnimationStyle.noAnimation
+          : const AnimationStyle(duration: Motion.medium, curve: Curves.easeInOut),
       // Foreground pushes show as snack bars over any screen.
       scaffoldMessengerKey: ref.watch(rootMessengerKeyProvider),
       routerConfig: ref.watch(routerProvider),
       // FamChat's own title bar over every screen on the desktop apps; nothing elsewhere.
       // The update popup floats over every screen.
-      builder: (context, child) => TimeFormatScope(
-        child: WindowFrame(
-          child: Stack(children: [child ?? const SizedBox.shrink(), const UpdatePrompt(), const ShareInbox(), const InviteLinkListener()]),
+      // The phone's status and navigation bars follow the theme.
+      builder: (context, child) => SystemBarsStyle(
+        child: TimeFormatScope(
+          child: WindowFrame(
+            child: Stack(children: [child ?? const SizedBox.shrink(), const UpdatePrompt(), const ShareInbox(), const InviteLinkListener()]),
+          ),
         ),
       ),
     );
