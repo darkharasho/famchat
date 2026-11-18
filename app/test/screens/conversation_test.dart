@@ -179,11 +179,31 @@ void main() {
     expect((pending.kind, pending.targetId), ('reaction', 'm1'));
   });
 
+  chatTestWidgets('each of my messages in a run carries its ticks', (tester) async {
+    await open(tester, messages: [row('m1', 1, alice.userId, 'one'), row('m2', 2, alice.userId, 'two'), row('m3', 3, alice.userId, 'three')]);
+    expect(find.byKey(const Key('sent-icon')), findsNWidgets(3));
+    await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 2));
+    await settle(tester);
+    expect(find.byKey(const Key('read-icon')), findsNWidgets(2));
+    expect(find.byKey(const Key('sent-icon')), findsOneWidget);
+  });
+
+  chatTestWidgets('my messages before their last reply carry no ticks', (tester) async {
+    await open(tester, messages: [
+      row('m1', 1, alice.userId, 'one'),
+      row('m2', 2, alice.userId, 'two'),
+      row('m3', 3, bob.userId, 'reply'),
+      row('m4', 4, alice.userId, 'four'),
+    ]);
+    expect(find.byKey(const Key('sent-icon')), findsOneWidget);
+    expect(find.byKey(const Key('time-m1')), findsNothing);
+  });
+
   chatTestWidgets('one tick when sent, two once the other member read it', (tester) async {
-    await open(tester, messages: [row('m1', 1, alice.userId, 'did you see?'), row('m2', 2, bob.userId, 'yes')]);
+    await open(tester, messages: [row('m1', 1, bob.userId, 'hi'), row('m2', 2, alice.userId, 'did you see?')]);
     expect(find.byKey(const Key('sent-icon')), findsOneWidget);
     expect(find.byKey(const Key('read-icon')), findsNothing);
-    await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 1));
+    await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 2));
     await settle(tester);
     expect(find.byKey(const Key('sent-icon')), findsNothing);
     expect(find.byKey(const Key('read-icon')), findsOneWidget);

@@ -366,7 +366,9 @@ class _MessageBubbleState extends State<MessageBubble> {
     final fg = mine ? t.onMineBubble : t.onTheirsBubble;
     final meta = mine ? t.mineMeta : t.theirsMeta;
     final pending = m.state == 'pending';
-    final showTime = widget.lastInGroup || pending || m.state == 'failed';
+    // My sent messages each carry their ticks (with the time), as Telegram does; others' runs show
+    // the time once, under the last bubble.
+    final showTime = widget.lastInGroup || pending || m.state == 'failed' || widget.receipt != null;
 
     // "edited" stays in the bubble; the time goes under it (below).
     final showEdited = widget.edited && !widget.deleted;

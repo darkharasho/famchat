@@ -1028,8 +1028,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final others = members.where((m) => m.userId != me).toList();
+    // Ticks only on my messages since someone else last wrote: anything before their reply is read.
+    final lastOtherSeq = visible.fold<int>(0, (top, m) => m.senderUserId != me && (m.seq ?? 0) > top ? m.seq! : top);
     ReadReceipt? receiptFor(MessageRow m) {
-      if (m.senderUserId != me || m.seq == null) return null;
+      if (m.senderUserId != me || m.seq == null || m.seq! <= lastOtherSeq) return null;
       return ReadReceipt(readBy: others.where((o) => o.lastReadSeq >= m.seq!).length, of: others.length);
     }
 

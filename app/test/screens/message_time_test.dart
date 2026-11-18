@@ -154,6 +154,12 @@ void main() {
       expect(readIcon, findsNothing);
     });
 
+    testWidgets('every one of my sent messages shows its time and ticks, mid-run too', (tester) async {
+      await pumpBubble(tester, lastInGroup: false, receipt: const ReadReceipt(readBy: 0, of: 1));
+      expect(time, findsOneWidget);
+      expect(sentIcon, findsOneWidget);
+    });
+
     testWidgets("others' messages carry no ticks", (tester) async {
       await pumpBubble(tester, mine: false);
       expect(sentIcon, findsNothing);
