@@ -1,5 +1,6 @@
-// "Porch light": the named colors behind both themes. Screens never use these directly; they read
-// the ColorScheme or FamTokens built from them in app_theme.dart.
+// "Porch light": the named colors behind the default preset (presets.dart) and the brand (the mark,
+// the launch and signed-out screens). Screens never use these directly; they read the ColorScheme
+// or FamTokens app_theme.dart builds from the chosen preset.
 import 'dart:ui' show Color;
 
 abstract final class Palette {

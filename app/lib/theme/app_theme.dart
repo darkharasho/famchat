@@ -1,5 +1,7 @@
 // The one place FamChat's look is defined: colors, type, shapes and component defaults for the day
-// (light) and evening (dark) themes. See docs/superpowers/plans/2026-11-16-ui-design.md.
+// (light) and evening (dark) themes. The colours come from a ThemePreset (presets.dart); the rest
+// is the same in every preset. See docs/superpowers/plans/2026-11-16-ui-design.md and
+// docs/superpowers/specs/2026-11-18-colour-themes-design.md.
 import 'package:cupertino_ui/cupertino_ui.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/services.dart' show rootBundle;
@@ -7,6 +9,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'motion.dart';
 import 'palette.dart';
+import 'presets.dart';
 import 'tokens.dart';
 
 /// Headings, names, the wordmark.
@@ -30,83 +33,69 @@ void registerFontLicenses() {
   });
 }
 
-const _lightScheme = ColorScheme(
-  brightness: Brightness.light,
-  primary: Palette.dusk,
-  onPrimary: Color(0xFFFFFFFF),
-  primaryContainer: Color(0xFFE6E0F5),
-  onPrimaryContainer: Palette.dusk,
-  secondary: Palette.amberDeep,
-  onSecondary: Color(0xFFFFFFFF),
-  secondaryContainer: Palette.amber,
-  onSecondaryContainer: Palette.amberInk,
-  tertiary: Palette.hydrangea,
-  onTertiary: Color(0xFFFFFFFF),
-  tertiaryContainer: Palette.hydrangeaPale,
-  onTertiaryContainer: Color(0xFF1E1878),
-  error: Palette.error,
-  onError: Color(0xFFFFFFFF),
-  errorContainer: Color(0xFFFFDAD6),
-  onErrorContainer: Color(0xFF410002),
-  surface: Palette.lilac100,
-  onSurface: Palette.ink,
-  onSurfaceVariant: Palette.inkMuted,
-  surfaceDim: Palette.lilac400,
-  surfaceBright: Color(0xFFFFFFFF),
-  surfaceContainerLowest: Color(0xFFFFFFFF),
-  surfaceContainerLow: Palette.lilac50,
-  surfaceContainer: Palette.lilac200,
-  surfaceContainerHigh: Palette.lilac300,
-  surfaceContainerHighest: Palette.lilac400,
-  outline: Color(0xFF7D7590),
-  outlineVariant: Palette.lilacLine,
-  shadow: Color(0xFF000000),
-  scrim: Color(0xFF000000),
-  inverseSurface: Palette.dusk,
-  onInverseSurface: Color(0xFFF3EFFA),
-  inversePrimary: Palette.amber,
-  surfaceTint: Color(0x00000000),
-);
+/// The ColorScheme of [preset] (FamChat's own look by default) in brightness [b]. Error colours
+/// are the same in every preset.
+ColorScheme schemeFor(Brightness b, [ThemePreset preset = ThemePreset.fallback]) {
+  final dark = b == Brightness.dark;
+  final c = preset.colors(dark: dark);
+  return ColorScheme(
+    brightness: b,
+    primary: c.primary,
+    onPrimary: c.onPrimary,
+    primaryContainer: c.primaryContainer,
+    onPrimaryContainer: c.onPrimaryContainer,
+    secondary: c.secondary,
+    onSecondary: c.onSecondary,
+    secondaryContainer: c.secondaryContainer,
+    onSecondaryContainer: c.onSecondaryContainer,
+    tertiary: c.tertiary,
+    onTertiary: c.onTertiary,
+    tertiaryContainer: c.tertiaryContainer,
+    onTertiaryContainer: c.onTertiaryContainer,
+    error: dark ? Palette.errorNight : Palette.error,
+    onError: dark ? const Color(0xFF690005) : const Color(0xFFFFFFFF),
+    errorContainer: dark ? const Color(0xFF93000A) : const Color(0xFFFFDAD6),
+    onErrorContainer: dark ? const Color(0xFFFFDAD6) : const Color(0xFF410002),
+    surface: c.surface,
+    onSurface: c.onSurface,
+    onSurfaceVariant: c.onSurfaceVariant,
+    surfaceDim: c.surfaceDim,
+    surfaceBright: c.surfaceBright,
+    surfaceContainerLowest: c.surfaceContainerLowest,
+    surfaceContainerLow: c.surfaceContainerLow,
+    surfaceContainer: c.surfaceContainer,
+    surfaceContainerHigh: c.surfaceContainerHigh,
+    surfaceContainerHighest: c.surfaceContainerHighest,
+    outline: c.outline,
+    outlineVariant: c.outlineVariant,
+    shadow: const Color(0xFF000000),
+    scrim: const Color(0xFF000000),
+    inverseSurface: c.inverseSurface,
+    onInverseSurface: c.onInverseSurface,
+    inversePrimary: c.inversePrimary,
+    surfaceTint: const Color(0x00000000),
+  );
+}
 
-const _darkScheme = ColorScheme(
-  brightness: Brightness.dark,
-  primary: Palette.amberEvening,
-  onPrimary: Palette.amberInk,
-  primaryContainer: Color(0xFF3E3460),
-  onPrimaryContainer: Color(0xFFEDE6FF),
-  secondary: Palette.amberEvening,
-  onSecondary: Palette.amberInk,
-  secondaryContainer: Color(0xFF4A3A12),
-  onSecondaryContainer: Color(0xFFFFE0A3),
-  tertiary: Palette.hydrangeaNight,
-  onTertiary: Color(0xFF1E1878),
-  tertiaryContainer: Color(0xFF3A3490),
-  onTertiaryContainer: Color(0xFFE3E1FF),
-  error: Palette.errorNight,
-  onError: Color(0xFF690005),
-  errorContainer: Color(0xFF93000A),
-  onErrorContainer: Color(0xFFFFDAD6),
-  surface: Palette.night100,
-  onSurface: Palette.moon,
-  onSurfaceVariant: Palette.moonMuted,
-  surfaceDim: Palette.night50,
-  surfaceBright: Palette.night500,
-  surfaceContainerLowest: Palette.night50,
-  surfaceContainerLow: Palette.night200,
-  surfaceContainer: Palette.night300,
-  surfaceContainerHigh: Palette.night400,
-  surfaceContainerHighest: Palette.night500,
-  outline: Color(0xFF91889F),
-  outlineVariant: Palette.nightLine,
-  shadow: Color(0xFF000000),
-  scrim: Color(0xFF000000),
-  inverseSurface: Palette.moon,
-  onInverseSurface: Palette.ink,
-  inversePrimary: Palette.dusk,
-  surfaceTint: Color(0x00000000),
-);
-
-ColorScheme schemeFor(Brightness b) => b == Brightness.dark ? _darkScheme : _lightScheme;
+/// The chat colours of [preset] in brightness [b]. Presence is the same in every preset; the
+/// unread badge wears the own-message colour, and their messages use the body and muted inks.
+FamTokens tokensFor(Brightness b, [ThemePreset preset = ThemePreset.fallback]) {
+  final dark = b == Brightness.dark;
+  final c = preset.colors(dark: dark);
+  return FamTokens(
+    mineBubble: c.mineBubble,
+    onMineBubble: c.onMineBubble,
+    mineMeta: c.mineMeta,
+    theirsBubble: c.theirsBubble,
+    onTheirsBubble: c.onSurface,
+    theirsMeta: c.onSurfaceVariant,
+    theirsBorder: c.theirsBorder,
+    chatBackdrop: c.chatBackdrop,
+    presence: dark ? Palette.fernNight : Palette.fern,
+    badge: c.mineBubble,
+    onBadge: c.onMineBubble,
+  );
+}
 
 TextTheme _textTheme(ColorScheme s) {
   TextStyle display(double size, FontWeight w, {double height = 1.2, double spacing = 0}) => TextStyle(
@@ -153,11 +142,12 @@ const _transitions = PageTransitionsTheme(builders: {
   TargetPlatform.macOS: ReducedMotionTransitionsBuilder(CupertinoPageTransitionsBuilder()),
 });
 
-ThemeData buildTheme(Brightness brightness) {
-  final s = schemeFor(brightness);
+/// The whole theme for [preset] (FamChat's own look by default) in [brightness].
+ThemeData buildTheme(Brightness brightness, [ThemePreset preset = ThemePreset.fallback]) {
+  final s = schemeFor(brightness, preset);
   final dark = brightness == Brightness.dark;
   final text = _textTheme(s);
-  final tokens = dark ? FamTokens.dark : FamTokens.light;
+  final tokens = tokensFor(brightness, preset);
   final pill = WidgetStatePropertyAll<OutlinedBorder>(const StadiumBorder());
   const buttonSize = WidgetStatePropertyAll(Size(64, 48));
   const buttonPadding = WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: Space.xl, vertical: Space.md));
