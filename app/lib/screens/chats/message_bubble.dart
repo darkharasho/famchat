@@ -63,6 +63,17 @@ class QuotedMessage {
   final String id, sender, snippet;
 }
 
+/// How many of the chat's other members have read one of my sent messages.
+class ReadReceipt {
+  const ReadReceipt({required this.readBy, required this.of});
+  final int readBy, of;
+
+  /// Two ticks once anyone has read it (as Telegram does in groups); one while nobody has.
+  bool get read => readBy > 0;
+
+  String get label => !read ? 'Sent' : (of <= 1 || readBy >= of ? 'Read' : 'Read by $readBy of $of');
+}
+
 /// One message: bubble, sender (groups), time, delivery state and reaction chips.
 class MessageBubble extends StatefulWidget {
   const MessageBubble({
@@ -74,7 +85,7 @@ class MessageBubble extends StatefulWidget {
     required this.myUserId,
     required this.onReact,
     required this.onRetry,
-    this.footer,
+    this.receipt,
     this.firstInGroup = true,
     this.lastInGroup = true,
     this.avatar,
@@ -108,8 +119,8 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<String> onReact;
   final VoidCallback onRetry;
 
-  /// E.g. "Seen".
-  final String? footer;
+  /// My sent messages: one tick, or two once read, beside the time. Null for others' messages.
+  final ReadReceipt? receipt;
 
   /// Where this bubble sits in a run from one sender (see timeline.dart).
   final bool firstInGroup, lastInGroup;
@@ -379,6 +390,18 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (pending) ...[
           const SizedBox(width: 4),
           Icon(Icons.schedule_rounded, key: const Key('pending-icon'), size: 13, color: dim, semanticLabel: 'Sending'),
+        ] else if (widget.receipt case final r? when m.state != 'failed') ...[
+          const SizedBox(width: 3),
+          Tooltip(
+            message: r.label,
+            child: Icon(
+              r.read ? Icons.done_all_rounded : Icons.done_rounded,
+              key: Key(r.read ? 'read-icon' : 'sent-icon'),
+              size: 15,
+              color: r.read ? scheme.primary : dim,
+              semanticLabel: r.label,
+            ),
+          ),
         ],
       ]),
     );
@@ -536,15 +559,6 @@ class _MessageBubbleState extends State<MessageBubble> {
                   ),
                   label: const Text('Not sent. Tap to retry'),
                 ),
-              ),
-            if (widget.footer != null)
-              Padding(
-                padding: const EdgeInsets.only(top: Space.xs, right: Space.xs),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.done_all_rounded, size: 14, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 4),
-                  Text(widget.footer!, style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
-                ]),
               ),
           ],
         ),

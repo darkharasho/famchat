@@ -157,6 +157,7 @@ void main() {
     hub.emit({'type': 'ack', 'id': pending.id, 'seq': 1, 'createdAt': 5});
     await settle(tester);
     expect(find.byKey(const Key('pending-icon')), findsNothing);
+    expect(find.byKey(const Key('sent-icon')), findsOneWidget);
   });
 
   chatTestWidgets('incoming message appears and is marked read', (tester) async {
@@ -178,12 +179,14 @@ void main() {
     expect((pending.kind, pending.targetId), ('reaction', 'm1'));
   });
 
-  chatTestWidgets('Seen appears once the other member read it', (tester) async {
-    await open(tester, messages: [row('m1', 1, alice.userId, 'did you see?')]);
-    expect(find.text('Seen'), findsNothing);
+  chatTestWidgets('one tick when sent, two once the other member read it', (tester) async {
+    await open(tester, messages: [row('m1', 1, alice.userId, 'did you see?'), row('m2', 2, bob.userId, 'yes')]);
+    expect(find.byKey(const Key('sent-icon')), findsOneWidget);
+    expect(find.byKey(const Key('read-icon')), findsNothing);
     await inApp(tester, () => alice.db.setMemberRead(chatId, bob.userId, 1));
     await settle(tester);
-    expect(find.text('Seen'), findsOneWidget);
+    expect(find.byKey(const Key('sent-icon')), findsNothing);
+    expect(find.byKey(const Key('read-icon')), findsOneWidget);
   });
 
   chatTestWidgets('typing indicator shows the other member', (tester) async {

@@ -1028,15 +1028,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final others = members.where((m) => m.userId != me).toList();
-    // Game cards carry no footer, so a game row never takes the Seen line.
-    final lastMineSent =
-        visible.lastWhere((m) => m.senderUserId == me && m.seq != null && m.kind != 'game' && m.kind != 'move', orElse: () => _none).id;
-    String? seenFooter(MessageRow m) {
-      if (m.id != lastMineSent || others.isEmpty) return null;
-      final seen = others.where((o) => o.lastReadSeq >= m.seq!).length;
-      if (seen == 0) return null;
-      if (seen == others.length) return 'Seen';
-      return 'Seen by $seen';
+    ReadReceipt? receiptFor(MessageRow m) {
+      if (m.senderUserId != me || m.seq == null) return null;
+      return ReadReceipt(readBy: others.where((o) => o.lastReadSeq >= m.seq!).length, of: others.length);
     }
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
@@ -1088,7 +1082,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 myUserId: me,
                 onReact: (e) => sync?.react(chatId, m.id, e),
                 onRetry: () => sync?.retry(m.id),
-                footer: seenFooter(m),
+                receipt: receiptFor(m),
                 firstInGroup: firstInGroup,
                 lastInGroup: lastInGroup,
                 avatarSpace: group ? avatarSpace : 0,
@@ -1384,17 +1378,3 @@ String resetBannerText(ResetRow r, Map<String, UserRow> users) {
   }
   return "$who's account was reset by ${users[r.signerUserId]?.name ?? 'an admin'}. Their old devices were signed out.";
 }
-
-final _none = MessageRow(
-  id: '',
-  chatId: '',
-  seq: null,
-  senderUserId: '',
-  senderDeviceId: '',
-  kind: '',
-  body: null,
-  targetId: null,
-  envelope: null,
-  createdAt: 0,
-  state: '',
-);
