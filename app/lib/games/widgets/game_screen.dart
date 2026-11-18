@@ -1,17 +1,16 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
+import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../chess_board.dart';
-import '../dots_and_boxes.dart';
 import '../game_state.dart';
 import '../providers.dart';
-import '../reversi.dart';
 import '../rules.dart';
 import 'board_view.dart';
 
@@ -69,32 +68,124 @@ GameViewer watchGameViewer(WidgetRef ref, String chatId) {
   );
 }
 
-/// Opens game [gameId]'s board: a full-screen route on narrow windows, a
-/// dialog (at most 560 wide) otherwise.
+/// Opens game [gameId]'s board as an overlay over the app, on every window
+/// size: what's behind is blurred and dimmed, and the board sits on a centred
+/// panel (at most 560 wide). Tapping outside the panel, back or the panel's
+/// close button closes it.
 Future<void> openGame(BuildContext context, String chatId, String gameId) {
-  final screen = GameScreen(chatId: chatId, gameId: gameId);
-  final size = MediaQuery.sizeOf(context);
-  if (size.width < 600) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(fullscreenDialog: true, builder: (_) => screen),
+  final theme = Theme.of(context);
+  final dark = theme.brightness == Brightness.dark;
+  return Navigator.of(context, rootNavigator: true).push<void>(
+    RawDialogRoute<void>(
+      barrierDismissible: true,
+      barrierLabel: 'Close',
+      barrierColor: theme.colorScheme.scrim.withValues(
+        alpha: dark ? 0.5 : 0.28,
+      ),
+      transitionDuration: Motion.of(context, Motion.medium),
+      pageBuilder: (context, _, _) => _GameOverlay(
+        child: GameScreen(chatId: chatId, gameId: gameId),
+      ),
+      transitionBuilder: _overlayTransition,
+    ),
+  );
+}
+
+/// How much the app behind the board overlay is blurred.
+const overlayBlurSigma = 14.0;
+
+/// Blurs what's behind as the panel fades, rises and grows in. With reduced
+/// motion the route has no duration, so it simply appears.
+Widget _overlayTransition(
+  BuildContext context,
+  Animation<double> animation,
+  Animation<double> secondaryAnimation,
+  Widget child,
+) {
+  final t = CurvedAnimation(
+    parent: animation,
+    curve: Motion.enter,
+    reverseCurve: Motion.exit,
+  );
+  return Stack(
+    fit: StackFit.expand,
+    children: [
+      // Never hit: taps outside the panel reach the route's barrier below.
+      IgnorePointer(
+        child: AnimatedBuilder(
+          animation: t,
+          builder: (context, _) {
+            final sigma = overlayBlurSigma * t.value;
+            return BackdropFilter(
+              key: const Key('game-overlay-blur'),
+              filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+              child: const SizedBox.expand(),
+            );
+          },
+        ),
+      ),
+      FadeTransition(
+        opacity: t,
+        child: SlideTransition(
+          position: Tween(
+            begin: const Offset(0, 0.03),
+            end: Offset.zero,
+          ).animate(t),
+          child: ScaleTransition(
+            scale: Tween(begin: 0.95, end: 1.0).animate(t),
+            child: child,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Centres the board panel in the safe area, with a small side margin on
+/// phones so the board gets most of the width. Only the panel takes taps.
+class _GameOverlay extends StatelessWidget {
+  const _GameOverlay({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = MediaQuery.sizeOf(context).width < 600;
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: phone ? Space.md : Space.xl,
+            vertical: Space.xl,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560, maxHeight: 760),
+            child: child,
+          ),
+        ),
+      ),
     );
   }
-  return showDialog<void>(
-    context: context,
-    builder: (context) {
-      final s = MediaQuery.sizeOf(context);
-      return Dialog(
-        clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: 560,
-            maxHeight: math.min(s.height - 48, 760),
-          ),
-          child: screen,
-        ),
-      );
-    },
-  );
+}
+
+/// Whether [g] offers Rematch: it's over, mine, the chat is writable and it is
+/// the chat's newest game that started (inert ones never did).
+bool canRematch(List<GameState> games, GameState g, GameViewer viewer) {
+  final me = viewer.me;
+  final mine = g.firstUserId == me || g.secondUserId == me;
+  final newest = games.lastWhere((x) => !x.inert, orElse: () => g);
+  return g.over && !viewer.readOnly && mine && newest.id == g.id;
+}
+
+/// Starts a new game of [g]'s kind where whoever went second goes first, and
+/// returns its id. If a game is already running (the other player's rematch
+/// got there first), returns that one's instead. Null when offline.
+Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
+  final sync = ref.read(chatSyncProvider);
+  if (sync == null) return null;
+  final active = activeGame(ref.read(gamesProvider(chatId)));
+  if (active != null) return active.id;
+  return sync.startGame(chatId, g.type, first: g.secondUserId);
 }
 
 const _reasons = {
@@ -109,17 +200,14 @@ const _reasons = {
 
 /// The final score of a game won or drawn on points, winner's first ("32–28").
 String? _finalScore(Board b, Outcome o) {
-  final (int, int)? s = switch (b) {
-    ReversiBoard() => b.counts,
-    DotsAndBoxesBoard() => b.scores,
-    _ => null,
-  };
+  final s = boardScore(b);
   if (s == null) return null;
   final (a, c) = o.winner == Side.second ? (s.$2, s.$1) : s;
   return '$a–$c';
 }
 
-/// A game's board, live: plays, resignation and draw offers.
+/// A game's board panel, live: plays, resignation, draw offers and Rematch.
+/// [openGame] shows it over the conversation.
 class GameScreen extends ConsumerStatefulWidget {
   const GameScreen({super.key, required this.chatId, required this.gameId});
 
@@ -131,10 +219,11 @@ class GameScreen extends ConsumerStatefulWidget {
 
 class _GameScreenState extends ConsumerState<GameScreen> {
   /// The game shown: [GameScreen.gameId] until the user opens the running
-  /// game from an inert one.
+  /// game from an inert one, or starts a rematch.
   late String _gameId = widget.gameId;
 
-  /// A draw answer, resignation or draw offer is being confirmed or sent.
+  /// A draw answer, resignation, draw offer or rematch is being confirmed or
+  /// sent.
   var _busy = false;
 
   @override
@@ -176,6 +265,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       g.ply,
       {'type': type},
     );
+  });
+
+  /// Starts a rematch (or switches to the game already running) in place.
+  Future<void> _rematch(GameState g) => _guard(() async {
+    final id = await startRematch(ref, widget.chatId, g);
+    if (id != null && mounted) setState(() => _gameId = id);
   });
 
   Future<void> _confirm(
@@ -226,20 +321,25 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           ref.watch(chatProvider(widget.chatId)).hasValue &&
           ref.watch(messagesProvider(widget.chatId)).hasValue &&
           ref.watch(membersProvider(widget.chatId)).hasValue;
-      return Scaffold(
-        appBar: AppBar(),
-        body: Center(
-          child: loaded
-              ? Text(
-                  "This game isn't available",
-                  key: const Key('game-unavailable'),
-                  style: theme.textTheme.bodyLarge,
-                )
-              : const SizedBox.square(
-                  dimension: 32,
-                  child: CircularProgressIndicator(),
-                ),
-        ),
+      return _Panel(
+        title: 'Game',
+        children: [
+          SizedBox(
+            height: 160,
+            child: Center(
+              child: loaded
+                  ? Text(
+                      "This game isn't available",
+                      key: const Key('game-unavailable'),
+                      style: theme.textTheme.bodyLarge,
+                    )
+                  : const SizedBox.square(
+                      dimension: 32,
+                      child: CircularProgressIndicator(),
+                    ),
+            ),
+          ),
+        ],
       );
     }
     final running = g.inert ? activeGame(games) : null;
@@ -267,171 +367,233 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       }
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(g.type.title),
-        actions: [
-          if (live)
-            PopupMenuButton<String>(
-              enabled: !_busy,
-              tooltip: 'Game options',
-              onSelected: (v) => switch (v) {
-                'resign' => _confirm(
-                  g,
-                  title: 'Resign?',
-                  body: '${viewer.nameOf(opponent)} wins this game.',
-                  action: 'Resign',
-                  move: const {'type': 'resign'},
+    return _Panel(
+      title: g.type.title,
+      subtitle: mySide == null ? null : 'with ${viewer.nameOf(opponent)}',
+      actions: [
+        if (live)
+          PopupMenuButton<String>(
+            enabled: !_busy,
+            tooltip: 'Game options',
+            icon: const Icon(Icons.more_horiz_rounded),
+            onSelected: (v) => switch (v) {
+              'resign' => _confirm(
+                g,
+                title: 'Resign?',
+                body: '${viewer.nameOf(opponent)} wins this game.',
+                action: 'Resign',
+                move: const {'type': 'resign'},
+              ),
+              _ => _confirm(
+                g,
+                title: 'Offer a draw?',
+                body: '${viewer.nameOf(opponent)} can accept or decline.',
+                action: 'Offer draw',
+                move: const {'type': 'draw_offer'},
+              ),
+            },
+            itemBuilder: (context) => [
+              if (g.board.drawOffers && offeredBy == null)
+                const PopupMenuItem(value: 'draw', child: Text('Offer draw')),
+              const PopupMenuItem(value: 'resign', child: Text('Resign')),
+            ],
+          ),
+      ],
+      children: [
+        if (live && offeredBy != null && offeredBy != me)
+          _Banner(
+            key: const Key('draw-offer'),
+            text: '${viewer.nameOf(offeredBy)} offers a draw',
+            actions: [
+              TextButton(
+                onPressed: _busy ? null : () => _answer(g, 'draw_decline'),
+                child: const Text('Decline'),
+              ),
+              TextButton(
+                onPressed: _busy ? null : () => _answer(g, 'draw_accept'),
+                child: const Text('Accept'),
+              ),
+            ],
+          ),
+        if (running != null)
+          _Banner(
+            key: const Key('game-running'),
+            text: 'A game is already running',
+            actions: [
+              TextButton(
+                onPressed: () => setState(() => _gameId = running.id),
+                child: const Text('Open'),
+              ),
+            ],
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+          child: Text(
+            status,
+            key: const Key('game-status'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: myTurn ? theme.colorScheme.tertiary : null,
+              fontWeight: myTurn ? FontWeight.w600 : null,
+            ),
+          ),
+        ),
+        // The board takes the panel's width, or less when the window is short.
+        Flexible(
+          child: Padding(
+            padding: const EdgeInsets.all(Space.lg),
+            child: Align(
+              heightFactor: 1,
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: BoardView(
+                  board: g.board,
+                  mySide: mySide,
+                  enabled: myTurn,
+                  initials: (
+                    viewer.initialOf(g.firstUserId),
+                    viewer.initialOf(g.secondUserId),
+                  ),
+                  names: (
+                    viewer.nameOf(g.firstUserId),
+                    viewer.nameOf(g.secondUserId),
+                  ),
+                  onPlay: (m) => _send(g, {'type': 'play', ...m}),
                 ),
-                _ => _confirm(
-                  g,
-                  title: 'Offer a draw?',
-                  body: '${viewer.nameOf(opponent)} can accept or decline.',
-                  action: 'Offer draw',
-                  move: const {'type': 'draw_offer'},
+              ),
+            ),
+          ),
+        ),
+        if (canRematch(games, g, viewer))
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.lg),
+            child: Center(
+              child: FilledButton.tonalIcon(
+                key: const Key('game-rematch'),
+                onPressed: _busy ? null : () => _rematch(g),
+                icon: const Icon(Icons.replay_rounded),
+                label: const Text('Rematch'),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The board overlay's card: a header with [title], [subtitle], [actions]
+/// and a close button, then [children] in a column only as tall as needed.
+class _Panel extends StatelessWidget {
+  const _Panel({
+    required this.title,
+    this.subtitle,
+    this.actions = const [],
+    required this.children,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<Widget> actions;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    return Material(
+      key: const Key('game-panel'),
+      color: s.surfaceContainerLow,
+      elevation: 12,
+      shadowColor: s.shadow.withValues(alpha: 0.4),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        side: BorderSide(color: s.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.sm, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleLarge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (subtitle != null)
+                        Text(
+                          subtitle!,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: s.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
-              },
-              itemBuilder: (context) => [
-                if (g.board.drawOffers && offeredBy == null)
-                  const PopupMenuItem(value: 'draw', child: Text('Offer draw')),
-                const PopupMenuItem(value: 'resign', child: Text('Resign')),
+                ...actions,
+                IconButton(
+                  key: const Key('game-close'),
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.maybePop(context),
+                ),
               ],
             ),
+          ),
+          ...children,
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (live && offeredBy != null && offeredBy != me)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Space.lg,
-                  Space.sm,
-                  Space.lg,
-                  0,
-                ),
-                child: Material(
-                  key: const Key('draw-offer'),
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(Radii.md),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.lg,
-                      Space.xs,
-                      Space.xs,
-                      Space.xs,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${viewer.nameOf(offeredBy)} offers a draw',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSecondaryContainer,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _answer(g, 'draw_decline'),
-                          child: const Text('Decline'),
-                        ),
-                        TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _answer(g, 'draw_accept'),
-                          child: const Text('Accept'),
-                        ),
-                      ],
-                    ),
+    );
+  }
+}
+
+/// A notice inside the panel with its own buttons (a draw offer, a running
+/// game).
+class _Banner extends StatelessWidget {
+  const _Banner({super.key, required this.text, required this.actions});
+
+  final String text;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+      child: Material(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(Radii.md),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Space.lg,
+            Space.xs,
+            Space.xs,
+            Space.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  text,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSecondaryContainer,
                   ),
                 ),
               ),
-            if (running != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Space.lg,
-                  Space.sm,
-                  Space.lg,
-                  0,
-                ),
-                child: Material(
-                  key: const Key('game-running'),
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(Radii.md),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.lg,
-                      Space.xs,
-                      Space.xs,
-                      Space.xs,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'A game is already running',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSecondaryContainer,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => setState(() => _gameId = running.id),
-                          child: const Text('Open'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.lg,
-                Space.md,
-                Space.lg,
-                0,
-              ),
-              child: Text(
-                status,
-                key: const Key('game-status'),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: myTurn ? theme.colorScheme.tertiary : null,
-                ),
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(Space.lg),
-                child: LayoutBuilder(
-                  builder: (context, box) {
-                    final side = math.min(box.maxWidth, box.maxHeight);
-                    return Center(
-                      child: SizedBox.square(
-                        dimension: side,
-                        child: BoardView(
-                          board: g.board,
-                          mySide: mySide,
-                          enabled: myTurn,
-                          initials: (
-                            viewer.initialOf(g.firstUserId),
-                            viewer.initialOf(g.secondUserId),
-                          ),
-                          names: (
-                            viewer.nameOf(g.firstUserId),
-                            viewer.nameOf(g.secondUserId),
-                          ),
-                          onPlay: (m) => _send(g, {'type': 'play', ...m}),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ],
+              ...actions,
+            ],
+          ),
         ),
       ),
     );

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show ImageFilter;
 
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
@@ -132,7 +133,10 @@ void main() {
     final card = find.byType(GameCard);
     expect(card, findsOneWidget);
     expect(
-      find.descendant(of: card, matching: find.text('Tic-tac-toe')),
+      find.descendant(
+        of: card,
+        matching: find.text('✕ Tic-tac-toe', findRichText: true),
+      ),
       findsOneWidget,
     );
     expect(
@@ -391,13 +395,7 @@ void main() {
     tester,
   ) async {
     await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
-    unawaited(
-      Navigator.of(tester.element(find.byType(GameCard))).push<void>(
-        MaterialPageRoute(
-          builder: (_) => const GameScreen(chatId: chatId, gameId: 'gone'),
-        ),
-      ),
-    );
+    unawaited(openGame(tester.element(find.byType(GameCard)), chatId, 'gone'));
     await settle(tester);
     expect(find.text("This game isn't available"), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -532,14 +530,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(
-      tester.widget<Text>(find.byKey(const Key('name-first'))).data,
-      'You',
+    Text inScreen(String key) => tester.widget<Text>(
+      find.descendant(of: screen, matching: find.byKey(Key(key))),
     );
-    expect(
-      tester.widget<Text>(find.byKey(const Key('name-second'))).data,
-      'Bob',
-    );
+    expect(inScreen('name-first').data, 'You');
+    expect(inScreen('name-second').data, 'Bob');
   });
 
   chatTestWidgets('inert game card says Game not started', (tester) async {
@@ -554,7 +549,229 @@ void main() {
     expect(find.text('Your turn'), findsOneWidget);
   });
 
-  chatTestWidgets('a wide window opens the board in a dialog', (tester) async {
+  final blur = find.byKey(const Key('game-overlay-blur'));
+  final panel = find.byKey(const Key('game-panel'));
+
+  chatTestWidgets('on a phone the board opens as a blurred overlay', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    await openBoard(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+    expect(
+      tester.widget<BackdropFilter>(blur).filter,
+      ImageFilter.blur(sigmaX: overlayBlurSigma, sigmaY: overlayBlurSigma),
+    );
+    // The conversation stays underneath, not replaced by a page.
+    expect(find.byType(GameCard, skipOffstage: false), findsOneWidget);
+    expect(find.text('Chess'), findsOneWidget);
+    expect(find.text('with Bob'), findsOneWidget);
+    // The board fills the panel's width, less its margins.
+    final p = tester.getRect(panel);
+    expect(p.width, greaterThan(360));
+    final board = tester.getSize(
+      find.descendant(of: panel, matching: find.byType(BoardView)),
+    );
+    expect(board.width, closeTo(p.width - 32, 0.5));
+    expect(board.height, closeTo(board.width, 0.5));
+  });
+
+  chatTestWidgets('tapping outside the panel closes the overlay', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    await openBoard(tester);
+    final p = tester.getRect(panel);
+    await tester.tapAt(Offset(p.center.dx, p.top - 8));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsNothing);
+    expect(blur, findsNothing);
+  });
+
+  chatTestWidgets('taps and drags on the panel keep the overlay open', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [game('g1', GameType.tictactoe, alice.userId)],
+    );
+    await openBoard(tester);
+    // The panel's own padding, the status line and the board.
+    final p = tester.getRect(panel);
+    await tester.tapAt(p.bottomCenter + const Offset(0, -4));
+    await tester.tap(find.byKey(const Key('game-status')));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+    final square = find.descendant(
+      of: panel,
+      matching: find.byKey(const Key('sq-4')),
+    );
+    // A drag from the board that ends outside the panel isn't an outside tap.
+    await tester.dragFrom(tester.getCenter(square), const Offset(0, 400));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+    await tester.tap(square);
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+    expect((await outbox(tester)).single['action'], {
+      'type': 'play',
+      'cell': 4,
+    });
+  });
+
+  chatTestWidgets('the close button and back close the overlay', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    await openBoard(tester);
+    await tester.tap(find.byTooltip('Close'));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsNothing);
+
+    await tester.tap(find.byKey(const Key('game-bar')));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+    expect(find.byType(GameScreen), findsNothing);
+    // Back closed the overlay only, not the conversation.
+    expect(find.byType(GameCard), findsOneWidget);
+  });
+
+  chatTestWidgets('the barrier is labelled Close for screen readers', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    await openBoard(tester);
+    final barrier = tester.widget<AnimatedModalBarrier>(
+      find.byType(AnimatedModalBarrier).last,
+    );
+    expect(barrier.semanticsLabel, 'Close');
+    expect(barrier.dismissible, isTrue);
+  });
+
+  chatTestWidgets('with reduced motion the overlay appears at once', (
+    tester,
+  ) async {
+    await open(tester, messages: [game('g1', GameType.chess, alice.userId)]);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pump();
+    await tester.tap(find.byType(GameCard));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester
+          .widget<FadeTransition>(
+            find
+                .ancestor(of: panel, matching: find.byType(FadeTransition))
+                .first,
+          )
+          .opacity
+          .value,
+      1,
+    );
+    await settle(tester);
+  });
+
+  chatTestWidgets('Rematch on a finished board starts the next game in place', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    await openBoard(tester);
+    await tester.tap(find.byKey(const Key('game-rematch')));
+    await settle(tester);
+    expect((await outbox(tester)).single, {
+      'kind': 'game',
+      'game': 'tictactoe',
+      'first': bob.userId,
+    });
+    expect(find.byType(GameScreen), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('game-status'))).data,
+      "Bob's turn",
+    );
+    expect(find.byKey(const Key('game-rematch')), findsNothing);
+  });
+
+  chatTestWidgets('the card shows a readable board, players and score', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.reversi, alice.userId),
+        move(alice.userId, 'g1', GameType.reversi, 0, {
+          'type': 'play',
+          'cell': 20,
+        }),
+      ],
+    );
+    final card = find.byType(GameCard);
+    final board = tester.getSize(
+      find.descendant(
+        of: card,
+        matching: find.byKey(const Key('game-card-board')),
+      ),
+    );
+    expect(board.width, greaterThanOrEqualTo(280));
+    expect(board.width, lessThanOrEqualTo(GameCard.maxWidth));
+    expect(board.height, closeTo(board.width, 0.5));
+    expect(
+      find.descendant(of: card, matching: find.byKey(const Key('name-first'))),
+      findsOneWidget,
+    );
+    Text inCard(String key) => tester.widget<Text>(
+      find.descendant(of: card, matching: find.byKey(Key(key))),
+    );
+    expect(inCard('name-first').data, 'You');
+    expect(inCard('name-second').data, 'Bob');
+    expect(inCard('count-first').data, '4');
+    expect(inCard('count-second').data, '1');
+    expect(
+      find.descendant(of: card, matching: find.text("Bob's turn")),
+      findsOneWidget,
+    );
+  });
+
+  chatTestWidgets('a Four in a Row card keeps its board shape', (tester) async {
+    await open(
+      tester,
+      size: const Size(1200, 900),
+      messages: [game('g1', GameType.fourinarow, alice.userId)],
+    );
+    final board = tester.getSize(find.byKey(const Key('game-card-board')));
+    expect(board.width / board.height, closeTo(7 / 6, 0.01));
+    expect(board.width, lessThanOrEqualTo(GameCard.maxWidth));
+  });
+
+  chatTestWidgets('an inert card is dimmed', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.chess, alice.userId),
+        game('g2', GameType.checkers, bob.userId),
+      ],
+    );
+    double opacityOf(String text) => tester
+        .widget<Opacity>(
+          find
+              .ancestor(of: find.text(text), matching: find.byType(Opacity))
+              .first,
+        )
+        .opacity;
+    expect(opacityOf('Game not started'), 0.5);
+    expect(opacityOf('Your turn'), 1);
+  });
+
+  chatTestWidgets('a wide window opens the same overlay', (tester) async {
     await open(
       tester,
       size: const Size(1200, 900),
@@ -562,10 +779,7 @@ void main() {
     );
     await openBoard(tester);
     final screen = find.byType(GameScreen);
-    expect(
-      find.ancestor(of: screen, matching: find.byType(Dialog)),
-      findsOneWidget,
-    );
+    expect(blur, findsOneWidget);
     expect(tester.getSize(screen).width, lessThanOrEqualTo(560));
     final board = tester.getSize(
       find.descendant(of: screen, matching: find.byType(BoardView)),
