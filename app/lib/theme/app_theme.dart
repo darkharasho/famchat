@@ -22,6 +22,7 @@ void registerFontLicenses() {
     for (final (family, file) in const [
       ('Familjen Grotesk', 'assets/fonts/OFL-FamiljenGrotesk.txt'),
       ('Atkinson Hyperlegible Next', 'assets/fonts/OFL-AtkinsonHyperlegibleNext.txt'),
+      ('Noto Sans Symbols 2', 'assets/fonts/OFL-NotoSansSymbols2.txt'),
     ]) {
       yield LicenseEntryWithLineBreaks([family], await rootBundle.loadString(file));
     }

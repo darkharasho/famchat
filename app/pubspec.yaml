@@ -116,9 +116,10 @@ flutter:
     - assets/spike/
     - assets/fonts/OFL-FamiljenGrotesk.txt
     - assets/fonts/OFL-AtkinsonHyperlegibleNext.txt
+    - assets/fonts/OFL-NotoSansSymbols2.txt
     - assets/spelling/
 
-  # Bundled, never fetched at runtime. Both are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
+  # Bundled, never fetched at runtime. All are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
   fonts:
     - family: FamiljenGrotesk
       fonts:
@@ -139,6 +140,9 @@ flutter:
           weight: 500
         - asset: assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf
           weight: 700
+    - family: NotoSansSymbols2
+      fonts:
+        - asset: assets/fonts/NotoSansSymbols2-Regular.ttf
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
