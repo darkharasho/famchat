@@ -255,7 +255,7 @@ class MediaService {
     String chatId,
     String messageId,
     Future<FetchedPreview?> fetch, {
-    Duration wait = const Duration(minutes: 1),
+    Duration wait = const Duration(seconds: 15),
   }) async {
     final FetchedPreview? fetched;
     try {
@@ -263,11 +263,22 @@ class MediaService {
     } catch (_) {
       return null; // offline, the site said no, or too slow
     }
-    if (fetched == null || _stopped || !await sync.canAttachPreview(chatId, messageId, fetched.url)) return null;
-    final editId = newUlid();
-    final sent = await sync.attachPreview(chatId, messageId, await _linkPreview(chatId, editId, fetched), id: editId);
-    if (sent == null) await db.deleteUploadsFor(editId); // the message changed while the image was made
-    return sent;
+    // Signing out (which closes the databases) may have happened during the wait.
+    if (fetched == null || _stopped) return null;
+    try {
+      if (!await sync.canAttachPreview(chatId, messageId, fetched.url)) return null;
+      final editId = newUlid();
+      final preview = await _linkPreview(chatId, editId, fetched);
+      // attachPreview checks the message again (in the sync queue) just before queueing the edit.
+      final sent = _stopped ? null : await sync.attachPreview(chatId, messageId, preview, id: editId);
+      if (sent == null && !_stopped) await db.deleteUploadsFor(editId); // the message changed meanwhile
+      return sent;
+    } catch (e, st) {
+      // Callers don't wait for this, so nothing else would see the failure.
+      // ignore: avoid_print
+      print('late link preview: $e\n$st');
+      return null;
+    }
   }
 
   /// [fetched] as a message's preview: its image (when it decodes) becomes an encrypted thumbnail

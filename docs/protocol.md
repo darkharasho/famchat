@@ -96,7 +96,8 @@ Edits and deletes are messages too, and count only when their sender is the targ
 
 ```
 {"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages; the latest edit wins
-                                                        (with "previewOnly": true, a late link preview: "Link previews")
+                                                        (with "previewOnly": true, a late link preview: "Link previews";
+                                                        those never count when picking the latest edit)
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
@@ -113,8 +114,9 @@ blob (its own media key, purpose `thumb`), uploaded before the message is sent, 
 contact the site. A preview that doesn't check out is dropped and the text shows as usual.
 
 A text sent before its preview was ready (say, a link pasted and sent at once) gets it afterwards:
-the sender's app keeps the fetch going after the send (it doesn't survive a restart) and, when a
-preview comes, sends a preview-only edit:
+the sender's app keeps the fetch going after the send for up to 15 seconds (it doesn't survive a
+restart) and, when a preview comes, checks again that the message isn't deleted and still shows
+that text and link, then sends a preview-only edit:
 `{"kind":"edit", "target":"<messageId>", "text":"<the text as it stands>", "previewOnly": true,
 "preview": {…as above}}`. Its image is a `thumb` blob uploaded under the edit's message id. It counts
 only when sent by the target's sender, while `text` equals the text the target shows at that point
@@ -122,7 +124,10 @@ only when sent by the target's sender, while `text` equals the text the target s
 doesn't change the text or mark the message edited. Nothing is attached when the user removed the
 preview in the composer, or the message was deleted, edited to drop the link, or already has a
 preview. It's sent `silent` like any edit. Clients from before this read it as a plain edit to the
-same text (an "edited" mark, no card).
+same text (an "edited" mark, no card). Remaining risk for them: if the user edits the message on
+another device while the preview is on its way, a preview edit carrying the old text can still
+arrive after that edit, and an old client (latest edit wins) then shows the old text again. The
+15-second limit and the re-check keep that window small; current clients ignore such a stale edit.
 
 - `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?}`,
   or 404 when there's nothing to show. The app asks while a link is being typed. YouTube links use

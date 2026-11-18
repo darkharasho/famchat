@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
@@ -11,9 +12,13 @@ import 'package:famchat/media/video.dart';
 class FakeProcessor implements PhotoProcessor {
   int calls = 0;
 
+  /// While set, processing waits for it (after counting the call).
+  Completer<void>? hold;
+
   @override
   Future<ProcessedPhoto> process(Uint8List original) async {
     calls++;
+    await hold?.future;
     if (original.length >= 2 && original[0] == 0xff && original[1] == 0x00) throw const UnsupportedImageException();
     return ProcessedPhoto(
       full: original,

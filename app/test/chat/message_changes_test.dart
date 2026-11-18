@@ -154,6 +154,19 @@ void main() {
       expect(c.textOf(rows.first), link);
     });
 
+    test('a stale preview edit (old text) after a real edit is ignored: the edit stands', () {
+      final rows = [
+        row('a', const TextBody(link), id: 't'),
+        row('a', const EditBody('t', '$link wow')),
+        row('a', late('t', link)), // higher seq, carrying the text from before the edit
+      ];
+      expect(rows[2].seq! > rows[1].seq!, isTrue);
+      final c = messageChanges(rows);
+      expect(c.textOf(rows.first), '$link wow');
+      expect(c.previewOf(rows.first), isNull);
+      expect(c.edited, {'t'});
+    });
+
     test('it follows edits: matches the latest text, and goes when an edit drops the link', () {
       final edited = [
         row('a', const TextBody(link), id: 't'),
