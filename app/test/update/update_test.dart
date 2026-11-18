@@ -177,12 +177,22 @@ void main() {
   });
 
   group('UpdateController', () {
-    ProviderContainer container(UpdatePlatform platform, {String body = '', int status = 200, List<Uri>? opened}) {
+    setUpAll(TestWidgetsFlutterBinding.ensureInitialized);
+
+    ProviderContainer container(
+      UpdatePlatform platform, {
+      String body = '',
+      int status = 200,
+      List<Uri>? opened,
+      DateTime Function()? now,
+      List<int>? requests,
+    }) {
       final c = ProviderContainer(overrides: [
         updateConfigProvider.overrideWithValue(UpdateConfig(
           currentVersion: '1.0.1',
           platform: platform,
           newClient: () => MockClient((req) async {
+            requests?.add(1);
             expect(req.url, latestReleaseUrl);
             return http.Response(body, status);
           }),
@@ -191,6 +201,7 @@ void main() {
             return true;
           },
           firstCheckDelay: const Duration(days: 1),
+          now: now ?? DateTime.now,
         )),
       ]);
       addTearDown(c.dispose);
@@ -255,6 +266,39 @@ void main() {
     test('checks soon after launch', () {
       expect(const UpdateConfig(currentVersion: '1', platform: _NoPlatform(), newClient: _noClient, openUrl: _noOpen)
           .firstCheckDelay, lessThanOrEqualTo(const Duration(seconds: 3)));
+    });
+
+    test('checks every 30 minutes', () {
+      expect(const UpdateConfig(currentVersion: '1', platform: _NoPlatform(), newClient: _noClient, openUrl: _noOpen)
+          .checkEvery, const Duration(minutes: 30));
+    });
+
+    test('checks when the app resumes, at most once every 5 minutes', () async {
+      var t = DateTime(2026, 1, 1);
+      final requests = <int>[];
+      final c = container(FakePlatform(), body: releaseJson(tag: 'v1.0.1'), now: () => t, requests: requests);
+      final updates = c.read(updateProvider.notifier);
+      WidgetsBinding.instance.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      expect(requests.length, 1);
+      t = t.add(const Duration(minutes: 4));
+      await updates.checkOnResume();
+      expect(requests.length, 1);
+      t = t.add(const Duration(minutes: 2));
+      await updates.checkOnResume();
+      expect(requests.length, 2);
+    });
+
+    test('a resume does not check while a download is waiting for a restart', () async {
+      var t = DateTime(2026, 1, 1);
+      final requests = <int>[];
+      final c = container(FakePlatform(), body: releaseJson(), now: () => t, requests: requests);
+      final updates = c.read(updateProvider.notifier);
+      await updates.check();
+      expect(c.read(updateProvider), isA<UpdateReady>());
+      t = t.add(const Duration(hours: 1));
+      await updates.checkOnResume();
+      expect(requests.length, 1);
     });
 
     test('reports a failed check without offering anything', () async {
