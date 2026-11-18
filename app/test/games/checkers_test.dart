@@ -86,6 +86,15 @@ void main() {
     );
   });
 
+  test('integral doubles in a path read as ints', () {
+    expect(
+      start().play({
+        'path': [9.0, 13.0],
+      }),
+      isNotNull,
+    );
+  });
+
   test('malformed moves → null', () {
     final b = start();
     expect(b.play({}), isNull);
@@ -106,7 +115,7 @@ void main() {
     );
     expect(
       b.play({
-        'path': [9, 13.0],
+        'path': [9, 13.5],
       }),
       isNull,
     );

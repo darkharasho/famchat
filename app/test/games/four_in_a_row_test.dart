@@ -41,12 +41,18 @@ void main() {
     expect(b.play({'col': 1}), isNotNull);
   });
 
-  test("bad col (7, -1, '3', missing) returns null", () {
+  test("bad col (7, -1, '3', 3.5, missing) returns null", () {
     expect(start().play({'col': 7}), isNull);
     expect(start().play({'col': -1}), isNull);
     expect(start().play({'col': '3'}), isNull);
-    expect(start().play({'col': 3.0}), isNull);
+    expect(start().play({'col': 3.5}), isNull);
     expect(start().play({}), isNull);
+  });
+
+  test('an integral double col plays like the int', () {
+    final b = start().play({'col': 3.0})! as FourInARowBoard;
+    expect(b.at(3, 0), Side.first);
+    expect(b.lastCol, 3);
   });
 
   test('horizontal, vertical and both diagonal fours win with reason line', () {

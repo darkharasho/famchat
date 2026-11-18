@@ -64,8 +64,8 @@ class FourInARowBoard implements Board {
 
   @override
   Board? play(Map<String, Object?> move) {
-    final col = move['col'];
-    if (col is! int || col < 0 || col >= columns) return null;
+    final col = wireInt(move['col']);
+    if (col == null || col < 0 || col >= columns) return null;
     if (outcome != null) return null;
     var row = 0;
     while (row < rows && at(col, row) != null) {

@@ -55,8 +55,8 @@ class TicTacToeBoard implements Board {
 
   @override
   Board? play(Map<String, Object?> move) {
-    final cell = move['cell'];
-    if (cell is! int || cell < 0 || cell > 8) return null;
+    final cell = wireInt(move['cell']);
+    if (cell == null || cell < 0 || cell > 8) return null;
     if (outcome != null || _cells[cell] != null) return null;
     final next = List<Side?>.of(_cells);
     next[cell] = toMove;

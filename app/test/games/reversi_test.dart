@@ -55,9 +55,15 @@ void main() {
     expect(b.play({'cell': -1}), isNull);
     expect(b.play({'cell': 64}), isNull);
     expect(b.play({'cell': '29'}), isNull);
-    expect(b.play({'cell': 29.0}), isNull);
+    expect(b.play({'cell': 29.5}), isNull);
     expect(b.play({'cell': null}), isNull);
     expect(b.play({}), isNull);
+  });
+
+  test('an integral double cell plays like the int', () {
+    final n = start().play({'cell': 29.0})! as ReversiBoard;
+    expect(n.lastCell, 29);
+    expect(n.counts, (4, 1));
   });
 
   test('play flips a line and passes the turn', () {
@@ -69,7 +75,8 @@ void main() {
   });
 
   test('side with no move passes automatically', () {
-    // First captures 2's only disc; second then has no move, first does.
+    // First plays 2, capturing second's disc on 1. Second's last disc (41)
+    // can't bracket anything, so second has no move while first does.
     final b = ReversiBoard.custom({
       0: Side.first,
       1: Side.second,
@@ -79,11 +86,24 @@ void main() {
     expect(b.toMove, Side.first);
     final n = b.play({'cell': 2})! as ReversiBoard;
     expect(n.at(1), Side.first);
-    // Second has no discs left that can bracket anything, first still can
-    // play 42 (flips 41), so the turn comes straight back.
+    // Second's only disc (41) sits next to 40 on the left edge, so it
+    // brackets nothing; first can play 42 (flips 41): the turn comes back.
     expect(n.toMove, Side.first);
     expect(n.outcome, isNull);
     expect(n.legalCells(), [42]);
+  });
+
+  test('lines stop at the row edge instead of wrapping to the next row', () {
+    // 7 is the last cell of row 0 and 8 the first of row 1: a play at 9 must
+    // not flip 8 by "bracketing" it against 7 across the row boundary.
+    final b = ReversiBoard.custom({
+      0: Side.first,
+      7: Side.first,
+      8: Side.second,
+    }, Side.first);
+    expect(b.legalCells(), [16]);
+    expect(b.play({'cell': 9}), isNull);
+    expect(b.at(8), Side.second);
   });
 
   test('a position whose nominal mover is stuck hands the turn over', () {

@@ -118,8 +118,8 @@ class ReversiBoard implements Board {
 
   @override
   Board? play(Map<String, Object?> move) {
-    final cell = move['cell'];
-    if (cell is! int || cell < 0 || cell >= size * size) return null;
+    final cell = wireInt(move['cell']);
+    if (cell == null || cell < 0 || cell >= size * size) return null;
     if (_over) return null;
     final flips = _flips(_cells, cell, _toMove);
     if (flips.isEmpty) return null;

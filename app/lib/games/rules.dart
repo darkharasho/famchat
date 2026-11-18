@@ -5,6 +5,16 @@ import 'four_in_a_row.dart';
 import 'reversi.dart';
 import 'tictactoe.dart';
 
+/// An integer read from decoded JSON: an int, or an integral finite double
+/// within ±2^53 (`3.0` → 3); null for anything else. On the web `3.0 is int`
+/// but not natively, so every platform must read wire numbers through this to
+/// agree on which moves are valid.
+int? wireInt(Object? v) {
+  if (v is! num || !v.isFinite || v.abs() > 9007199254740991) return null;
+  final i = v.toInt();
+  return i == v ? i : null;
+}
+
 enum Side {
   first,
   second;

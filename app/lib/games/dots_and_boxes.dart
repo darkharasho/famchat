@@ -112,8 +112,8 @@ class DotsAndBoxesBoard implements Board {
 
   @override
   Board? play(Map<String, Object?> move) {
-    final line = move['line'];
-    if (line is! int || line < 0 || line >= lineCount) return null;
+    final line = wireInt(move['line']);
+    if (line == null || line < 0 || line >= lineCount) return null;
     if (_lines[line] || _over) return null;
     final lines = List.of(_lines)..[line] = true;
     final drawers = List.of(_drawers)..[line] = _toMove;

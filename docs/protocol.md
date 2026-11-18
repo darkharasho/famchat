@@ -127,6 +127,8 @@ Resign and draw actions carry the current next ply and don't advance it. Moves a
 without `silent`, count as activity and as unread, and the timeline does not show them as messages. A game or move
 with an unknown `game` name is kept as `unknown` and shown once a newer version knows it; a `game` without a
 non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `action` with a `type`, is invalid.
+Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;
+`3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
 Move fields of `play`:
 
