@@ -422,6 +422,7 @@ static void register_done(GObject* source, GAsyncResult* result,
   g_autoptr(GError) error = nullptr;
   g_autoptr(GVariant) reply = g_dbus_connection_call_finish(
       G_DBUS_CONNECTION(source), result, &error);
+  (void)reply;  // only the error matters; the reply is freed on return
   if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) return;
   DesktopShell* self = static_cast<DesktopShell*>(user_data);
   if (error != nullptr) {
