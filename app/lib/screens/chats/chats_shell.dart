@@ -8,6 +8,7 @@ import '../../chat/providers.dart';
 import '../../media/providers.dart';
 import '../../push/providers.dart';
 import '../../session/session_controller.dart';
+import '../../settings/list_width.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/brand_mark.dart';
 import '../../widgets/common.dart';
@@ -15,6 +16,7 @@ import '../../widgets/person_avatar.dart';
 import '../account_providers.dart';
 import 'chat_list.dart';
 import 'conversation_view.dart';
+import 'pane_divider.dart';
 import 'quick_switcher.dart';
 
 /// "Ctrl" or "⌘" in shortcut hints.
@@ -22,7 +24,7 @@ String get shortcutModifier =>
     {TargetPlatform.macOS, TargetPlatform.iOS}.contains(defaultTargetPlatform) ? '⌘' : 'Ctrl';
 
 /// Signed-in home. Phones: the chat list, or one conversation full screen. From [twoPaneWidth]:
-/// the list and the open conversation side by side.
+/// the list and the open conversation side by side, split by a divider that resizes the list.
 class ChatsShell extends ConsumerWidget {
   const ChatsShell({super.key, this.chatId, this.jumpTo});
 
@@ -32,7 +34,6 @@ class ChatsShell extends ConsumerWidget {
   final String? jumpTo;
 
   static const twoPaneWidth = 720.0;
-  static const listWidth = 360.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -66,13 +67,23 @@ class ChatsShell extends ConsumerWidget {
                 ? const _ListPane(selectedId: null)
                 : ConversationView(key: ValueKey(id), chatId: id, jumpTo: jumpTo);
           }
-          return Row(children: [
-            SizedBox(width: listWidth, child: _ListPane(selectedId: id)),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: id == null
-                  ? const _WelcomePane()
-                  : ConversationView(key: ValueKey(id), chatId: id, showBack: false, jumpTo: jumpTo),
+          final listWidth = clampListWidth(ref.watch(listWidthProvider), c.maxWidth);
+          return Stack(fit: StackFit.expand, children: [
+            Row(children: [
+              SizedBox(width: listWidth, child: _ListPane(selectedId: id)),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: id == null
+                    ? const _WelcomePane()
+                    : ConversationView(key: ValueKey(id), chatId: id, showBack: false, jumpTo: jumpTo),
+              ),
+            ]),
+            // The grab strip straddles the 1px line rather than taking room in the row.
+            Positioned(
+              left: listWidth + 0.5 - PaneDivider.grabWidth / 2,
+              top: 0,
+              bottom: 0,
+              child: PaneDivider(shownWidth: listWidth),
             ),
           ]);
         }),
