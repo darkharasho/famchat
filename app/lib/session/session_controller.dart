@@ -15,6 +15,7 @@ import '../chat/ulid.dart';
 import '../crypto/keys.dart';
 import '../crypto/reset.dart';
 import '../platform_info.dart';
+import '../push/preview_setting.dart';
 import 'invite_link.dart';
 import 'secure_kv.dart';
 import 'stored_session.dart';
@@ -352,6 +353,13 @@ class SessionController extends Notifier<SessionState> {
   Future<void> _endSession(SignedOut next) => _serial(() async {
         final s = state;
         _detach();
+        try {
+          await writePreviewsOn(false).timeout(_timeout);
+        } catch (_) {
+          // Best effort: the server resets it when the token is cleared.
+        }
+        // The switch must not keep showing the old value for the next sign-in.
+        if (ref.mounted) ref.invalidate(previewsOnProvider);
         if (s is SignedIn) {
           try {
             final stored = await _store.load().timeout(_timeout);

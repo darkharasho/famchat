@@ -101,6 +101,46 @@ export function fcmMessage(token: string, n: Notification, appOrigin: string) {
   };
 }
 
+/** What a preview push carries besides the visible text: the encrypted envelope for the device. */
+export interface PreviewData {
+  messageId: string;
+  senderUserId: string;
+  senderDeviceId: string;
+  epoch: number;
+  envelope: string;
+}
+
+/**
+ * A data-only message for a device with previews on: the app decrypts [PreviewData.envelope] and
+ * shows the text itself, or the generic [n] text when it can't. The iOS block keeps an alert and
+ * mutable-content so a notification extension could replace it. All data values are strings.
+ */
+export function fcmPreviewMessage(token: string, n: Notification, p: PreviewData, appOrigin: string) {
+  const chatId = n.chatId ?? "test";
+  return {
+    message: {
+      token,
+      data: {
+        chatId,
+        messageId: p.messageId,
+        senderUserId: p.senderUserId,
+        senderDeviceId: p.senderDeviceId,
+        epoch: String(p.epoch),
+        env: p.envelope,
+        title: n.title,
+        body: n.body,
+        preview: "1",
+      },
+      android: { priority: "high" },
+      apns: {
+        headers: { "apns-priority": "10" },
+        payload: { aps: { alert: { title: n.title, body: n.body }, "mutable-content": 1, sound: "default", "thread-id": chatId } },
+      },
+      webpush: { fcm_options: { link: `${appOrigin}/chats/${chatId}` } },
+    },
+  };
+}
+
 function errorCode(text: string): string | null {
   try {
     const details = (JSON.parse(text) as { error?: { details?: { errorCode?: unknown }[] } }).error?.details ?? [];
@@ -121,9 +161,7 @@ export type SendResult = "ok" | "stale" | "retry" | "auth" | "error";
 export async function sendFcm(
   sa: ServiceAccount,
   accessTok: string,
-  token: string,
-  n: Notification,
-  appOrigin: string,
+  message: object,
   fetcher: Fetch,
 ): Promise<SendResult> {
   let res: Response;
@@ -131,7 +169,7 @@ export async function sendFcm(
     res = await fetcher(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(sa.projectId)}/messages:send`, {
       method: "POST",
       headers: { authorization: `Bearer ${accessTok}`, "content-type": "application/json" },
-      body: JSON.stringify(fcmMessage(token, n, appOrigin)),
+      body: JSON.stringify(message),
     });
   } catch (e) {
     console.error("fcm send failed", e);

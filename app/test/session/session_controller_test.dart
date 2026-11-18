@@ -10,6 +10,9 @@ import 'package:famchat/session/stored_session.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:famchat/push/preview_setting.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
 import '../support/fake_server.dart';
 import '../support/session_overrides.dart';
@@ -158,6 +161,18 @@ void main() {
     expect((c.read(sessionProvider) as SignedOut).message, isNull);
     expect(kv.values, isEmpty);
     expect(server.devices[id]!.revokedAt, isNotNull);
+  });
+
+  test('sign out turns message previews off', () async {
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+    final c = make();
+    await settledSession(c);
+    await c.read(sessionProvider.notifier).join(token: server.addInvite(), deviceName: 'Pixel');
+    await c.read(previewsOnProvider.notifier).set(true);
+    expect(await c.read(previewsOnProvider.future), isTrue);
+    await c.read(sessionProvider.notifier).signOut();
+    expect(await readPreviewsOn(), isFalse);
+    expect(await c.read(previewsOnProvider.future), isFalse);
   });
 
   test('sign out while offline still clears storage', () async {

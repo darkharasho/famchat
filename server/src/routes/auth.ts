@@ -336,7 +336,7 @@ auth.post("/refresh", async (c) => {
   if (!row) {
     // 3. The previous token after the window: treat as theft and revoke the device.
     await db.prepare(
-      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
+      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL, push_previews = 0
        WHERE prev_refresh_hash = ? AND revoked_at IS NULL`,
     ).bind(now, oldHash).run();
     throw new ApiError("unauthorized");

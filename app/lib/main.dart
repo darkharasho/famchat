@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'audio_init.dart';
+import 'push/android_previews.dart';
 import 'push/providers.dart';
 import 'push/push_messaging.dart';
 import 'router.dart';
@@ -34,6 +36,10 @@ Future<void> main() async {
   final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
   // FCM on Android, iOS and the web once Firebase is configured; otherwise null and push is off.
   final push = await initPush();
+  // Android with previews on: data-only pushes the app decrypts and shows itself.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android && push != null) {
+    FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
+  }
   runApp(ProviderScope(
     overrides: [
       initialInviteTokenProvider.overrideWithValue(invite),

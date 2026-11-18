@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
+import 'package:famchat/crypto/encoding.dart';
+import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/crypto/keys.dart';
 import 'package:famchat/push/firebase_options.dart';
 import 'package:famchat/push/notification_settings.dart' show pushTestSummary, runNotificationTest;
 import 'package:famchat/push/local_notifier.dart';
@@ -51,19 +55,26 @@ class Harness {
   Harness({bool askNow = true, this.visible}) {
     controller = PushController(
       messaging: messaging,
-      register: (t) async {
+      register: (t, previews) async {
         if (failRegister) throw Exception('offline');
         registered.add(t);
+        registeredPreviews.add(previews);
       },
+      previewsOn: () async => previewsValue,
       openRoute: routes.add,
       isChatVisible: (id) => id == visible,
       showInApp: (m, route) => shown.add((m, route)),
+      enrich: (m) async => enrich(m),
       askNow: askNow,
     );
   }
 
+  PushMessage Function(PushMessage) enrich = (m) => m;
+
   final messaging = FakeMessaging();
   final registered = <String>[];
+  final registeredPreviews = <bool>[];
+  bool previewsValue = false;
   final routes = <String>[];
   final shown = <(PushMessage, String?)>[];
   String? visible;
@@ -185,6 +196,41 @@ void main() {
       expect(again.registered, ['tok-1']);
     });
 
+    test('enable registers with the previews value', () async {
+      final h = Harness()..previewsValue = true;
+      await h.controller.start();
+      expect(h.registered, ['tok-1']);
+      expect(h.registeredPreviews, [true]);
+    });
+
+    test('setPreviews re-registers the token', () async {
+      final h = Harness();
+      await h.controller.start();
+      await h.controller.setPreviews(true);
+      expect(h.registered, ['tok-1', 'tok-1']);
+      expect(h.registeredPreviews, [false, true]);
+    });
+
+    test('setPreviews without a token registers nothing', () async {
+      final h = Harness()..messaging.token = null;
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
+    });
+
+    test('setPreviews without notification permission registers nothing and asks nothing', () async {
+      final h = Harness(askNow: false)..messaging.grantOnRequest = false;
+      await h.controller.start();
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
+      expect(h.messaging.requests, 0);
+    });
+
+    test('setPreviews offline does not throw', () async {
+      final h = Harness()..failRegister = true;
+      await h.controller.setPreviews(true);
+      expect(h.registered, isEmpty);
+    });
+
     test('an offline registration does not break start', () async {
       final h = Harness()..failRegister = true;
       await h.controller.start();
@@ -216,6 +262,48 @@ void main() {
       await settle();
       expect(h.shown.map((s) => (s.$1.title, s.$2)), [('Parents', '/chats/$chatB'), ('FamChat', null)]);
     });
+
+    test('PushMessage.fromData reads title and body from data', () {
+      final m = PushMessage.fromData({
+        'chatId': chatA,
+        'messageId': 'M1',
+        'senderUserId': 'mom',
+        'senderDeviceId': 'd-mom',
+        'epoch': '1',
+        'env': '{"v":1}',
+        'title': 'Mom',
+        'body': 'New message',
+        'preview': '1',
+      });
+      expect((m.chatId, m.title, m.body, m.messageId, m.senderUserId, m.senderDeviceId, m.isPreview),
+          (chatA, 'Mom', 'New message', 'M1', 'mom', 'd-mom', true));
+      expect(m.envelope, {'v': 1});
+      // The notification block wins when there is one; junk env is no envelope.
+      final n = PushMessage.fromData({'title': 'x', 'body': 'y', 'env': 'not json'}, title: 'Mom', body: 'New message');
+      expect((n.title, n.body, n.envelope, n.isPreview), ('Mom', 'New message', null, false));
+    });
+
+    test('foreground preview is enriched before showInApp', () async {
+      final h = Harness()..enrich = (m) => PushMessage(chatId: m.chatId, title: m.title, body: 'see you at 6');
+      await h.controller.start();
+      h.messaging.foreground.add(const PushMessage(chatId: chatB, title: 'Mom', body: 'New message'));
+      await settle();
+      expect(h.shown.map((s) => (s.$1.title, s.$1.body, s.$2)), [('Mom', 'see you at 6', '/chats/$chatB')]);
+    });
+
+    test('foreground preview for the visible chat is still suppressed', () async {
+      var enriched = 0;
+      final h = Harness(visible: chatA)
+        ..enrich = (m) {
+          enriched++;
+          return PushMessage(chatId: m.chatId, title: m.title, body: 'see you at 6');
+        };
+      await h.controller.start();
+      h.messaging.foreground.add(const PushMessage(chatId: chatA, title: 'Mom', body: 'New message'));
+      await settle();
+      expect(enriched, 1);
+      expect(h.shown, isEmpty);
+    });
   });
 
   group('socket notifications', () {
@@ -240,7 +328,7 @@ void main() {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
       var front = false;
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => front)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => front)
         ..start();
       events.add(msg(chatB, 'dad'));
       events.add(msg(chatB, 'me')); // my own other device
@@ -256,7 +344,7 @@ void main() {
     test('silent messages and muted chats do not notify; an expired mute does', () async {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => false)
         ..start();
       events.add({...msg(chatB, 'dad'), 'silent': true});
       await db.setMutedUntil(chatA, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
@@ -273,7 +361,7 @@ void main() {
     test('a mention of me notifies through a mute and says so', () async {
       final events = StreamController<Map<String, Object?>>.broadcast();
       final notifier = FakeNotifier();
-      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, inFront: () => false)
+      final n = MessageNotifier(events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => false, inFront: () => false)
         ..start();
       await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
       events.add({...msg(chatB, 'dad'), 'mentions': ['someone-else']});
@@ -282,6 +370,99 @@ void main() {
       expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad mentioned you')]);
       await n.stop();
       await events.close();
+    });
+
+    group('previews', () {
+      final chatKey = Uint8List.fromList(List.generate(32, (i) => i));
+      late DeviceKeys signer;
+      setUpAll(() async => signer = await DeviceKeys.generate());
+      setUp(() async {
+        for (final u in ['mom', 'dad']) {
+          await db.putDevice(DeviceRow(
+            id: 'd-$u',
+            userId: u,
+            name: 'Phone',
+            encPub: 'x',
+            signPub: b64url(await signer.signPub()),
+            certSig: 'x',
+            revoked: false,
+            certValid: true,
+            trusted: true,
+          ));
+        }
+        for (final c in [chatA, chatB]) {
+          await db.putKey(c, 1, chatKey);
+        }
+      });
+
+      // The event as the socket delivers it: the envelope is a parsed JSON map.
+      Future<Map<String, Object?>> event(String chatId, String sender, {String text = 'see you at 6', Object? envelope}) async {
+        final env = envelope ??
+            (await encryptEnvelope(
+              chatKey: chatKey,
+              epoch: 1,
+              chatId: chatId,
+              messageId: 'm',
+              senderDeviceId: 'd-$sender',
+              signKey: signer.sign,
+              plaintext: TextBody(text).encode(),
+            ))
+                .toJson();
+        final e = msg(chatId, sender);
+        (e['message']! as Map<String, Object?>)
+          ..['envelope'] = env
+          ..['senderDeviceId'] = 'd-$sender';
+        return e;
+      }
+
+      Future<List<(String, String)>> run(bool on, Map<String, Object?> e) async {
+        final events = StreamController<Map<String, Object?>>.broadcast();
+        final notifier = FakeNotifier();
+        final n = MessageNotifier(
+            events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => on, inFront: () => false)
+          ..start();
+        events.add(e);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await n.stop();
+        await events.close();
+        return [for (final s in notifier.shown) (s.$2, s.$3)];
+      }
+
+      test('previews on shows the decrypted text', () async {
+        expect(await run(true, await event(chatA, 'mom')), [('Mom', 'see you at 6')]);
+      });
+
+      test('previews off shows generic text', () async {
+        expect(await run(false, await event(chatA, 'mom')), [('Mom', 'New message')]);
+      });
+
+      test('previews on but undecryptable falls back to generic', () async {
+        expect(await run(true, await event(chatA, 'mom', envelope: {'junk': 1})), [('Mom', 'New message')]);
+        expect(await run(true, await event(chatA, 'mom', envelope: 'not a map')), [('Mom', 'New message')]);
+      });
+
+      test('group shows sender prefix', () async {
+        expect(await run(true, await event(chatB, 'dad')), [('Parents', 'Dad: see you at 6')]);
+      });
+
+      test('a mention in a muted chat shows the preview', () async {
+        await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+        final e = {...await event(chatB, 'dad'), 'mentions': ['me']};
+        expect(await run(true, e), [('Parents', 'Dad: see you at 6')]);
+      });
+
+      test('a failing previewsOn still shows generic text', () async {
+        final events = StreamController<Map<String, Object?>>.broadcast();
+        final notifier = FakeNotifier();
+        final n = MessageNotifier(
+            events: events.stream, myUserId: 'me', db: db, notifier: notifier, previewsOn: () async => throw Exception('prefs'), inFront: () => false)
+          ..start();
+        events.add(await event(chatA, 'mom'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await n.stop();
+        await events.close();
+        expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Mom', 'New message')]);
+      });
     });
   });
 

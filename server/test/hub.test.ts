@@ -1,6 +1,6 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type FamilyHub, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
+import { type FamilyHub, MAX_PREVIEW_ENVELOPE, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
 import { addDevice, api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
 import { notifyReset } from "../src/lib/reset-account";
@@ -79,6 +79,11 @@ async function connect(u: TestUser): Promise<Client> {
 const setPushToken = (deviceId: string, tok: string) =>
   env.DB.prepare("UPDATE devices SET push_token = ? WHERE id = ?").bind(tok, deviceId).run();
 
+const previewOf = (from: { deviceId: string }, e: { epoch: number }) => ({
+  senderDeviceId: from.deviceId,
+  epoch: e.epoch,
+  envelope: JSON.stringify(e),
+});
 const envelope = (epoch = 1) => ({ v: 1, epoch, nonce: "AAAA", ct: "AAAAAAAAAAAAAAAAAAAAAA", sig: "AAAA" });
 
 beforeEach(resetDb);
@@ -399,7 +404,43 @@ describe("send", () => {
     ca.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
     await ca.next("ack");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId] }]);
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId], preview: previewOf(a, envelope()) }]);
+  });
+
+  it("push job carries the envelope", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setPushToken(b.deviceId, "tok-b");
+    const chat = await createGroup(a, [b], "Family");
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const env2 = envelope(1);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: env2 });
+    await ca.next("ack");
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs[0].preview).toEqual({ senderDeviceId: a.deviceId, epoch: 1, envelope: JSON.stringify(env2) });
+  });
+
+  it("oversized envelope is not attached", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setPushToken(b.deviceId, "tok-b");
+    const chat = await createGroup(a, [b], "Family");
+    const jobs: PushJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = { notify: async (j) => void jobs.push(j) };
+    });
+    const ca = await connect(a);
+    const big = { ...envelope(1), ct: "A".repeat(MAX_PREVIEW_ENVELOPE) };
+    expect(JSON.stringify(big).length).toBeGreaterThan(MAX_PREVIEW_ENVELOPE);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: big });
+    await ca.next("ack");
+    for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).not.toHaveProperty("preview");
   });
 
   it("a phone is pushed even while the same user's desktop is connected", async () => {
@@ -421,7 +462,7 @@ describe("send", () => {
     await ca.next("ack");
     await cb.next("msg");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [b.userId], deviceIds: [bPhone] }]);
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [b.userId], deviceIds: [bPhone], preview: previewOf(a, envelope()) }]);
   });
 
   it("no job when every token-holding device is connected", async () => {
@@ -579,7 +620,7 @@ describe("send", () => {
     expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: false });
     await cb.next("msg");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId] }]);
+    expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId], preview: previewOf(a, envelope()) }]);
   });
 
   it("the default push hook puts the job on the queue", async () => {

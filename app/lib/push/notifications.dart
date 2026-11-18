@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../chat/db/chat_db.dart';
 import 'chat_route.dart';
 import 'local_notifier.dart';
+import 'preview.dart';
 import 'push_messaging.dart';
 
 /// Direct chat: (sender, "New message"). Group: (title, "New message from `sender`").
@@ -25,16 +26,21 @@ class PushController {
   PushController({
     required this.messaging,
     required this.register,
+    required this.previewsOn,
     required this.openRoute,
     required this.isChatVisible,
     required this.showInApp,
+    required this.enrich,
     required this.askNow,
   });
 
   final PushMessaging messaging;
 
-  /// Sends the token to the server (`PUT /devices/me/push`).
-  final Future<void> Function(String token) register;
+  /// Sends the token and this device's previews setting to the server (`PUT /devices/me/push`).
+  final Future<void> Function(String token, bool previews) register;
+
+  /// This device's "Show message previews" setting.
+  final Future<bool> Function() previewsOn;
   final void Function(String route) openRoute;
 
   /// True while that chat is on screen and the app is in front.
@@ -42,6 +48,9 @@ class PushController {
 
   /// Shows a foreground push inside the app; [route] is where "Open" goes (null: nowhere).
   final void Function(PushMessage message, String? route) showInApp;
+
+  /// A foreground push as it should show: a preview push gets its decrypted text. Never throws.
+  final Future<PushMessage> Function(PushMessage message) enrich;
 
   /// Ask for permission at start (phones). The web asks from a button instead ([enable]); there
   /// a permission granted earlier is still used at start.
@@ -52,7 +61,7 @@ class PushController {
 
   Future<void> start() async {
     _subs.add(messaging.onMessageOpenedApp.listen(_open));
-    _subs.add(messaging.onMessage.listen(_foreground));
+    _subs.add(messaging.onMessage.listen((m) => unawaited(_foreground(m))));
     _subs.add(messaging.onTokenRefresh.listen(_register));
     try {
       final initial = await messaging.getInitialMessage();
@@ -79,12 +88,26 @@ class PushController {
     }
   }
 
-  Future<void> _register(String token) async {
+  Future<void> _register(String token, [bool? previews]) async {
     if (_stopped) return;
     try {
-      await register(token);
+      await register(token, previews ?? await previewsOn());
     } catch (_) {
       // Offline: the next start registers again.
+    }
+  }
+
+  /// Tells the server the new setting by re-sending the current token. Without notification
+  /// permission (never asked here) or a token, nothing is registered and the stored value is all
+  /// there is; [enable] sends it once push is allowed.
+  Future<void> setPreviews(bool on) async {
+    if (_stopped) return;
+    try {
+      if (!await messaging.permissionGranted()) return;
+      final token = await messaging.getToken();
+      if (token != null) await _register(token, on);
+    } catch (_) {
+      // Offline or no push: the stored value is used at the next registration.
     }
   }
 
@@ -93,10 +116,17 @@ class PushController {
     if (route != null) openRoute(route);
   }
 
-  void _foreground(PushMessage m) {
-    final chatId = m.chatId;
+  Future<void> _foreground(PushMessage m) async {
+    var shown = m;
+    try {
+      shown = await enrich(m);
+    } catch (_) {
+      // The generic text, then.
+    }
+    if (_stopped) return;
+    final chatId = shown.chatId;
     if (chatId != null && isChatVisible(chatId)) return;
-    showInApp(m, chatRoute(chatId));
+    showInApp(shown, chatRoute(chatId));
   }
 
   Future<void> stop() async {
@@ -119,6 +149,7 @@ class MessageNotifier {
     required this.myUserId,
     required this.db,
     required this.notifier,
+    required this.previewsOn,
     required this.inFront,
   });
 
@@ -126,6 +157,9 @@ class MessageNotifier {
   final String myUserId;
   final ChatDb db;
   final LocalNotifier notifier;
+
+  /// This device's "Show message previews" setting (never true on the web).
+  final Future<bool> Function() previewsOn;
   final bool Function() inFront;
 
   StreamSubscription<Object?>? _sub;
@@ -147,10 +181,32 @@ class MessageNotifier {
     final mentioned = (e['mentions'] as List?)?.contains(myUserId) ?? false;
     try {
       if (!mentioned && isMuted(await db.chatById(chatId), DateTime.now())) return;
-      final (title, body) = await notificationText(db, chatId, sender, mention: mentioned);
+      final (title, generic) = await notificationText(db, chatId, sender, mention: mentioned);
+      final body = await _previewBody(m, chatId, sender) ?? generic;
       await notifier.show(id: chatId.hashCode & 0x7fffffff, title: title, body: body, route: route);
     } catch (_) {
       // The database closed (signed out) meanwhile.
+    }
+  }
+
+  /// The notification body with previews on, or null (previews off, or no preview) for the generic text.
+  Future<String?> _previewBody(Map<Object?, Object?> m, String chatId, String sender) async {
+    try {
+      if (!await previewsOn()) return null;
+      // The socket carries the envelope as a parsed JSON object; anything else means no preview.
+      final envelope = m['envelope'], id = m['id'], deviceId = m['senderDeviceId'];
+      if (envelope is! Map || id is! String || deviceId is! String) return null;
+      final preview = await previewText(
+        db: db,
+        chatId: chatId,
+        messageId: id,
+        senderUserId: sender,
+        senderDeviceId: deviceId,
+        envelope: Map<String, Object?>.from(envelope),
+      );
+      return preview == null ? null : await previewBody(db: db, chatId: chatId, senderUserId: sender, preview: preview);
+    } catch (_) {
+      return null; // Any failure still notifies, with the generic text.
     }
   }
 

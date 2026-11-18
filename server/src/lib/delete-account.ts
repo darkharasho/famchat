@@ -61,11 +61,11 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
        WHERE user_id = ? AND ${guard}`,
     ).bind(userId, ...gb),
     db.prepare(
-      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL
+      `UPDATE devices SET revoked_at = ?, refresh_hash = NULL, prev_refresh_hash = NULL, push_token = NULL, push_previews = 0
        WHERE user_id = ? AND revoked_at IS NULL AND ${guard} RETURNING id`,
     ).bind(now, userId, ...gb),
     // Device names are often personal ("Mom's iPhone"); certificates don't cover them.
-    db.prepare(`UPDATE devices SET name = ?, push_token = NULL WHERE user_id = ? AND ${guard}`)
+    db.prepare(`UPDATE devices SET name = ?, push_token = NULL, push_previews = 0 WHERE user_id = ? AND ${guard}`)
       .bind(DELETED_DEVICE_NAME, userId, ...gb),
     db.prepare(`DELETE FROM chat_key_wraps WHERE device_id IN (SELECT id FROM devices WHERE user_id = ?) AND ${guard}`)
       .bind(userId, ...gb),

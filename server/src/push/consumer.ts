@@ -6,9 +6,12 @@ import type { PushJob } from "../hub";
 import {
   accessToken,
   type Fetch,
+  fcmMessage,
+  fcmPreviewMessage,
   invalidateAccessToken,
   type Notification,
   parseServiceAccount,
+  type PreviewData,
   type SendResult,
   type ServiceAccount,
   sendFcm,
@@ -72,14 +75,18 @@ export async function deliverJob(env: Env, sa: ServiceAccount, job: PushJob, fet
   if (!note) return [];
   const users = job.userIds.slice(0, 100);
   const { results } = await env.DB.prepare(
-    `SELECT d.id, d.push_token FROM devices d
+    `SELECT d.id, d.push_token, d.push_previews FROM devices d
      JOIN chat_members m ON m.user_id = d.user_id AND m.chat_id = ?
      WHERE d.user_id IN (${users.map(() => "?").join(",")})
        AND d.revoked_at IS NULL AND d.push_token IS NOT NULL`,
-  ).bind(job.chatId, ...users).all<{ id: string; push_token: string }>();
+  ).bind(job.chatId, ...users).all<{ id: string; push_token: string; push_previews: number }>();
   const only = job.deviceIds ? new Set(job.deviceIds) : null;
   const targets = results.filter((d) => !only || only.has(d.id));
-  const deliveries = await sendAll(env, sa, targets, note, fetcher);
+  const deliveries = await sendAll(env, sa, targets, note, fetcher, job.preview && {
+    messageId: job.messageId,
+    senderUserId: job.senderUserId,
+    ...job.preview,
+  });
 
   const retry = deliveries.filter((d) => d.result === "retry").map((d) => d.deviceId);
   const attempt = (job.attempt ?? 0) + 1;
@@ -87,7 +94,7 @@ export async function deliverJob(env: Env, sa: ServiceAccount, job: PushJob, fet
     // After FCM calls went out, nothing may throw: a retry of the whole job would notify the devices
     // that already got it a second time.
     await env.PUSH_QUEUE.send(
-      { chatId: job.chatId, senderUserId: job.senderUserId, messageId: job.messageId, userIds: job.userIds, deviceIds: retry, attempt, ...(job.mention ? { mention: true } : {}) },
+      { chatId: job.chatId, senderUserId: job.senderUserId, messageId: job.messageId, userIds: job.userIds, deviceIds: retry, attempt, ...(job.mention ? { mention: true } : {}), ...(job.preview ? { preview: job.preview } : {}) },
       { delaySeconds: RETRY_DELAY_S * attempt },
     ).catch((e) => console.error("push retry not queued", e));
   }
@@ -98,14 +105,20 @@ export async function deliverJob(env: Env, sa: ServiceAccount, job: PushJob, fet
 export async function sendAll(
   env: Env,
   sa: ServiceAccount,
-  devices: { id: string; push_token: string }[],
+  devices: { id: string; push_token: string; push_previews?: number }[],
   note: Notification,
   fetcher: Fetch,
+  preview?: PreviewData,
 ): Promise<Delivery[]> {
   if (devices.length === 0) return [];
+  // Previews only for devices that switched them on, and only when the job carries the envelope.
+  const messageFor = (d: (typeof devices)[number]) =>
+    d.push_previews === 1 && preview
+      ? fcmPreviewMessage(d.push_token, note, preview, env.APP_ORIGIN)
+      : fcmMessage(d.push_token, note, env.APP_ORIGIN);
   const sendEach = async (ds: typeof devices) => {
     const tok = await accessToken(sa, fetcher);
-    return Promise.all(ds.map(async (d) => ({ d, result: await sendFcm(sa, tok, d.push_token, note, env.APP_ORIGIN, fetcher) })));
+    return Promise.all(ds.map(async (d) => ({ d, result: await sendFcm(sa, tok, messageFor(d), fetcher) })));
   };
   let sent = await sendEach(devices);
   const refused = sent.filter((s) => s.result === "auth").map((s) => s.d);
@@ -120,7 +133,7 @@ export async function sendAll(
   const stale = sent.filter((s) => s.result === "stale");
   if (stale.length) {
     await env.DB.batch(
-      stale.map((s) => env.DB.prepare("UPDATE devices SET push_token = NULL WHERE id = ? AND push_token = ?").bind(s.d.id, s.d.push_token)),
+      stale.map((s) => env.DB.prepare("UPDATE devices SET push_token = NULL, push_previews = 0 WHERE id = ? AND push_token = ?").bind(s.d.id, s.d.push_token)),
     ).catch((e) => console.error("stale tokens not cleared", e)); // cleared on the next push
   }
   return sent.map((s) => ({ deviceId: s.d.id, result: s.result }));

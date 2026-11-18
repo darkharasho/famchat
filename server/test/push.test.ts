@@ -2,14 +2,17 @@ import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF }
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PushJob } from "../src/hub";
 import { deliverJob, handlePushBatch, notificationFor, sendAll } from "../src/push/consumer";
-import { invalidateAccessToken, parseServiceAccount } from "../src/push/fcm";
+import { fcmMessage, invalidateAccessToken, parseServiceAccount } from "../src/push/fcm";
 import { addDevice, createDirect, createGroup, insertMessage } from "./chat-helpers";
 import { BASE, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
 import { fakeGoogle, fcmError, testServiceAccount } from "./push-helpers";
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
-const setToken = (t: string, token: unknown) =>
-  SELF.fetch(`${BASE}/api/devices/me/push`, jsonReq("PUT", { token }, auth(t)));
+const setToken = (t: string, token: unknown, previews?: unknown) =>
+  SELF.fetch(`${BASE}/api/devices/me/push`, jsonReq("PUT", previews === undefined ? { token } : { token, previews }, auth(t)));
+const previewsOf = async (deviceId: string) =>
+  (await env.DB.prepare("SELECT push_previews FROM devices WHERE id = ?").bind(deviceId).first<{ push_previews: number }>())
+    ?.push_previews;
 const tokenOf = async (deviceId: string) =>
   (await env.DB.prepare("SELECT push_token FROM devices WHERE id = ?").bind(deviceId).first<{ push_token: string | null }>())
     ?.push_token ?? null;
@@ -34,6 +37,45 @@ describe("PUT /api/devices/me/push", () => {
     await setToken(b.accessToken, "shared");
     expect(await tokenOf(a.deviceId)).toBeNull();
     expect(await tokenOf(b.deviceId)).toBe("shared");
+  });
+
+  it("stores previews with the token", async () => {
+    const a = await insertUserWithDevice();
+    expect((await setToken(a.accessToken, "t", true)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(1);
+    expect((await setToken(a.accessToken, "t")).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(1);
+    expect((await setToken(a.accessToken, "t", false)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("clearing the token clears previews", async () => {
+    const a = await insertUserWithDevice();
+    await setToken(a.accessToken, "t", true);
+    expect((await setToken(a.accessToken, null)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("null token with previews true leaves previews off", async () => {
+    const a = await insertUserWithDevice();
+    expect((await setToken(a.accessToken, null, true)).status).toBe(204);
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("a token taken by another device clears that row's previews", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setToken(a.accessToken, "shared", true);
+    await setToken(b.accessToken, "shared");
+    expect(await tokenOf(a.deviceId)).toBeNull();
+    expect(await previewsOf(a.deviceId)).toBe(0);
+  });
+
+  it("rejects a non-boolean previews", async () => {
+    const a = await insertUserWithDevice();
+    const res = await setToken(a.accessToken, "t", "yes");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_request");
   });
 
   it("rejects bad bodies", async () => {
@@ -135,6 +177,7 @@ describe("push queue consumer", () => {
   it("stale tokens are cleared and the others still sent", async () => {
     const { mom, dad, dadLaptop } = await family();
     const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id IN (?, ?)").bind(dadLaptop, dad.deviceId).run();
     const { env: e, sa } = await pushEnv();
     const g = fakeGoogle((t) => (t === "dad-laptop" ? fcmError(404, "UNREGISTERED") : Response.json({ name: "x" })));
     const out = await deliverJob(e, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId] }, g.fetcher);
@@ -144,6 +187,8 @@ describe("push queue consumer", () => {
     ]);
     expect(await tokenOf(dadLaptop)).toBeNull();
     expect(await tokenOf(dad.deviceId)).toBe("dad-phone");
+    expect(await previewsOf(dadLaptop)).toBe(0);
+    expect(await previewsOf(dad.deviceId)).toBe(1);
   });
 
   it("transient failures re-queue only the failed devices, up to three attempts", async () => {
@@ -161,6 +206,54 @@ describe("push queue consumer", () => {
     expect(q.sent[1]).toEqual({ job: { ...job, deviceIds: [dadLaptop], attempt: 2 }, delaySeconds: 20 });
     await deliverJob(e, sa, q.sent[1].job, g2.fetcher);
     expect(q.sent).toHaveLength(2); // gave up after the third try
+  });
+
+  it("previews device gets a preview message, others the plain one", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id = ?").bind(dad.deviceId).run();
+    const { env: e, sa } = await pushEnv();
+    const g = fakeGoogle();
+    const envelope = JSON.stringify({ v: 1, epoch: 3, nonce: "n", ct: "c", sig: "s" });
+    await deliverJob(e, sa, {
+      chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId],
+      preview: { senderDeviceId: mom.deviceId, epoch: 3, envelope },
+    }, g.fetcher);
+    const byTok = Object.fromEntries(g.sends().map((c) => {
+      const b = JSON.parse(c.body) as { message: { token: string } };
+      return [b.message.token, b];
+    }));
+    const p = (byTok["dad-phone"] as unknown as { message: { data: Record<string, string>; notification?: unknown } }).message;
+    expect(p.data.env).toBe(envelope);
+    expect(p.data.epoch).toBe("3");
+    expect(p.data.senderDeviceId).toBe(mom.deviceId);
+    expect(p.notification).toBeUndefined();
+    expect(byTok["dad-laptop"]).toEqual(fcmMessage("dad-laptop", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN));
+  });
+
+  it("job without preview sends plain to a previews device", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id = ?").bind(dad.deviceId).run();
+    const { env: e, sa } = await pushEnv();
+    const g = fakeGoogle();
+    await deliverJob(e, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId] }, g.fetcher);
+    const phone = g.sends().find((c) => c.body.includes('"dad-phone"'))!;
+    expect(JSON.parse(phone.body)).toEqual(
+      fcmMessage("dad-phone", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN),
+    );
+  });
+
+  it("retry keeps preview", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id = ?").bind(dad.deviceId).run();
+    const { env: e, sa, q } = await pushEnv();
+    const g = fakeGoogle(() => fcmError(503, "UNAVAILABLE"));
+    const preview = { senderDeviceId: mom.deviceId, epoch: 2, envelope: '{"v":1}' };
+    await deliverJob(e, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId], preview }, g.fetcher);
+    expect(q.sent).toHaveLength(1);
+    expect(q.sent[0].job.preview).toEqual(preview);
   });
 
   it("a refused access token is renewed once", async () => {
