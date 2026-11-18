@@ -300,4 +300,37 @@ void main() {
     await tester.tap(find.byKey(const Key('col-2')), warnIfMissed: false);
     expect(played, isEmpty);
   });
+
+  testWidgets('reversi: tapping a legal cell sends {cell: n}', (tester) async {
+    await tester.pumpWidget(view(initialBoard(GameType.reversi)));
+    await tester.tap(find.byKey(const Key('sq-29')));
+    expect(played, [
+      {'cell': 29},
+    ]);
+  });
+
+  testWidgets('reversi: tapping an illegal cell does nothing', (tester) async {
+    await tester.pumpWidget(view(initialBoard(GameType.reversi)));
+    await tester.tap(find.byKey(const Key('sq-0')));
+    await tester.tap(find.byKey(const Key('sq-27')));
+    expect(played, isEmpty);
+  });
+
+  testWidgets('reversi: shows both counts; thumbnail, spectator and '
+      'disabled ignore taps', (tester) async {
+    final b = initialBoard(GameType.reversi);
+    await tester.pumpWidget(view(b));
+    expect(find.byKey(const Key('count-first')), findsOneWidget);
+    expect(find.byKey(const Key('count-second')), findsOneWidget);
+    await tester.pumpWidget(view(b, enabled: false));
+    await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: Side.second));
+    await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: null));
+    await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, thumbnail: true));
+    expect(find.byKey(const Key('count-first')), findsNothing);
+    await tester.tap(find.byKey(const Key('sq-29')), warnIfMissed: false);
+    expect(played, isEmpty);
+  });
 }

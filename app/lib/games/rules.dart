@@ -1,6 +1,7 @@
 import 'checkers.dart';
 import 'chess_board.dart';
 import 'four_in_a_row.dart';
+import 'reversi.dart';
 import 'tictactoe.dart';
 
 enum Side {
@@ -14,7 +15,8 @@ enum GameType {
   tictactoe('tictactoe', 'Tic-tac-toe'),
   checkers('checkers', 'Checkers'),
   chess('chess', 'Chess'),
-  fourinarow('fourinarow', 'Four in a Row');
+  fourinarow('fourinarow', 'Four in a Row'),
+  reversi('reversi', 'Reversi');
 
   const GameType(this.wire, this.title);
 
@@ -64,5 +66,7 @@ Board initialBoard(GameType t) {
       return ChessBoard.initial();
     case GameType.fourinarow:
       return FourInARowBoard.initial();
+    case GameType.reversi:
+      return ReversiBoard.initial();
   }
 }

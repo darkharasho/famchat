@@ -3,11 +3,13 @@ import 'package:material_ui/material_ui.dart';
 import '../checkers.dart';
 import '../chess_board.dart';
 import '../four_in_a_row.dart';
+import '../reversi.dart';
 import '../rules.dart';
 import '../tictactoe.dart';
 import 'checkers_view.dart';
 import 'chess_view.dart';
 import 'four_in_a_row_view.dart';
+import 'reversi_view.dart';
 import 'tictactoe_view.dart';
 
 /// An interactive board for any game, with [mySide] at the bottom. With
@@ -67,6 +69,13 @@ class _BoardViewState extends State<BoardView> {
         thumbnail: widget.thumbnail,
       ),
       FourInARowBoard() => FourInARowView(
+        board: b,
+        mySide: widget.mySide,
+        onPlay: widget.onPlay,
+        interactive: interactive,
+        thumbnail: widget.thumbnail,
+      ),
+      ReversiBoard() => ReversiView(
         board: b,
         mySide: widget.mySide,
         onPlay: widget.onPlay,

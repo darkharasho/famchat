@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`) and Four in a Row (`fourinarow`). All are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`) and Reversi (`reversi`). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow", "first":"<userId>"}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi", "first":"<userId>"}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -138,6 +138,11 @@ Move fields of `play`:
   when the move promotes and never otherwise.
 - Four in a Row: `{"col": 0..6}`, columns numbered from the left; the disc falls to the lowest empty cell. The first
   player is red and moves first. No draw offers.
+- Reversi: `{"cell": 0..63}`, row-major with row 0 at the top (a1 is 56). The start position has the second
+  player's discs on 28 and 35 and the first player's on 27 and 36; the first player (dark) moves first. A move must
+  flip at least one opposing disc, and every bracketed line flips. A side with no legal move is passed over
+  automatically (no message), and the game ends when neither side can move: most discs wins (reason `discs`), equal
+  counts draw. No draw offers.
 
 ### Link previews
 A text may carry a card for its first link, made by the sender:
