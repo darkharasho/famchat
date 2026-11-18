@@ -150,6 +150,20 @@ void main() {
     await until(() async => (await bob.texts(chatId)).contains('now'));
   });
 
+  test('hasUnsent is true from send until the ack', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await alice.sync.idle;
+    expect(await alice.sync.hasUnsent(), isFalse);
+    alice.d.hub.drop();
+    final id = await alice.sync.sendText(chatId, 'wait');
+    expect(await alice.sync.hasUnsent(), isTrue);
+    await alice.d.hub.connect();
+    await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
+    expect(await alice.sync.hasUnsent(), isFalse);
+  });
+
   test('a gap triggers a catch-up fetch', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

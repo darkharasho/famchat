@@ -617,7 +617,11 @@ class ChatSync {
   /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
   static const mediaKinds = {'photo', 'voice', 'video'};
 
-  /// Queues an outbox flush (after work queued before it).
+  /// Whether this device has a message the server hasn't acknowledged yet (sending, or waiting
+  /// for a connection or an upload).
+  Future<bool> hasUnsent() async => (await db.pendingOutbox(me.deviceId)).isNotEmpty;
+
+  /// Queues an outbox flush (on the send lane).
   void flushSoon() => unawaited(_flushOutbox().catchError((_) {}));
 
   /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
