@@ -85,3 +85,20 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
       ? '♟ You lost at $title'
       : '🏆 You won at $title';
 }
+
+/// The game a timeline event [m] belongs to and what it says, with [who] as the actor ("You" or a name):
+/// resigns and draw offers, accepts and declines. Null for plays (the card shows those) and anything else.
+({String gameId, String text})? gameEventOf(MessageRow m, String who) {
+  if (m.kind != 'move') return null;
+  final p = _decode(m);
+  if (p is! MoveBody) return null;
+  final title = p.game.title;
+  final text = switch (p.action['type']) {
+    'resign' => '🏳 $who resigned at $title',
+    'draw_offer' => '🤝 $who offered a draw in $title',
+    'draw_accept' => '🤝 $who accepted a draw in $title',
+    'draw_decline' => '$who declined a draw in $title',
+    _ => null,
+  };
+  return text == null ? null : (gameId: p.target, text: text);
+}

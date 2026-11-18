@@ -14,6 +14,9 @@ people, not a separate app.
 - Tic-tac-toe, checkers and chess, playable in **direct (1:1) chats only**.
 - Starting a game puts **one game card** in the timeline. Moves update that card; they never appear
   as their own bubbles.
+  Resigns and draw offers, accepts and declines (not plays) also show as a small centred line where
+  they landed (`🏳 You resigned at Chess`, `🤝 Mom offered a draw in Chess`); tapping it opens the
+  board. Added 2026-11-18 at the user's request, so the chat shows what the chat list does.
 - While a game is unfinished, a slim **active-game bar** sits at the top of the DM
   (`♟ Chess with Mom · Your turn` / `· Mom's turn`). Tapping it, or the card, opens the full board.
 - Each move **notifies the other person** (push + unread), so async play doesn't stall. Live play
