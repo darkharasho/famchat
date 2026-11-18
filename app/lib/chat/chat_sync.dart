@@ -677,6 +677,44 @@ class ChatSync {
     return _enqueueMessage(chatId, EditBody(messageId, t), targetId: messageId);
   }
 
+  /// Whether [attachPreview] would attach a preview of [url] to [messageId] now.
+  Future<bool> canAttachPreview(String chatId, String messageId, String url) async {
+    final own = await _ownText(chatId, messageId);
+    return own != null && !own.$2 && previewFits(own.$1, url);
+  }
+
+  /// The text this user's text message [messageId] shows now (after edits) and whether it shows a
+  /// link preview; null when it's gone, deleted, someone else's, or not a text.
+  Future<(String, bool)?> _ownText(String chatId, String messageId) async {
+    final m = await db.messageById(messageId);
+    if (m == null || m.chatId != chatId || m.senderUserId != me.userId) return null;
+    final changes = messageChanges([m, ...await db.changesTo(chatId, messageId)]);
+    final text = changes.textOf(m);
+    return text == null ? null : (text, changes.previewOf(m) != null);
+  }
+
+  /// Attaches [preview] to this user's text [messageId], sent before its link's preview was ready:
+  /// a preview-only edit repeating the text as it stands (docs/protocol.md "Link previews"). [id]
+  /// lets the caller tie the preview's image upload to the edit. Returns the edit's id, or null
+  /// when the message is gone, no longer has the link, or already shows a preview. Runs in the sync
+  /// queue, like deletes, so the check and the enqueue see the same message.
+  Future<String?> attachPreview(String chatId, String messageId, LinkPreview preview, {String? id}) async {
+    String? sent;
+    await _enqueue(() async {
+      final own = await _ownText(chatId, messageId);
+      if (own == null) return;
+      final (text, hasPreview) = own;
+      if (hasPreview || !previewFits(text, preview.url)) return;
+      sent = await _enqueueMessage(
+        chatId,
+        EditBody(messageId, text, preview: preview, previewOnly: true),
+        targetId: messageId,
+        id: id,
+      );
+    });
+    return sent;
+  }
+
   /// Unsends this user's message [messageId] for everyone. A message still in this device's outbox
   /// is just dropped.
   /// Runs in the sync queue, so the outbox can't start sending the message meanwhile.

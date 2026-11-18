@@ -109,6 +109,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// The fetch for [_previewUrl] while it runs, so a send can wait for it.
   Future<void>? _previewLoad;
 
+  /// The fetch for [_previewUrl] (kept when done): a text sent before it finished gets the preview
+  /// attached afterwards.
+  Future<FetchedPreview?>? _previewFetch;
+
   /// A send is waiting for its link's preview (a second tap must not send twice).
   bool _waitingForPreview = false;
 
@@ -136,7 +140,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _previewUrl = url;
       _preview = null;
     });
-    final fetch = ref.read(chatApiProvider).preview(url);
+    final fetch = _previewFetch = ref.read(chatApiProvider).preview(url);
     final load = _previewLoad = fetch.then((_) {}, onError: (Object _) {});
     FetchedPreview? found;
     try {
@@ -540,11 +544,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (!mounted) return;
         final preview = _preview;
         final media = ref.read(mediaServiceProvider);
-        if (preview != null && media != null && _firstLink(text) == _previewUrl) {
+        final link = _firstLink(text);
+        if (preview != null && media != null && link == _previewUrl) {
           await media.sendTextWithPreview(widget.chatId, text, preview,
               replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
         } else {
-          await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+          // Its preview may still be on the way (the wait above is short): attach it once it comes.
+          final late = link != null && link == _previewUrl && link != _dismissedPreviewUrl ? _previewFetch : null;
+          final id = await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+          if (late != null && media != null) unawaited(media.attachLatePreview(widget.chatId, id, late));
         }
         _previewTimer?.cancel();
         if (mounted) setState(() => _previewUrl = _preview = _dismissedPreviewUrl = null);
@@ -1006,7 +1014,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
                 mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
-                linkPreview: changes.isDeleted(m.id) ? null : previewOf(m, changes.textOf(m)),
+                linkPreview: changes.previewOf(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),

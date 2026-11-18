@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -74,8 +75,36 @@ void main() {
     expect(find.byKey(const Key('composer-preview')), findsNothing);
     await tester.tap(find.byTooltip('Send'));
     await settle(tester);
+    await tester.pump(const Duration(seconds: 5));
+    await settle(tester);
     final sent = await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId));
+    expect(sent.map((r) => r.kind), ['text', 'text'], reason: 'no preview attached later either');
     expect(sent.map((r) => (Plaintext.decode(utf8.encode(r.body!)) as TextBody).preview), [null, null]);
+  });
+
+  chatTestWidgets('a link sent before its preview is ready gets it afterwards, not marked edited', (tester) async {
+    await open(tester);
+    final hold = Completer<void>();
+    alice.api.holds['GET /preview'] = hold;
+    await tester.enterText(find.byKey(const Key('composer')), 'look https://youtu.be/cat');
+    await tester.pump(); // sent at once: the fetch starts with the send
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump(const Duration(seconds: 4)); // longer than a send waits
+    await settle(tester);
+    final text = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    expect((Plaintext.decode(utf8.encode(text.body!)) as TextBody).preview, isNull);
+    expect(find.byKey(Key('link-preview-${text.id}')), findsNothing);
+
+    hold.complete();
+    await settle(tester);
+    final rows = await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId));
+    final edit = Plaintext.decode(utf8.encode(rows.last.body!)) as EditBody;
+    expect((edit.target, edit.text, edit.previewOnly), (text.id, 'look https://youtu.be/cat', true));
+    expect(edit.preview!.title, 'Cat jumps');
+    expect(edit.preview!.image, isNotNull);
+    expect(find.byKey(Key('link-preview-${text.id}')), findsOneWidget);
+    expect(find.text('YouTube'), findsOneWidget);
+    expect(find.text('edited'), findsNothing);
   });
 
   chatTestWidgets('hovering a preview card shows the link cursor', (tester) async {
