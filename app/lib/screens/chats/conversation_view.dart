@@ -25,6 +25,8 @@ import '../../games/game_state.dart' show activeGame;
 import '../../games/providers.dart';
 import '../../games/widgets/game_bar.dart';
 import '../../games/widgets/game_card.dart';
+import '../../games/widgets/game_event_line.dart';
+import '../../games/labels.dart' show gameEventOf;
 import '../../games/widgets/start_game_sheet.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
@@ -1004,9 +1006,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
-    final visible = messages.where((m) => !timelineHiddenKinds.contains(m.kind)).toList();
-    final byId = {for (final m in visible) m.id: m};
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
+    // Resigns and draw offers show as a line in the timeline; plays only move the card's board.
+    String firstNameOf(String userId) => nameOf(userId).split(' ').first;
+    final gameEvents = {
+      for (final m in messages)
+        if (m.kind == 'move') m.id: ?gameEventOf(m, firstNameOf(m.senderUserId)),
+    };
+    final visible =
+        messages.where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id)).toList();
+    final byId = {for (final m in visible) m.id: m};
     QuotedMessage? quoteFor(MessageRow m) {
       final target = replyTargetOf(m);
       if (target == null) return null;
@@ -1021,7 +1030,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final others = members.where((m) => m.userId != me).toList();
     // Game cards carry no footer, so a game row never takes the Seen line.
     final lastMineSent =
-        visible.lastWhere((m) => m.senderUserId == me && m.seq != null && m.kind != 'game', orElse: () => _none).id;
+        visible.lastWhere((m) => m.senderUserId == me && m.seq != null && m.kind != 'game' && m.kind != 'move', orElse: () => _none).id;
     String? seenFooter(MessageRow m) {
       if (m.id != lastMineSent || others.isEmpty) return null;
       final seen = others.where((o) => o.lastReadSeq >= m.seq!).length;
@@ -1038,6 +1047,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
+          MessageEntry(message: final m) when gameEvents.containsKey(m.id) => AppearIn(
+              key: ValueKey(m.id),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
+              child: KeyedSubtree(
+                key: _keyFor(m.id),
+                child: GameEventLine(chatId: chatId, gameId: gameEvents[m.id]!.gameId, text: gameEvents[m.id]!.text),
+              ),
+            ),
           MessageEntry(message: final m) when m.kind == 'game' => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),

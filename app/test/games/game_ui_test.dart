@@ -8,6 +8,7 @@ import 'package:famchat/chat/wire.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
 import 'package:famchat/games/widgets/game_card.dart';
+import 'package:famchat/games/widgets/game_event_line.dart';
 import 'package:famchat/games/widgets/game_screen.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
@@ -206,6 +207,30 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  chatTestWidgets('resigns and draw offers show as lines in the chat; plays do not', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.chess, alice.userId),
+        ...[
+          move(alice.userId, 'g1', GameType.chess, 0, {'type': 'play', 'from': 12, 'to': 28}),
+          move(bob.userId, 'g1', GameType.chess, 1, {'type': 'draw_offer'}),
+          move(alice.userId, 'g1', GameType.chess, 1, {'type': 'draw_decline'}),
+          move(alice.userId, 'g1', GameType.chess, 1, {'type': 'resign'}),
+        ],
+      ],
+    );
+    expect(find.byType(GameEventLine), findsNWidgets(3));
+    expect(find.text('🤝 Bob offered a draw in Chess'), findsOneWidget);
+    expect(find.text('You declined a draw in Chess'), findsOneWidget);
+    expect(find.text('🏳 You resigned at Chess'), findsOneWidget);
+    await tester.tap(find.text('🏳 You resigned at Chess'));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
   });
 
   chatTestWidgets('resign asks for confirmation then sends resign', (

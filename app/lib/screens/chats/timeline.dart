@@ -27,7 +27,11 @@ final class MessageEntry extends TimelineEntry {
 DateTime _at(MessageRow m) => DateTime.fromMillisecondsSinceEpoch(m.createdAt);
 DateTime _dayOf(DateTime t) => DateTime(t.year, t.month, t.day);
 
+/// Game cards and game event lines stand alone; bubbles either side of them start or end a run.
+bool _standsAlone(MessageRow m) => m.kind == 'game' || m.kind == 'move';
+
 bool _sameRun(MessageRow a, MessageRow b) {
+  if (_standsAlone(a) || _standsAlone(b)) return false;
   final ta = _at(a), tb = _at(b);
   return a.senderUserId == b.senderUserId && _dayOf(ta) == _dayOf(tb) && tb.difference(ta).abs() <= groupGap;
 }
