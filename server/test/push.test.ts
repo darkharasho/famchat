@@ -1,8 +1,8 @@
 import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PushJob } from "../src/hub";
-import { deliverJob, handlePushBatch, notificationFor, sendAll } from "../src/push/consumer";
-import { fcmMessage, invalidateAccessToken, parseServiceAccount } from "../src/push/fcm";
+import type { PushJob, QueueJob } from "../src/hub";
+import { deliverBadgeJob, deliverJob, handlePushBatch, notificationFor, sendAll, unreadTotals } from "../src/push/consumer";
+import { fcmBadgeMessage, fcmMessage, invalidateAccessToken, parseServiceAccount } from "../src/push/fcm";
 import { addDevice, createDirect, createGroup, insertMessage } from "./chat-helpers";
 import { BASE, insertUserWithDevice, jsonReq, resetDb } from "./helpers";
 import { fakeGoogle, fcmError, testServiceAccount } from "./push-helpers";
@@ -145,7 +145,8 @@ describe("push queue consumer", () => {
     for (const s of g.sends()) {
       const m = (JSON.parse(s.body) as { message: Record<string, unknown> }).message;
       expect(m.notification).toEqual({ title: "Parents", body: "New message from Mom" });
-      expect(m.data).toEqual({ chatId: chat.id });
+      // Dad has one unread message: the badge.
+      expect(m.data).toEqual({ chatId: chat.id, badge: "1" });
       // Never the envelope, nor anything else from the message row.
       expect(s.body).not.toContain(stored!.envelope);
       expect(s.body).not.toContain('"ct"');
@@ -228,7 +229,7 @@ describe("push queue consumer", () => {
     expect(p.data.epoch).toBe("3");
     expect(p.data.senderDeviceId).toBe(mom.deviceId);
     expect(p.notification).toBeUndefined();
-    expect(byTok["dad-laptop"]).toEqual(fcmMessage("dad-laptop", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN));
+    expect(byTok["dad-laptop"]).toEqual(fcmMessage("dad-laptop", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN, 0));
   });
 
   it("job without preview sends plain to a previews device", async () => {
@@ -240,7 +241,7 @@ describe("push queue consumer", () => {
     await deliverJob(e, sa, { chatId: chat.id, senderUserId: mom.userId, messageId: "m", userIds: [dad.userId] }, g.fetcher);
     const phone = g.sends().find((c) => c.body.includes('"dad-phone"'))!;
     expect(JSON.parse(phone.body)).toEqual(
-      fcmMessage("dad-phone", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN),
+      fcmMessage("dad-phone", { title: "Family", body: "New message from Mom", chatId: chat.id }, e.APP_ORIGIN, 0),
     );
   });
 
@@ -346,5 +347,108 @@ describe("POST /api/devices/me/push/test", () => {
   it("requires auth", async () => {
     const res = await SELF.fetch(`${BASE}/api/devices/me/push/test`, { method: "POST" });
     expect(res.status).toBe(401);
+  });
+});
+
+const msgOf = (c: { body: string }) => (JSON.parse(c.body) as { message: Record<string, any> }).message;
+const setPlatform = (deviceId: string, platform: string) =>
+  env.DB.prepare("UPDATE devices SET platform = ? WHERE id = ?").bind(platform, deviceId).run();
+
+describe("unread totals (app-icon badge)", () => {
+  it("counts others' non-silent messages after the read point and the join point, in unmuted chats", async () => {
+    const [mom, dad, kid] = [await insertUserWithDevice(), await insertUserWithDevice(), await insertUserWithDevice()];
+    const group = await createGroup(mom, [dad, kid], "Family");
+    const direct = await createDirect(mom, dad);
+    await insertMessage(group.id, mom); // seq 1
+    await insertMessage(group.id, mom); // seq 2
+    await insertMessage(group.id, mom, 1, { silent: true }); // seq 3, a reaction: never unread
+    await insertMessage(group.id, dad); // seq 4, dad's own
+    await insertMessage(group.id, kid); // seq 5
+    await insertMessage(direct.id, mom);
+    let t = await unreadTotals(env.DB, [dad.userId, kid.userId, mom.userId]);
+    expect(t.get(dad.userId)).toBe(4); // group 1, 2, 5 + direct
+    expect(t.get(kid.userId)).toBe(3); // group 1, 2, 4
+    expect(t.get(mom.userId)).toBe(2); // dad's and kid's
+
+    // Dad read up to 2; kid joined at 3 (history from before isn't unread).
+    await env.DB.prepare("UPDATE chat_members SET last_read_seq = 2 WHERE chat_id = ? AND user_id = ?").bind(group.id, dad.userId).run();
+    await env.DB.prepare("UPDATE chat_members SET joined_seq = 3 WHERE chat_id = ? AND user_id = ?").bind(group.id, kid.userId).run();
+    t = await unreadTotals(env.DB, [dad.userId, kid.userId]);
+    expect(t.get(dad.userId)).toBe(2); // group 5 + direct
+    expect(t.get(kid.userId)).toBe(1); // group 4 (dad's)
+
+    // A mute leaves the chat out until it ends.
+    const now = Date.now();
+    await env.DB.prepare("UPDATE chat_members SET muted_until = ? WHERE chat_id = ? AND user_id = ?").bind(now + 60_000, direct.id, dad.userId).run();
+    expect((await unreadTotals(env.DB, [dad.userId], now)).get(dad.userId)).toBe(1);
+    expect((await unreadTotals(env.DB, [dad.userId], now + 60_000)).get(dad.userId)).toBe(2);
+  });
+
+  it("is 0 for users with nothing unread", async () => {
+    const [mom, dad] = [await insertUserWithDevice(), await insertUserWithDevice()];
+    await createGroup(mom, [dad], "Family");
+    expect([...(await unreadTotals(env.DB, [dad.userId]))]).toEqual([[dad.userId, 0]]);
+    expect((await unreadTotals(env.DB, [])).size).toBe(0);
+  });
+
+  it("each message push carries its own user's total", async () => {
+    const { mom, dad, kid, dadLaptop } = await family();
+    const chat = await createGroup(mom, [dad, kid], "Family", [dadLaptop]);
+    await env.DB.prepare("UPDATE devices SET push_previews = 1 WHERE id = ?").bind(dad.deviceId).run();
+    await insertMessage(chat.id, kid);
+    const id = await insertMessage(chat.id, mom);
+    const { env: e, sa } = await pushEnv();
+    const g = fakeGoogle();
+    await deliverJob(e, sa, {
+      chatId: chat.id, senderUserId: mom.userId, messageId: id, userIds: [dad.userId, kid.userId],
+      preview: { senderDeviceId: mom.deviceId, epoch: 1, envelope: '{"v":1}' },
+    }, g.fetcher);
+    const byTok = Object.fromEntries(g.sends().map((c) => [msgOf(c).token, msgOf(c)]));
+    // Dad's phone (previews): a data value and aps.badge; his laptop (plain): notification_count too.
+    expect(byTok["dad-phone"].data.badge).toBe("2");
+    expect(byTok["dad-phone"].apns.payload.aps.badge).toBe(2);
+    expect(byTok["dad-laptop"].android.notification.notification_count).toBe(2);
+    expect(byTok["dad-laptop"].apns.payload.aps.badge).toBe(2);
+    expect(byTok["kid-phone"].data.badge).toBe("1");
+    expect(byTok["kid-phone"].apns.payload.aps.badge).toBe(1);
+  });
+});
+
+describe("badge update jobs", () => {
+  beforeEach(() => invalidateAccessToken());
+
+  it("send the user's total, quietly, to the job's phones that are still theirs", async () => {
+    const { mom, dad, kid, dadLaptop } = await family();
+    await setPlatform(dadLaptop, "ios");
+    const dadWeb = await addDevice(dad.userId);
+    await setTok(dadWeb, "dad-web");
+    await setPlatform(dadWeb, "web");
+    const chat = await createGroup(mom, [dad], "Family", [dadLaptop, dadWeb]);
+    await insertMessage(chat.id, mom);
+    await insertMessage(chat.id, mom, 1, { silent: true });
+    const { env: e, sa } = await pushEnv();
+    const g = fakeGoogle();
+    // The kid's phone isn't dad's; the web device isn't a phone.
+    const out = await deliverBadgeJob(e, sa, { kind: "badge", userId: dad.userId, deviceIds: [dadLaptop, dadWeb, kid.deviceId] }, g.fetcher);
+    expect(out).toEqual([{ deviceId: dadLaptop, result: "ok" }]);
+    expect(g.sends().map(msgOf)).toEqual([fcmBadgeMessage("dad-laptop", 1).message]);
+  });
+
+  it("go through the queue handler and re-queue only failed devices", async () => {
+    const { mom, dad, dadLaptop } = await family();
+    await setPlatform(dadLaptop, "ios");
+    await createGroup(mom, [dad], "Family", [dadLaptop]);
+    const { env: e, q } = await pushEnv();
+    const g = fakeGoogle((t) => (t === "dad-laptop" ? fcmError(503, "UNAVAILABLE") : Response.json({ name: "x" })));
+    const batch = createMessageBatch<QueueJob>("famchat-push", [
+      { id: "b1", timestamp: new Date(), attempts: 1, body: { kind: "badge", userId: dad.userId, deviceIds: [dad.deviceId, dadLaptop] } },
+    ]);
+    const ctx = createExecutionContext();
+    await handlePushBatch(batch, e, g.fetcher);
+    expect((await getQueueResult(batch, ctx)).explicitAcks).toEqual(["b1"]);
+    expect(g.sends().map((c) => msgOf(c).data)).toEqual([{ type: "badge", badge: "0" }, { type: "badge", badge: "0" }]);
+    expect(q.sent as unknown[]).toEqual([
+      { job: { kind: "badge", userId: dad.userId, deviceIds: [dadLaptop], attempt: 1 }, delaySeconds: 10 },
+    ]);
   });
 });

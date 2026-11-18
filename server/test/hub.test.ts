@@ -1,6 +1,6 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type FamilyHub, MAX_PREVIEW_ENVELOPE, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
+import { type BadgeJob, type FamilyHub, MAX_PREVIEW_ENVELOPE, noPush, type PushJob, queuePush, STALE_SOCKET_MS } from "../src/hub";
 import { newId } from "../src/lib/ids";
 import { addDevice, api, type ChatOut, createDirect, createGroup, type TestUser, wrapsFor } from "./chat-helpers";
 import { notifyReset } from "../src/lib/reset-account";
@@ -670,6 +670,89 @@ describe("typing and read receipts", () => {
     expect((await ca.next("read")).seq).toBe(3);
     const c = (await (await api(a.accessToken, "GET", `/chats/${chat.id}`)).json<{ chat: ChatOut }>()).chat;
     expect(c.members.find((m) => m.userId === b.userId)!.lastReadSeq).toBe(3);
+  });
+
+  it("stores whether a message was silent", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createDirect(a, b);
+    const ca = await connect(a);
+    const plain = newId();
+    const quiet = newId();
+    ca.send({ type: "send", id: plain, chatId: chat.id, envelope: envelope() });
+    await ca.next("ack");
+    ca.send({ type: "send", id: quiet, chatId: chat.id, envelope: envelope(), silent: true });
+    await ca.next("ack");
+    const silentOf = (id: string) => env.DB.prepare("SELECT silent FROM messages WHERE id = ?").bind(id).first<number>("silent");
+    expect(await silentOf(plain)).toBe(0);
+    expect(await silentOf(quiet)).toBe(1);
+  });
+
+  it("a read that clears unread messages sends a badge update to the reader's other phones only", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice(); // b.deviceId: the Android phone that reads
+    const bIphone = await addDevice(b.userId);
+    const bLaptop = await addDevice(b.userId); // not a phone
+    const bOld = await addDevice(b.userId); // no token
+    await setPushToken(b.deviceId, "b-android");
+    await setPushToken(bIphone, "b-iphone");
+    await setPushToken(bLaptop, "b-laptop");
+    await env.DB.prepare("UPDATE devices SET platform = 'ios' WHERE id IN (?, ?)").bind(bIphone, bOld).run();
+    const chat = await createGroup(a, [b], "Family", [bIphone, bLaptop, bOld]);
+    const badges: BadgeJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = noPush;
+      hub.badges = { update: async (j) => void badges.push(j) };
+    });
+    const ca = await connect(a);
+    const cb = await connect(b);
+    const sendFrom = async (c: Client, silent = false) => {
+      c.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope(), ...(silent ? { silent: true } : {}) });
+      return (await c.next("ack")).seq as number;
+    };
+    const readAndWait = async (seq: number) => {
+      cb.send({ type: "read", chatId: chat.id, seq });
+      await ca.next("read");
+      await new Promise((r) => setTimeout(r, 50));
+    };
+    const waitForBadges = async (n: number) => {
+      for (let i = 0; i < 50 && badges.length < n; i++) await new Promise((r) => setTimeout(r, 10));
+    };
+
+    await sendFrom(ca);
+    await readAndWait(await sendFrom(ca));
+    await waitForBadges(1);
+    expect(badges).toEqual([{ kind: "badge", userId: b.userId, deviceIds: [bIphone] }]);
+
+    // Reading past only b's own messages or silent changes leaves the badge as it was: no update.
+    await readAndWait(await sendFrom(cb));
+    await readAndWait(await sendFrom(ca, true));
+    expect(badges).toHaveLength(1);
+
+    // Nor in a muted chat, whose messages the badge leaves out.
+    expect((await api(b.accessToken, "PUT", `/chats/${chat.id}/mute`, { until: Date.now() + 3_600_000 })).status).toBe(204);
+    await readAndWait(await sendFrom(ca));
+    expect(badges).toHaveLength(1);
+  });
+
+  it("no badge update when the reader has no other phone with a token", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    await setPushToken(b.deviceId, "b-android");
+    const chat = await createDirect(a, b);
+    const badges: BadgeJob[] = [];
+    await runInDurableObject(env.HUB.get(env.HUB.idFromName("family")), (hub: FamilyHub) => {
+      hub.push = noPush;
+      hub.badges = { update: async (j) => void badges.push(j) };
+    });
+    const ca = await connect(a);
+    const cb = await connect(b);
+    ca.send({ type: "send", id: newId(), chatId: chat.id, envelope: envelope() });
+    const seq = (await ca.next("ack")).seq as number;
+    cb.send({ type: "read", chatId: chat.id, seq });
+    await ca.next("read");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(badges).toEqual([]);
   });
 });
 

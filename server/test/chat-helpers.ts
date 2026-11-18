@@ -92,16 +92,16 @@ export async function createDirect(a: TestUser, b: TestUser) {
 }
 
 /** Inserts a message row directly (the hub does this in production). */
-export async function insertMessage(chatId: string, sender: TestUser, epoch = 1) {
+export async function insertMessage(chatId: string, sender: TestUser, epoch = 1, { silent = false } = {}) {
   const id = newId();
   const now = Date.now();
   const envelope = JSON.stringify({ v: 1, epoch, nonce: "AA", ct: "AA", sig: "AA" });
   await env.DB.batch([
     env.DB.prepare("UPDATE chats SET last_seq = last_seq + 1, last_message_at = ? WHERE id = ?").bind(now, chatId),
     env.DB.prepare(
-      `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at)
-       SELECT id, last_seq, ?, ?, ?, ?, ? FROM chats WHERE id = ?`,
-    ).bind(id, sender.userId, sender.deviceId, envelope, now, chatId),
+      `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at, silent)
+       SELECT id, last_seq, ?, ?, ?, ?, ?, ? FROM chats WHERE id = ?`,
+    ).bind(id, sender.userId, sender.deviceId, envelope, now, silent ? 1 : 0, chatId),
   ]);
   return id;
 }

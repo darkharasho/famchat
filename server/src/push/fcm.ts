@@ -83,16 +83,28 @@ export interface Notification {
   chatId: string | null;
 }
 
-/** One FCM v1 message for [token]: the visible text plus the chat id, with per-platform blocks. */
-export function fcmMessage(token: string, n: Notification, appOrigin: string) {
+/**
+ * One FCM v1 message for [token]: the visible text plus the chat id, with per-platform blocks.
+ * [badge] (the user's unread total, consumer.ts unreadTotals) sets the app-icon number: iOS
+ * `aps.badge`, Android `notification_count` plus a `badge` data value for the app's own badge code
+ * (launchers that ignore notification_count). Omitted, the badge is left alone.
+ */
+export function fcmMessage(token: string, n: Notification, appOrigin: string, badge?: number) {
   const tag = n.chatId ?? "test";
+  const hasBadge = badge !== undefined;
   return {
     message: {
       token,
       notification: { title: n.title, body: n.body },
-      data: n.chatId ? { chatId: n.chatId } : {},
-      android: { priority: "high", notification: { channel_id: "messages", tag } },
-      apns: { headers: { "apns-priority": "10" }, payload: { aps: { sound: "default", "thread-id": tag } } },
+      data: { ...(n.chatId ? { chatId: n.chatId } : {}), ...(hasBadge ? { badge: String(badge) } : {}) },
+      android: {
+        priority: "high",
+        notification: { channel_id: "messages", tag, ...(hasBadge ? { notification_count: badge } : {}) },
+      },
+      apns: {
+        headers: { "apns-priority": "10" },
+        payload: { aps: { sound: "default", "thread-id": tag, ...(hasBadge ? { badge } : {}) } },
+      },
       webpush: {
         notification: { tag },
         fcm_options: { link: n.chatId ? `${appOrigin}/chats/${n.chatId}` : `${appOrigin}/` },
@@ -114,9 +126,11 @@ export interface PreviewData {
  * A data-only message for a device with previews on: the app decrypts [PreviewData.envelope] and
  * shows the text itself, or the generic [n] text when it can't. The iOS block keeps an alert and
  * mutable-content so a notification extension could replace it. All data values are strings.
+ * [badge]: iOS `aps.badge`; Android a `badge` data value the app sets on the icon itself.
  */
-export function fcmPreviewMessage(token: string, n: Notification, p: PreviewData, appOrigin: string) {
+export function fcmPreviewMessage(token: string, n: Notification, p: PreviewData, appOrigin: string, badge?: number) {
   const chatId = n.chatId ?? "test";
+  const hasBadge = badge !== undefined;
   return {
     message: {
       token,
@@ -130,13 +144,44 @@ export function fcmPreviewMessage(token: string, n: Notification, p: PreviewData
         title: n.title,
         body: n.body,
         preview: "1",
+        ...(hasBadge ? { badge: String(badge) } : {}),
       },
       android: { priority: "high" },
       apns: {
         headers: { "apns-priority": "10" },
-        payload: { aps: { alert: { title: n.title, body: n.body }, "mutable-content": 1, sound: "default", "thread-id": chatId } },
+        payload: {
+          aps: {
+            alert: { title: n.title, body: n.body },
+            "mutable-content": 1,
+            sound: "default",
+            "thread-id": chatId,
+            ...(hasBadge ? { badge } : {}),
+          },
+        },
       },
       webpush: { fcm_options: { link: `${appOrigin}/chats/${chatId}` } },
+    },
+  };
+}
+
+/**
+ * A quiet badge update (the user read chats on another device): nothing shows, only the app-icon
+ * number changes. iOS: an `alert`-type push (APNs counts badge-only pushes as alerts) whose `aps`
+ * holds only `badge`, no alert or sound, so iOS sets the number without showing anything or waking
+ * the app. Android: a normal-priority data message (`type: "badge"`, `badge`) that the app handles
+ * by setting the badge itself; normal because Android demotes apps whose high-priority messages
+ * show no notification.
+ */
+export function fcmBadgeMessage(token: string, badge: number) {
+  return {
+    message: {
+      token,
+      data: { type: "badge", badge: String(badge) },
+      android: { priority: "normal" },
+      apns: {
+        headers: { "apns-push-type": "alert", "apns-priority": "10" },
+        payload: { aps: { badge } },
+      },
     },
   };
 }
