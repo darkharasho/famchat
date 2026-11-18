@@ -129,7 +129,7 @@ class MessageBubble extends StatefulWidget {
   /// The card for the text's link, if the sender made one.
   final LinkPreview? linkPreview;
 
-  /// Shows "edited" by the time; [deleted] shows the message as deleted.
+  /// Shows "edited" in the bubble; [deleted] shows the message as deleted.
   final bool edited, deleted;
 
   /// The message this one replies to, shown above it; tapping it calls [onOpenQuote].
@@ -357,48 +357,52 @@ class _MessageBubbleState extends State<MessageBubble> {
     final pending = m.state == 'pending';
     final showTime = widget.lastInGroup || pending || m.state == 'failed';
 
-    final metaStyle = theme.textTheme.labelSmall?.copyWith(color: meta);
-    final metaRow = Row(mainAxisSize: MainAxisSize.min, children: [
-      if (widget.edited && !widget.deleted) ...[
-        Text('edited', style: metaStyle?.copyWith(fontStyle: FontStyle.italic)),
-        if (showTime) const SizedBox(width: 4),
-      ],
-      if (showTime)
+    // "edited" stays in the bubble; the time goes under it (below).
+    final showEdited = widget.edited && !widget.deleted;
+    final edited = Text('edited', style: theme.textTheme.labelSmall?.copyWith(color: meta, fontStyle: FontStyle.italic));
+    final dim = scheme.onSurfaceVariant;
+    final timeLine = Padding(
+      padding: EdgeInsets.only(
+        top: 2,
+        left: mine ? 0 : widget.avatarSpace + Space.xs,
+        right: mine ? Space.xs : 0,
+      ),
+      child: Row(key: Key('time-${m.id}'), mainAxisSize: MainAxisSize.min, children: [
         Text(
           clockTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt), h24: MediaQuery.alwaysUse24HourFormatOf(context)),
           style: theme.textTheme.labelSmall?.copyWith(
             fontFamily: kDisplayFont, // plain zeros in times
-            color: meta,
+            color: dim,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
-      if (pending) ...[
-        const SizedBox(width: 4),
-        Icon(Icons.schedule_rounded, key: const Key('pending-icon'), size: 13, color: meta, semanticLabel: 'Sending'),
-      ],
-    ]);
+        if (pending) ...[
+          const SizedBox(width: 4),
+          Icon(Icons.schedule_rounded, key: const Key('pending-icon'), size: 13, color: dim, semanticLabel: 'Sending'),
+        ],
+      ]),
+    );
 
-    final showMeta = showTime || (widget.edited && !widget.deleted);
     Widget content;
     if (photo != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
-        if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+        if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (video != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         VideoThumb(body: video, messageId: m.id, onOpen: () => showVideoViewer(context, video, m.id)),
-        if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+        if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (gif != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         GifView(body: gif),
-        if (showMeta) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: metaRow),
+        if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (voice != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         VoiceBubble(body: voice, messageId: m.id, mine: mine),
-        if (showMeta) metaRow,
+        if (showEdited) edited,
       ]);
     } else {
       final text = _text;
@@ -417,7 +421,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         spacing: Space.sm,
         children: [
           if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames),
-          if (showMeta) Padding(padding: const EdgeInsets.only(top: 2), child: metaRow),
+          if (showEdited) Padding(padding: const EdgeInsets.only(top: 2), child: edited),
         ],
       );
       final preview = special ? null : widget.linkPreview;
@@ -498,11 +502,13 @@ class _MessageBubbleState extends State<MessageBubble> {
           borderRadius: BorderRadius.circular(Radii.md),
         ),
         child: Padding(
-        padding: EdgeInsets.only(top: widget.firstInGroup ? Space.sm : 2, bottom: widget.lastInGroup ? 2 : 0),
+        // The time line under a run's last bubble takes most of the gap between runs.
+        padding: EdgeInsets.only(top: widget.firstInGroup ? Space.xs : 2),
         child: Column(
           crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             row,
+            if (showTime) timeLine,
             if (widget.reactions.isNotEmpty && !widget.deleted)
               Padding(
                 padding: indent.add(EdgeInsets.only(top: Space.xs, left: mine ? 0 : Space.sm, right: mine ? Space.sm : 0)),
