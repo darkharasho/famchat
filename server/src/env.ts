@@ -1,4 +1,4 @@
-import type { FamilyHub, PushJob } from "./hub";
+import type { FamilyHub, QueueJob } from "./hub";
 
 export interface Env {
   DB: D1Database;
@@ -7,8 +7,8 @@ export interface Env {
   TOKEN_SECRET: string;
   BOOTSTRAP_SECRET: string;
   APP_ORIGIN: string;
-  /** Offline members' new messages, consumed by this Worker's queue() handler. */
-  PUSH_QUEUE?: Queue<PushJob>;
+  /** Offline members' new messages and badge updates, consumed by this Worker's queue() handler. */
+  PUSH_QUEUE?: Queue<QueueJob>;
   /** The Firebase service-account key (JSON). Without it push is off. */
   FCM_SERVICE_ACCOUNT?: string;
   /** KLIPY app key for GIF search (docs/protocol.md "GIFs"); unset hides GIFs in the app. */

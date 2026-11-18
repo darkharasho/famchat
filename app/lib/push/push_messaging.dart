@@ -23,6 +23,8 @@ class PushMessage {
     this.senderDeviceId,
     this.envelope,
     this.isPreview = false,
+    this.badge,
+    this.isBadgeUpdate = false,
   });
 
   final String? chatId;
@@ -38,6 +40,12 @@ class PushMessage {
   /// A data-only push for the app to draw itself (`preview: "1"`).
   final bool isPreview;
 
+  /// The unread total the server counted for the app-icon badge (`badge`), when it sent one.
+  final int? badge;
+
+  /// A quiet badge update (`type: "badge"`): nothing to show, only [badge] to set.
+  final bool isBadgeUpdate;
+
   /// [title] and [body] come from the notification block; a data-only push has its text in [data].
   factory PushMessage.fromData(Map<String, Object?> data, {String? title, String? body}) {
     String? str(String key) => data[key] is String ? data[key] as String : null;
@@ -50,6 +58,8 @@ class PushMessage {
       senderDeviceId: str('senderDeviceId'),
       envelope: _envelope(str('env')),
       isPreview: data['preview'] == '1',
+      badge: int.tryParse(str('badge') ?? ''),
+      isBadgeUpdate: data['type'] == 'badge',
     );
   }
 
@@ -63,6 +73,8 @@ class PushMessage {
         senderDeviceId: senderDeviceId,
         envelope: envelope,
         isPreview: isPreview,
+        badge: badge,
+        isBadgeUpdate: isBadgeUpdate,
       );
 
   static Map<String, Object?>? _envelope(String? json) {

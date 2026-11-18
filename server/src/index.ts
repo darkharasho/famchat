@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "./env";
-import type { PushJob } from "./hub";
+import type { QueueJob } from "./hub";
 import { handlePushBatch } from "./push/consumer";
 import { ApiError, errorResponse } from "./lib/errors";
 import { admin } from "./routes/admin";
@@ -49,4 +49,4 @@ export default {
   fetch: (req: Request, env: Env, ctx: ExecutionContext) =>
     new URL(req.url).pathname.startsWith("/.well-known/") ? wellKnown.fetch(req, env, ctx) : app.fetch(req, env, ctx),
   queue: (batch, env) => handlePushBatch(batch, env),
-} satisfies ExportedHandler<Env, PushJob>;
+} satisfies ExportedHandler<Env, QueueJob>;

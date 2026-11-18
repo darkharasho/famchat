@@ -117,6 +117,8 @@ class PushController {
   }
 
   Future<void> _foreground(PushMessage m) async {
+    // A badge update shows nothing; while the app runs it keeps the badge itself (app_badge.dart).
+    if (m.isBadgeUpdate) return;
     var shown = m;
     try {
       shown = await enrich(m);

@@ -93,5 +93,17 @@ void main() {
     expect(d.styleInformation, isA<BigTextStyleInformation>().having((s) => s.bigText, 'bigText', body));
     expect((d.channelId, d.tag, d.visibility, d.importance, d.priority),
         ('messages', chatId, NotificationVisibility.private, Importance.high, Priority.high));
+    expect(d.number, isNull);
+    expect(previewNotificationDetails(chatId, body, badge: 4).number, 4);
+  });
+
+  test('background pushes set the badge they carry; a badge update does only that', () async {
+    final set = <int>[];
+    Future<void> record(int n) async => set.add(n);
+    await handleBackgroundPush({'type': 'badge', 'badge': '2'}, setBadge: record);
+    await handleBackgroundPush({'chatId': chatId, 'badge': '5'}, title: 'Bob', body: 'New message', setBadge: record);
+    await handleBackgroundPush({'type': 'badge', 'badge': '0'}, setBadge: record);
+    await handleBackgroundPush({'chatId': chatId}, title: 'Bob', body: 'New message', setBadge: record);
+    expect(set, [2, 5, 0]);
   });
 }
