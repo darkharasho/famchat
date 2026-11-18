@@ -112,3 +112,58 @@ class _BoardViewState extends State<BoardView> {
     return IgnorePointer(child: ExcludeSemantics(child: view));
   }
 }
+
+/// The display aspect ratio (width / height) of [b]'s board: square, except
+/// Four in a Row.
+double boardAspectRatio(Board b) =>
+    b is FourInARowBoard ? FourInARowBoard.columns / FourInARowBoard.rows : 1;
+
+/// [side]'s colour on [b]'s board, as spoken ("white", "red", "X").
+String sideColourName(Board b, Side side) {
+  final first = side == Side.first;
+  return switch (b) {
+    TicTacToeBoard() => first ? 'X' : 'O',
+    ChessBoard() => first ? 'white' : 'black',
+    CheckersBoard() => first ? 'red' : 'black',
+    FourInARowBoard() => first ? 'red' : 'yellow',
+    ReversiBoard() => first ? 'dark' : 'light',
+    _ => first ? 'red' : 'blue',
+  };
+}
+
+/// The (first, second) score of a game played for points, or null.
+(int, int)? boardScore(Board b) => switch (b) {
+  ReversiBoard() => b.counts,
+  DotsAndBoxesBoard() => b.scores,
+  _ => null,
+};
+
+/// A small sample of [side]'s pieces on [b]'s board, to sit by a name.
+Widget sideSwatch(BuildContext context, Board b, Side side) => switch (b) {
+  TicTacToeBoard() => FittedBox(
+    child: Text(
+      sideColourName(b, side),
+      style: TextStyle(
+        fontWeight: FontWeight.w800,
+        color: TicTacToeView.markColor(context, side),
+      ),
+    ),
+  ),
+  ChessBoard() => ChessGlyph(piece: ChessPieceAt(side, ChessRole.pawn)),
+  CheckersBoard() => CheckersDisc(
+    piece: CheckersSquare(side, CheckersPiece.man),
+  ),
+  FourInARowBoard() => DecoratedBox(
+    decoration: BoxDecoration(
+      color: FourInARowView.discColor(context, side),
+      shape: BoxShape.circle,
+    ),
+  ),
+  ReversiBoard() => ReversiView.disc(side),
+  _ => DecoratedBox(
+    decoration: BoxDecoration(
+      color: DotsAndBoxesView.sideColor(context, side),
+      borderRadius: BorderRadius.circular(4),
+    ),
+  ),
+};
