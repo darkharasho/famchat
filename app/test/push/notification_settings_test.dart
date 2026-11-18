@@ -92,10 +92,10 @@ void main() {
     expect(find.byKey(switchKey), findsOneWidget);
   });
 
-  testWidgets('is absent on iOS', (t) async {
+  testWidgets('is shown on iOS', (t) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     await pump(t, push: FakeMessaging());
-    expect(find.byKey(switchKey), findsNothing);
+    expect(find.byKey(switchKey), findsOneWidget);
   });
 
   testWidgets('is absent when notifications are not available', (t) async {

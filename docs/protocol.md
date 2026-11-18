@@ -186,6 +186,12 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
     gets `priority: high` and no notification block; iOS gets `aps.alert {title, body}`,
     `mutable-content: 1`, sound and `thread-id`. The app decrypts `env` and shows the text itself,
     falling back to `title`/`body`. The server never sees readable text.
+    On iPhone a `NotificationService` app extension does the decrypting, because the app may not be
+    running. The app keeps a keyring (chat keys per epoch, trusted devices' signing keys, group chat
+    ids and member names) as one JSON item in the shared keychain access group `group.dev.famchat.app`
+    (`AfterFirstUnlockThisDevice`), rewritten when keys or devices change and wiped when previews are
+    turned off or the user signs out. The extension verifies the signature, decrypts, and on any
+    failure delivers the generic alert unchanged.
   - The envelope is attached only when its JSON is at most 3000 bytes (`MAX_PREVIEW_ENVELOPE`);
     larger ones go as the plain shape. A retry after a transient FCM failure keeps the envelope.
 - Who gets one: every device of the other members (except those who muted the chat and weren't
