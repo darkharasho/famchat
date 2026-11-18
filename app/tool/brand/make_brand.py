@@ -9,6 +9,7 @@ The in-app BrandMark (lib/widgets/brand_mark.dart) paints the same geometry; kee
 """
 import pathlib
 import subprocess
+import tempfile
 
 OUT = pathlib.Path("assets/brand")
 
@@ -38,13 +39,20 @@ def svg(body: str) -> str:
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">{body}\n</svg>\n'
 
 
+def desktop_tile(margin: int) -> str:
+    size = 1024 - 2 * margin
+    return f'\n  <rect x="{margin}" y="{margin}" width="{size}" height="{size}" rx="{round(size * 0.22)}" fill="{DUSK}"/>'
+
+
 VARIANTS = {
-    # Full-bleed square: iOS, Android legacy, Windows, web (also safe as a maskable icon).
+    # Full-bleed square: iOS, Android legacy, web (also safe as a maskable icon).
     "famchat-icon": svg(f'\n  <rect width="1024" height="1024" fill="{DUSK}"/>' + glyph(0.84)),
     # macOS: the rounded tile with the system's margin.
     "famchat-icon-macos": svg(
         f'\n  <rect x="100" y="100" width="824" height="824" rx="186" fill="{DUSK}"/>' + glyph(0.64)
     ),
+    # Windows/Linux: rounded tile with a slim margin (7 %, corner radius 22 % of the tile).
+    "famchat-icon-desktop": svg(desktop_tile(72) + glyph(0.70)),
     # Android adaptive foreground: glyph inside the 66 % safe zone, transparent around it.
     "famchat-foreground": svg(glyph(0.56)),
     # Splash: the glyph alone; Android 12 masks it to a circle, so it stays well inside.
@@ -59,13 +67,23 @@ def main() -> None:
         src.write_text(content)
         subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024", "-o", str(OUT / f"{name}.png"), str(src)], check=True)
         print("wrote", src, "and .png")
-    # Windows wants every size in the .ico (flutter_launcher_icons writes only one).
-    subprocess.run(
-        ["magick", str(OUT / "famchat-icon.png"), "-define", "icon:auto-resize=256,64,48,32,24,16",
-         "windows/runner/resources/app_icon.ico"],
-        check=True,
-    )
+    # Windows wants every size in one .ico. Small sizes use a slimmer margin and a bigger glyph
+    # so the mark stays legible at 16-24 px.
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    layers = []
+    for px in (16, 24, 32, 48, 64, 128, 256):
+        small = px <= 32
+        src = tmp / f"{px}.svg"
+        src.write_text(svg(desktop_tile(40 if small else 72) + glyph(0.78 if small else 0.70)))
+        dst = tmp / f"{px}.png"
+        subprocess.run(["rsvg-convert", "-w", str(px), "-h", str(px), "-o", str(dst), str(src)], check=True)
+        layers.append(str(dst))
+    subprocess.run(["magick", *layers, "windows/runner/resources/app_icon.ico"], check=True)
     print("wrote windows/runner/resources/app_icon.ico")
+    # Linux: 512 px PNG for the AppImage and hicolor.
+    subprocess.run(["rsvg-convert", "-w", "512", "-h", "512", "-o", str(OUT / "famchat-icon-desktop-512.png"),
+                    str(OUT / "famchat-icon-desktop.svg")], check=True)
+    print("wrote", OUT / "famchat-icon-desktop-512.png")
 
 
 if __name__ == "__main__":
