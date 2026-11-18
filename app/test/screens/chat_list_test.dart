@@ -94,6 +94,20 @@ void main() {
     expect(find.text('1'), findsWidgets, reason: 'edits and deletes are not unread');
   });
 
+  chatTestWidgets('a game message shows its label in the chat list', (tester) async {
+    setWindow(tester, const Size(400, 800));
+    await seed(tester);
+    await tester.runAsync(() async {
+      await alice.db.insertMessageIfAbsent(text('g1', 'direct1', 3, alice.userId, 'x').copyWith(
+            kind: 'game',
+            body: Value('{"kind":"game","game":"checkers","first":"${alice.userId}"}'),
+          ));
+    });
+    await pumpChatApp(tester, alice);
+    expect(find.text('You: 🎲 Started a game of Checkers'), findsOneWidget);
+    expect(find.text('Unsupported message'), findsNothing);
+  });
+
   chatTestWidgets('tapping a chat opens it full screen on a phone', (tester) async {
     setWindow(tester, const Size(400, 800));
     await seed(tester);
