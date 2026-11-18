@@ -1,3 +1,4 @@
+import 'checkers.dart';
 import 'tictactoe.dart';
 
 enum Side {
@@ -55,7 +56,7 @@ Board initialBoard(GameType t) {
     case GameType.tictactoe:
       return TicTacToeBoard.initial();
     case GameType.checkers:
-      throw UnimplementedError('checkers');
+      return CheckersBoard.initial();
     case GameType.chess:
       throw UnimplementedError('chess');
   }
