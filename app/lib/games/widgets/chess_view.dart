@@ -53,13 +53,21 @@ class _ChessViewState extends State<ChessView> {
   @override
   void didUpdateWidget(ChessView old) {
     super.didUpdateWidget(old);
-    if (!identical(old.board, widget.board) ||
+    if (!_samePosition(old.board, widget.board) ||
         old.mySide != widget.mySide ||
         old.interactive != widget.interactive) {
       _selected = null;
       _promoTo = null;
     }
   }
+
+  /// Games are re-derived (new Board objects) on every chat update, so the
+  /// selection clears only when the position actually changed.
+  static bool _samePosition(ChessBoard a, ChessBoard b) =>
+      identical(a, b) ||
+      a.toMove == b.toMove &&
+          a.lastMove == b.lastMove &&
+          sameOutcome(a.outcome, b.outcome);
 
   bool get _canPlay =>
       widget.interactive &&
@@ -81,10 +89,6 @@ class _ChessViewState extends State<ChessView> {
 
   void _tap(String sq) {
     final from = _selected;
-    if (_promoTo != null) {
-      setState(() => _promoTo = null);
-      return;
-    }
     if (from != null && widget.board.targetsFrom(from).contains(sq)) {
       if (widget.board.needsPromotion(from, sq)) {
         setState(() => _promoTo = sq);
@@ -107,6 +111,7 @@ class _ChessViewState extends State<ChessView> {
         ? const <String>[]
         : board.targetsFrom(selected);
     final last = board.lastMove;
+    final inCheck = board.inCheck;
     final grid = BoardGrid(
       size: 8,
       thumbnail: widget.thumbnail,
@@ -116,15 +121,15 @@ class _ChessViewState extends State<ChessView> {
         final sq = '${_files[file]}${rank + 1}';
         final dark = (file + rank).isEven;
         final piece = board.at(sq);
-        final inCheck =
-            board.inCheck &&
+        final checked =
+            inCheck &&
             piece?.role == ChessRole.king &&
             piece?.side == board.toMove;
         final tappable = canPlay && (selected != null || _selectable(sq));
         return BoardSquare(
           key: Key('sq-$sq'),
           color: dark ? colors.dark : colors.light,
-          tint: inCheck
+          tint: checked
               ? colors.check
               : last != null && (last.$1 == sq || last.$2 == sq)
               ? colors.lastMove
@@ -160,10 +165,24 @@ class _ChessViewState extends State<ChessView> {
             onTap: () => setState(() => _promoTo = null),
             child: ColoredBox(
               color: const Color(0x66000000),
-              child: Center(
-                child: _PromotionPicker(
-                  side: board.toMove,
-                  onPick: (p) => _send('$from$to$p'),
+              child: LayoutBuilder(
+                builder: (context, box) => Center(
+                  // Taps on the picker itself (between its buttons) are
+                  // not a cancel.
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {},
+                    child: _PromotionPicker(
+                      key: const Key('promo-picker'),
+                      side: board.toMove,
+                      // Four buttons with their padding in 92% of the board.
+                      square: ((box.maxWidth * 0.92 - 12) / 4 - 4).clamp(
+                        16.0,
+                        52.0,
+                      ),
+                      onPick: (p) => _send('$from$to$p'),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -275,9 +294,17 @@ class _Coords extends StatelessWidget {
 }
 
 class _PromotionPicker extends StatelessWidget {
-  const _PromotionPicker({required this.side, required this.onPick});
+  const _PromotionPicker({
+    super.key,
+    required this.side,
+    required this.square,
+    required this.onPick,
+  });
 
   final Side side;
+
+  /// Each button's side.
+  final double square;
   final void Function(String piece) onPick;
 
   @override
@@ -304,8 +331,8 @@ class _PromotionPicker extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => onPick(letter),
                     child: Ink(
-                      width: 52,
-                      height: 52,
+                      width: square,
+                      height: square,
                       decoration: BoxDecoration(
                         color: colors.light,
                         borderRadius: BorderRadius.circular(10),

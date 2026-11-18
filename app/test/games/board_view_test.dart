@@ -184,6 +184,75 @@ void main() {
     ]);
   });
 
+  testWidgets('selection survives a rebuild with an equal position', (
+    tester,
+  ) async {
+    // Each replay of the same moves makes a new Board instance, as
+    // gamesProvider does whenever the chat's messages change.
+    Board chess() => initialBoard(
+      GameType.chess,
+    ).play({'uci': 'e2e4'})!.play({'uci': 'e7e5'})!;
+    await tester.pumpWidget(view(chess()));
+    await tester.tap(find.byKey(const Key('sq-g1')));
+    await tester.pump();
+    await tester.pumpWidget(view(chess()));
+    await tester.tap(find.byKey(const Key('sq-f3')));
+    expect(played, [
+      {'uci': 'g1f3'},
+    ]);
+
+    played.clear();
+    Board checkers() => initialBoard(GameType.checkers).play({
+      'path': [9, 13],
+    })!.play({
+      'path': [23, 19],
+    })!;
+    await tester.pumpWidget(view(checkers()));
+    await tester.tap(find.byKey(const Key('sq-10')));
+    await tester.pump();
+    await tester.pumpWidget(view(checkers()));
+    await tester.tap(find.byKey(const Key('sq-14')));
+    expect(played, [
+      {
+        'path': [10, 14],
+      },
+    ]);
+  });
+
+  testWidgets('promotion picker fits a small board; its padding does not '
+      'cancel', (tester) async {
+    await tester.pumpWidget(
+      host(
+        Center(
+          child: SizedBox.square(
+            dimension: 160,
+            child: BoardView(
+              board: ChessBoard.fromFen('8/P7/8/8/8/8/8/k6K w - - 0 1'),
+              mySide: Side.first,
+              onPlay: played.add,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('sq-a7')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('sq-a8')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    final picker = find.byKey(const Key('promo-picker'));
+    final box = tester.getRect(picker);
+    expect(box.width, lessThanOrEqualTo(160));
+    // A tap on the picker's own padding keeps it open.
+    await tester.tapAt(box.topLeft + const Offset(2, 2));
+    await tester.pump();
+    expect(picker, findsOneWidget);
+    await tester.tap(find.byKey(const Key('promo-r')));
+    expect(played, [
+      {'uci': 'a7a8r'},
+    ]);
+  });
+
   testWidgets('thumbnail renders all three games without labels', (
     tester,
   ) async {

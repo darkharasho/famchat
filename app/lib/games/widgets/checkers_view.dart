@@ -33,11 +33,22 @@ class _CheckersViewState extends State<CheckersView> {
   @override
   void didUpdateWidget(CheckersView old) {
     super.didUpdateWidget(old);
-    if (!identical(old.board, widget.board) ||
+    if (!_samePosition(old.board, widget.board) ||
         old.mySide != widget.mySide ||
         old.interactive != widget.interactive) {
       _prefix = const [];
     }
+  }
+
+  /// Games are re-derived (new Board objects) on every chat update, so the
+  /// selection clears only when the position actually changed.
+  static bool _samePosition(CheckersBoard a, CheckersBoard b) {
+    if (identical(a, b)) return true;
+    final pa = a.lastPath, pb = b.lastPath;
+    return a.toMove == b.toMove &&
+        (pa == null) == (pb == null) &&
+        (pa == null || _startsWith(pa, pb!) && pa.length == pb.length) &&
+        sameOutcome(a.outcome, b.outcome);
   }
 
   bool get _canPlay =>

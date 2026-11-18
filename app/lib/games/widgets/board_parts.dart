@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../rules.dart';
+
 /// Board colours derived from the theme, so boards follow light and dark mode.
 class BoardColors {
   const BoardColors._({
@@ -27,7 +29,10 @@ class BoardColors {
           : Color.lerp(const Color(0xFFFFFFFF), s.primary, 0.42)!,
       lastMove: s.tertiary.withValues(alpha: 0.32),
       selected: s.tertiary,
-      target: const Color(0xFF000000).withValues(alpha: 0.24),
+      // Dark mode's squares are dark: a light mark reads on both colours.
+      target: isDark
+          ? s.onSurface.withValues(alpha: 0.6)
+          : const Color(0xFF000000).withValues(alpha: 0.24),
       check: s.error.withValues(alpha: 0.45),
     );
   }
@@ -36,6 +41,10 @@ class BoardColors {
 }
 
 enum TargetMark { none, dot, ring }
+
+/// Whether two outcomes are the same result (Outcome has no ==).
+bool sameOutcome(Outcome? a, Outcome? b) =>
+    a?.winner == b?.winner && a?.reason == b?.reason;
 
 /// The board's outer shape: a square with rounded corners. [cell] builds the
 /// square at display [row] (0 at the top) and [col] (0 at the left).

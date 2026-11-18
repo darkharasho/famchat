@@ -11,7 +11,8 @@ import 'tictactoe_view.dart';
 /// An interactive board for any game, with [mySide] at the bottom. With
 /// [thumbnail] it is a static picture: no interaction, selection or labels.
 ///
-/// Selection lives in the per-game views and clears whenever [board] changes.
+/// Selection lives in the per-game views and clears when the position changes
+/// (not merely the [board] instance).
 class BoardView extends StatefulWidget {
   const BoardView({
     super.key,
