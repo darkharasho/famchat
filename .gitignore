@@ -8,7 +8,7 @@ build
 .superpowers
 .sai/
 server/node_modules
-server/.wrangler
+.wrangler/
 server/.dev.vars
 server/public
 __pycache__
