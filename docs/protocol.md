@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`) and chess (`chess`). Both are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`) and Four in a Row (`fourinarow`). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess", "first":"<userId>"}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow", "first":"<userId>"}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -136,6 +136,8 @@ Move fields of `play`:
   The first player's men start on 0-11, the second's on 20-31. A multi-jump is one move (one `path`).
 - Chess: `{"uci":"e2e4"}`, UCI long algebraic notation. A promotion adds `q`, `r`, `b` or `n` (`e7e8q`), exactly
   when the move promotes and never otherwise.
+- Four in a Row: `{"col": 0..6}`, columns numbered from the left; the disc falls to the lowest empty cell. The first
+  player is red and moves first. No draw offers.
 
 ### Link previews
 A text may carry a card for its first link, made by the sender:

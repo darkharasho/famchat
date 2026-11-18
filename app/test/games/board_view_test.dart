@@ -261,4 +261,43 @@ void main() {
       expect(tester.takeException(), isNull);
     }
   });
+
+  testWidgets('four in a row: tapping a column sends {col: n}', (tester) async {
+    await tester.pumpWidget(view(initialBoard(GameType.fourinarow)));
+    await tester.tap(find.byKey(const Key('col-4')));
+    expect(played, [
+      {'col': 4},
+    ]);
+  });
+
+  testWidgets('four in a row: tapping a full column does nothing', (
+    tester,
+  ) async {
+    var b = initialBoard(GameType.fourinarow);
+    for (var i = 0; i < 6; i++) {
+      b = b.play({'col': 0})!;
+    }
+    await tester.pumpWidget(view(b));
+    await tester.tap(find.byKey(const Key('col-0')));
+    expect(played, isEmpty);
+    await tester.tap(find.byKey(const Key('col-1')));
+    expect(played, [
+      {'col': 1},
+    ]);
+  });
+
+  testWidgets('four in a row: disabled, spectator and thumbnail ignore taps', (
+    tester,
+  ) async {
+    final b = initialBoard(GameType.fourinarow);
+    await tester.pumpWidget(view(b, enabled: false));
+    await tester.tap(find.byKey(const Key('col-2')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: Side.second));
+    await tester.tap(find.byKey(const Key('col-2')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, mySide: null));
+    await tester.tap(find.byKey(const Key('col-2')), warnIfMissed: false);
+    await tester.pumpWidget(view(b, thumbnail: true));
+    await tester.tap(find.byKey(const Key('col-2')), warnIfMissed: false);
+    expect(played, isEmpty);
+  });
 }

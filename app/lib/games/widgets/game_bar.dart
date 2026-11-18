@@ -11,6 +11,7 @@ import 'game_screen.dart';
 String gameGlyph(GameType t) => switch (t) {
   GameType.chess => '\u265F\uFE0E',
   GameType.checkers => '\u26C0\uFE0E',
+  GameType.fourinarow => '\u25CF\uFE0E',
   GameType.tictactoe => '\u2715',
 };
 
