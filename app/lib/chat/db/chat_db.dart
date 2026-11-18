@@ -59,13 +59,13 @@ class LocalMessages extends Table {
   TextColumn get senderUserId => text()();
   TextColumn get senderDeviceId => text()();
 
-  /// text | photo | voice | reaction | edit | delete | unknown | undecryptable | invalid
+  /// text | photo | voice | gif | video | game | move | reaction | edit | delete | unknown | undecryptable | invalid
   TextColumn get kind => text()();
 
   /// The plaintext JSON (null while undecryptable).
   TextColumn get body => text().nullable()();
 
-  /// For reactions, edits and deletes: the message they change.
+  /// For reactions, edits and deletes: the message they change. For moves: the game's `game` message.
   TextColumn get targetId => text().nullable()();
 
   /// The envelope JSON, kept only while the message can't be decrypted yet.

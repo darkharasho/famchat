@@ -12,6 +12,7 @@ import '../api/models.dart';
 import '../crypto/encoding.dart';
 import '../crypto/envelope.dart';
 import '../crypto/keys.dart';
+import '../games/rules.dart';
 import 'chat_keys.dart';
 import 'db/chat_db.dart';
 import 'directory.dart';
@@ -335,6 +336,8 @@ class ChatSync {
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
       VideoBody() => base.copyWith(kind: 'video', body: Value(body)),
+      GameBody() => base.copyWith(kind: 'game', body: Value(body)),
+      MoveBody(:final target) => base.copyWith(kind: 'move', body: Value(body), targetId: Value(target)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
@@ -667,6 +670,14 @@ class ChatSync {
   /// Sets this user's reaction on [messageId]; an empty [emoji] removes it.
   Future<void> react(String chatId, String messageId, String emoji) =>
       _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
+
+  /// Starts [game] in [chatId]; the returned id (the message's) is the game's id. [first] moves first.
+  Future<String> startGame(String chatId, GameType game, {required String first}) =>
+      _enqueueMessage(chatId, GameBody(game, first));
+
+  /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].
+  Future<String> sendMove(String chatId, String gameId, GameType game, int ply, Map<String, Object?> action) =>
+      _enqueueMessage(chatId, MoveBody(gameId, game, ply, action), targetId: gameId);
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.

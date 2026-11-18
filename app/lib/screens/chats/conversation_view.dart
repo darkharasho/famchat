@@ -963,7 +963,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
-    final visible = messages.where((m) => !changeKinds.contains(m.kind)).toList();
+    final visible = messages.where((m) => !timelineHiddenKinds.contains(m.kind)).toList();
     final byId = {for (final m in visible) m.id: m};
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
     QuotedMessage? quoteFor(MessageRow m) {

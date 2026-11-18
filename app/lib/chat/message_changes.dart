@@ -8,6 +8,10 @@ import 'plaintext.dart';
 /// Kinds that change another message instead of showing as one.
 const changeKinds = {'reaction', 'edit', 'delete'};
 
+/// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
+/// and count as activity and unread, unlike changes).
+const timelineHiddenKinds = {...changeKinds, 'move'};
+
 /// The edits and deletes in force over a chat's messages.
 class MessageChanges {
   MessageChanges._(this._texts, this._deleted);
