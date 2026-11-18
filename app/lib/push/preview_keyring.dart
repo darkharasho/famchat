@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_initializing_formals
 // The preview keyring: what the iPhone Notification Service Extension needs to decrypt a push and
 // show its text. Built from the local database and written whole to one shared keychain item
 // (generic password, service `dev.famchat.preview`, account `preview_keyring`, access group
@@ -24,6 +25,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../chat/db/chat_db.dart';
 import '../chat/providers.dart';
 import '../crypto/encoding.dart';
+import '../session/session_controller.dart';
 import 'preview_setting.dart';
 
 const previewKeyringGroup = 'group.dev.famchat.app',
@@ -94,7 +96,6 @@ class MemoryPreviewKeyringStore implements PreviewKeyringStore {
 /// a generation counter drops any rebuild that finishes after off or dispose, so a late rewrite
 /// can never bring the keyring back. Store errors are swallowed (a simulator has no entitlement).
 class PreviewKeyringSync {
-  // ignore_for_file: prefer_initializing_formals
   PreviewKeyringSync({
     required ChatDb db,
     required PreviewKeyringStore store,
@@ -108,7 +109,7 @@ class PreviewKeyringSync {
   final Duration _debounce;
 
   int _gen = 0;
-  bool _on = false;
+  bool? _on; // null until the first setOn, so the first "off" always wipes
   StreamSubscription<Set<Object>>? _sub;
   Timer? _timer;
   Future<void> _chain = Future.value();
@@ -165,10 +166,15 @@ final previewKeyringStoreProvider = Provider<PreviewKeyringStore?>(
     (ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? SecurePreviewKeyringStore() : null);
 
 /// iOS only: mirrors the previews setting and the local database into the shared keychain item.
+/// One sync lives per chat database while signed in; the setting drives it through a listener so
+/// turning previews off reaches the same instance and wipes. A loading or reloading setting counts
+/// as off (sign-out invalidates it), and signing out drops the sync altogether.
 final previewKeyringSyncProvider = Provider<void>((ref) {
   final store = ref.watch(previewKeyringStoreProvider);
   if (store == null) return;
+  if (!ref.watch(sessionProvider.select((s) => s is SignedIn))) return;
   final sync = PreviewKeyringSync(db: ref.watch(chatDbProvider), store: store);
   ref.onDispose(sync.dispose);
-  unawaited(sync.setOn(ref.watch(previewsOnProvider).value ?? false));
+  ref.listen(previewsOnProvider, (_, n) => unawaited(sync.setOn(!n.isLoading && (n.value ?? false))),
+      fireImmediately: true);
 });

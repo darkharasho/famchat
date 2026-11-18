@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
@@ -7,7 +8,14 @@ import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/push/preview_keyring.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:famchat/chat/providers.dart';
+import 'package:famchat/push/preview_setting.dart';
+import 'package:famchat/session/session_controller.dart';
+import 'package:famchat/session/stored_session.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
 Uint8List key(int seed) => Uint8List.fromList(List.generate(32, (i) => (i + seed) % 256));
 
@@ -191,14 +199,42 @@ void main() {
       expect(store.value, isNull);
     });
 
-    test('a rebuild still in flight when previews turn off is dropped', () async {
+    test('a rebuild held open across off is dropped (generation check after the build)', () async {
+      final gdb = _GatedDb();
+      addTearDown(gdb.close);
       final store = MemoryPreviewKeyringStore();
+      final sync = PreviewKeyringSync(db: gdb, store: store, debounce: Duration.zero);
+      addTearDown(sync.dispose);
+      gdb.gate = Completer<void>();
+      final on = sync.setOn(true);
+      await pump(const Duration(milliseconds: 10));
+      expect(gdb.reads, 1);
+      final off = sync.setOn(false);
+      gdb.gate!.complete();
+      await Future.wait([on, off]);
+      expect(store.writes, 0);
+      expect(store.value, isNull);
+    });
+
+    test('a wipe waits for a write already in flight (serialised)', () async {
+      final store = _GatedStore();
       final sync = PreviewKeyringSync(db: db, store: store, debounce: Duration.zero);
       addTearDown(sync.dispose);
       final on = sync.setOn(true);
+      await pump(const Duration(milliseconds: 10));
+      expect(store.writeStarted, isTrue);
       final off = sync.setOn(false);
+      await pump(const Duration(milliseconds: 10));
+      expect(store.wiped, isFalse);
+      store.gate.complete();
       await Future.wait([on, off]);
-      await pump(const Duration(milliseconds: 20));
+      expect(store.value, isNull);
+    });
+
+    test('the first off wipes even when nothing was on', () async {
+      final (store, sync) = make();
+      store.value = 'left behind';
+      await sync.setOn(false);
       expect(store.value, isNull);
     });
 
@@ -209,6 +245,99 @@ void main() {
       await sync.setOn(false);
     });
   });
+
+  group('previewKeyringSyncProvider', () {
+    test('turning previews on then off from the setting wipes the keyring', () async {
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      final store = MemoryPreviewKeyringStore();
+      final c = ProviderContainer(overrides: [
+        previewKeyringStoreProvider.overrideWithValue(store),
+        chatDbProvider.overrideWithValue(db),
+        sessionProvider.overrideWith(_SignedInStub.new),
+      ]);
+      addTearDown(c.dispose);
+      c.listen(previewKeyringSyncProvider, (_, _) {});
+      await db.putKey('C1', 1, key(1));
+      await c.read(previewsOnProvider.future);
+      await c.read(previewsOnProvider.notifier).set(true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.value, contains('"C1"'));
+      await c.read(previewsOnProvider.notifier).set(false);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.value, isNull);
+    });
+
+    ProviderContainer containerWith(MemoryPreviewKeyringStore store) {
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      final c = ProviderContainer(overrides: [
+        previewKeyringStoreProvider.overrideWithValue(store),
+        chatDbProvider.overrideWithValue(db),
+        sessionProvider.overrideWith(_SignedInStub.new),
+        previewsOnProvider.overrideWith(_ControlledPreviews.new),
+      ]);
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    test('a reloading setting that still holds true counts as off', () async {
+      final store = MemoryPreviewKeyringStore();
+      final c = containerWith(store);
+      c.listen(previewKeyringSyncProvider, (_, _) {});
+      await db.putKey('C1', 1, key(1));
+      await c.read(previewsOnProvider.future);
+      await c.read(previewsOnProvider.notifier).set(true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.value, contains('"C1"'));
+      (c.read(previewsOnProvider.notifier) as _ControlledPreviews).reloading();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.value, isNull);
+    });
+
+    test('once signed out the sync is gone and nothing rewrites the keyring', () async {
+      final store = MemoryPreviewKeyringStore();
+      final c = containerWith(store);
+      c.listen(previewKeyringSyncProvider, (_, _) {});
+      await c.read(previewsOnProvider.future);
+      await c.read(previewsOnProvider.notifier).set(true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.value, isNotNull);
+      (c.read(sessionProvider.notifier) as _SignedInStub).endNow();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await store.wipe();
+      await db.putKey('C1', 1, key(1));
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(store.value, isNull);
+    });
+  });
+}
+
+class _ControlledPreviews extends PreviewsOnNotifier {
+  bool _hang = false;
+
+  @override
+  Future<bool> build() => _hang ? Completer<bool>().future : super.build();
+
+  /// Reloads and never finishes: loading, with the previous true still readable.
+  void reloading() {
+    _hang = true;
+    ref.invalidateSelf();
+  }
+}
+
+class _SignedInStub extends SessionController {
+  void endNow() => state = const SignedOut();
+
+  @override
+  SessionState build() => SignedIn(StoredSession(
+      userId: 'u',
+      deviceId: 'd',
+      deviceName: 'Pixel',
+      refreshToken: 'r',
+      isAdmin: false,
+      name: null,
+      identitySeed: 'x',
+      encSeed: 'x',
+      signSeed: 'x'));
 }
 
 class _ThrowingStore implements PreviewKeyringStore {
@@ -216,4 +345,35 @@ class _ThrowingStore implements PreviewKeyringStore {
   Future<void> write(String json) async => throw StateError('no entitlement');
   @override
   Future<void> wipe() async => throw StateError('no entitlement');
+}
+
+class _GatedDb extends ChatDb {
+  _GatedDb() : super(NativeDatabase.memory());
+  Completer<void>? gate;
+  int reads = 0;
+
+  @override
+  Future<List<KeyRow>> allKeys() async {
+    reads++;
+    await gate?.future;
+    return super.allKeys();
+  }
+}
+
+class _GatedStore extends MemoryPreviewKeyringStore {
+  final gate = Completer<void>();
+  bool writeStarted = false, wiped = false;
+
+  @override
+  Future<void> write(String json) async {
+    writeStarted = true;
+    await gate.future;
+    await super.write(json);
+  }
+
+  @override
+  Future<void> wipe() async {
+    wiped = true;
+    await super.wipe();
+  }
 }
