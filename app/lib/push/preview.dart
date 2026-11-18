@@ -1,11 +1,14 @@
 // Turns a message's end-to-end-encrypted envelope into notification text, on this device only.
 // The server never sees the text: it delivers the envelope and the app decrypts it here.
+import 'dart:convert';
+
 import 'package:characters/characters.dart';
 
 import '../chat/db/chat_db.dart';
 import '../chat/plaintext.dart';
 import '../crypto/encoding.dart';
 import '../crypto/envelope.dart';
+import '../games/labels.dart';
 
 /// Longest preview text, in characters as a reader counts them (an emoji is one).
 const maxPreviewChars = 300;
@@ -50,6 +53,25 @@ Future<String?> previewText({
     if (p is TextBody) {
       final chars = p.text.characters;
       return chars.length <= maxPreviewChars ? p.text : '${chars.take(maxPreviewChars)}…';
+    }
+    if (p is GameBody || p is MoveBody) {
+      return await gamePushLabel(
+        db,
+        chatId,
+        MessageRow(
+          id: messageId,
+          chatId: chatId,
+          seq: null,
+          senderUserId: senderUserId,
+          senderDeviceId: senderDeviceId,
+          kind: p.kind,
+          body: utf8.decode(raw),
+          targetId: p is MoveBody ? p.target : null,
+          envelope: null,
+          createdAt: 0,
+          state: 'sent',
+        ),
+      );
     }
     return mediaLabel(p.kind);
   } catch (_) {

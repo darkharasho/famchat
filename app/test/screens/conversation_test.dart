@@ -1,9 +1,17 @@
+import 'dart:convert';
+
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/directory.dart';
+import 'package:famchat/chat/plaintext.dart';
+import 'package:famchat/games/rules.dart';
+import 'package:famchat/games/widgets/game_card.dart';
+import 'package:famchat/games/widgets/game_screen.dart';
+import 'package:famchat/screens/chats/message_bubble.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
 import 'package:famchat/widgets/link_text.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +49,33 @@ MessageRow row(String id, int? seq, String from, String text, {String state = 's
       envelope: null,
       createdAt: DateTime.now().millisecondsSinceEpoch,
       state: state,
+    );
+
+MessageRow plain(String id, int seq, String from, Plaintext p) => MessageRow(
+      id: id,
+      chatId: chatId,
+      seq: seq,
+      senderUserId: from,
+      senderDeviceId: 'x',
+      kind: p.kind,
+      body: jsonEncode(p.toJson()),
+      targetId: p is MoveBody ? p.target : null,
+      envelope: null,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      state: 'sent',
+    );
+
+ChatDto groupOf(List<String> ids) => ChatDto(
+      id: chatId,
+      kind: 'group',
+      title: 'G',
+      createdBy: ids.first,
+      currentEpoch: 1,
+      epochReady: true,
+      lastSeq: 0,
+      lastMessageAt: null,
+      createdAt: 1,
+      members: [for (final u in ids) MemberDto(userId: u, joinedSeq: 0, lastReadSeq: 0)],
     );
 
 void main() {
@@ -257,5 +292,96 @@ void main() {
     await mouse.moveTo(Offset(box.left + 16 * 12.5, box.top + 8));
     await tester.pump();
     expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
+  });
+
+  group('games', () {
+    MessageRow ttt(int seq, String from, int ply, int cell) =>
+        plain('t$seq', seq, from, MoveBody('g1', GameType.tictactoe, ply, {'type': 'play', 'cell': cell}));
+
+    chatTestWidgets('bar appears for an unfinished game and disappears when it ends', (tester) async {
+      await open(tester, messages: [plain('g1', 1, alice.userId, GameBody(GameType.tictactoe, alice.userId))]);
+      final bar = find.byKey(const Key('game-bar'));
+      expect(bar, findsOneWidget);
+      expect(find.descendant(of: bar, matching: find.textContaining('Tic-tac-toe with Bob · Your turn')), findsOneWidget);
+      await inApp(tester, () async {
+        for (final m in [
+          ttt(2, alice.userId, 0, 0),
+          ttt(3, bob.userId, 1, 3),
+          ttt(4, alice.userId, 2, 1),
+          ttt(5, bob.userId, 3, 4),
+          ttt(6, alice.userId, 4, 2),
+        ]) {
+          await alice.db.insertMessageIfAbsent(m);
+        }
+      });
+      await settle(tester);
+      expect(bar, findsNothing);
+      expect(find.text('You won'), findsOneWidget);
+    });
+
+    chatTestWidgets("move rows don't render as bubbles", (tester) async {
+      await open(tester, messages: [
+        row('m1', 1, bob.userId, 'fancy a game?'),
+        plain('g1', 2, alice.userId, GameBody(GameType.tictactoe, alice.userId)),
+        ttt(3, alice.userId, 0, 4),
+        ttt(4, bob.userId, 1, 0),
+      ]);
+      expect(find.byType(MessageBubble), findsOneWidget);
+      expect(find.byType(GameCard), findsOneWidget);
+    });
+
+    chatTestWidgets('Game entry is absent in groups', (tester) async {
+      final carol = await backend.addUser('Carol');
+      setWindow(tester, const Size(400, 800));
+      await pumpChatApp(tester, alice);
+      await inApp(tester, () => alice.db.upsertChat(groupOf([alice.userId, bob.userId, carol.userId])));
+      ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
+      await settle(tester);
+      await tester.tap(find.byTooltip('Attach photo or video'));
+      await settle(tester);
+      expect(find.text('Photos and videos'), findsOneWidget);
+      expect(find.text('Game'), findsNothing);
+      expect(find.byKey(const Key('start-game')), findsNothing);
+    });
+
+    chatTestWidgets('picking a game starts it, me first, and opens the board', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Attach photo or video'));
+      await settle(tester);
+      await tester.tap(find.text('Game'));
+      await settle(tester);
+      await tester.tap(find.text('Chess'));
+      await settle(tester);
+      final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+      expect(jsonDecode(sent.body!), {'kind': 'game', 'game': 'chess', 'first': alice.userId});
+      expect(find.byType(GameScreen), findsOneWidget);
+    });
+
+    chatTestWidgets('starting a game while one is unfinished offers Open instead', (tester) async {
+      await open(tester, messages: [plain('g1', 1, bob.userId, GameBody(GameType.checkers, bob.userId))]);
+      await tester.tap(find.byTooltip('Attach photo or video'));
+      await settle(tester);
+      await tester.tap(find.text('Game'));
+      await settle(tester);
+      expect(find.text('Finish your current game first'), findsOneWidget);
+      expect(find.text('Chess'), findsNothing);
+      await tester.tap(find.widgetWithText(FilledButton, 'Open'));
+      await settle(tester);
+      expect(find.byType(GameScreen), findsOneWidget);
+      expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
+    });
+
+    chatTestWidgets('without a camera sheet, the composer has a Game button in direct chats only', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        await open(tester);
+        expect(find.byKey(const Key('start-game')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('start-game')));
+        await settle(tester);
+        expect(find.text('Tic-tac-toe'), findsOneWidget);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
   });
 }

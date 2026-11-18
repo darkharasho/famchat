@@ -21,6 +21,11 @@ import '../../chat/providers.dart';
 import '../../chat/spelling/providers.dart';
 import '../../chat/spelling/speller.dart';
 import '../../chat/reactions.dart';
+import '../../games/game_state.dart' show activeGame;
+import '../../games/providers.dart';
+import '../../games/widgets/game_bar.dart';
+import '../../games/widgets/game_card.dart';
+import '../../games/widgets/start_game_sheet.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
 import '../../media/media_service.dart';
@@ -96,6 +101,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Who can be @mentioned here (other members of a group: id → name); set in build.
   Map<String, String> _people = const {};
+
+  /// A game can be started here (a direct chat that isn't read-only); set in build.
+  bool _canStartGame = false;
 
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
@@ -737,10 +745,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     );
   }
 
+  Future<void> _startGame() => showStartGameSheet(context, widget.chatId);
+
   Future<void> _attach() async {
     var source = PickSource.library;
     if (cameraAvailable) {
-      final choice = await showModalBottomSheet<PickSource>(
+      final canGame = _canStartGame;
+      // A PickSource, or [_gameChoice].
+      final choice = await showModalBottomSheet<Object>(
         context: context,
         builder: (context) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -759,10 +771,20 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               title: const Text('Record a video'),
               onTap: () => Navigator.pop(context, PickSource.cameraVideo),
             ),
+            if (canGame)
+              ListTile(
+                leading: const Icon(Icons.casino_outlined),
+                title: const Text('Game'),
+                onTap: () => Navigator.pop(context, _gameChoice),
+              ),
           ]),
         ),
       );
-      if (choice == null) return;
+      if (choice == _gameChoice) {
+        if (mounted) await _startGame();
+        return;
+      }
+      if (choice is! PickSource) return;
       source = choice;
     }
     final List<PickedMedia> picked;
@@ -818,6 +840,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           icon: const Icon(Icons.gif_box_outlined),
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
           onPressed: _pickGif,
+        ),
+      // Where the attach button has no sheet to hold it, Game gets its own button.
+      if (!cameraAvailable && _canStartGame && _editing == null)
+        IconButton(
+          key: const Key('start-game'),
+          tooltip: 'Game',
+          icon: const Icon(Icons.casino_outlined),
+          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+          onPressed: _startGame,
         ),
       Expanded(
         child: CallbackShortcuts(
@@ -960,6 +991,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _people = group
         ? {for (final m in members) if (m.userId != me && users[m.userId] != null) m.userId: users[m.userId]!.name}
         : const {};
+    _canStartGame = !group && !readOnly && other != null;
+    final active = group ? null : activeGame(ref.watch(gamesProvider(chatId)));
     final otherOnline = other != null && online.contains(other);
     final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
@@ -971,7 +1004,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
-    final visible = messages.where((m) => !changeKinds.contains(m.kind)).toList();
+    final visible = messages.where((m) => !timelineHiddenKinds.contains(m.kind)).toList();
     final byId = {for (final m in visible) m.id: m};
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
     QuotedMessage? quoteFor(MessageRow m) {
@@ -986,7 +1019,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final others = members.where((m) => m.userId != me).toList();
-    final lastMineSent = visible.lastWhere((m) => m.senderUserId == me && m.seq != null, orElse: () => _none).id;
+    // Game cards carry no footer, so a game row never takes the Seen line.
+    final lastMineSent =
+        visible.lastWhere((m) => m.senderUserId == me && m.seq != null && m.kind != 'game', orElse: () => _none).id;
     String? seenFooter(MessageRow m) {
       if (m.id != lastMineSent || others.isEmpty) return null;
       final seen = others.where((o) => o.lastReadSeq >= m.seq!).length;
@@ -1003,6 +1038,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
+          MessageEntry(message: final m) when m.kind == 'game' => AppearIn(
+              key: ValueKey(m.id),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
+              child: KeyedSubtree(
+                key: _keyFor(m.id),
+                child: GameCard(key: ValueKey(m.id), chatId: chatId, gameId: m.id),
+              ),
+            ),
           MessageEntry(message: final m, :final firstInGroup, :final lastInGroup) => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1130,6 +1173,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   ),
                 ],
               ),
+            if (active != null) GameBar(chatId: chatId, game: active),
             Expanded(
               // Phones: a tap on the messages (not on a link or button in one) puts the keyboard
               // or emoji picker away.
@@ -1269,6 +1313,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     );
   }
 }
+
+/// The attach sheet's Game entry.
+const _gameChoice = #game;
 
 bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);
 

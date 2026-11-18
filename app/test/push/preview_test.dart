@@ -5,6 +5,7 @@ import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/games/rules.dart';
 import 'package:famchat/push/preview.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -206,5 +207,16 @@ void main() {
     expect(mediaLabel('video'), '🎥 Video');
     expect(mediaLabel('gif'), 'GIF');
     expect(mediaLabel('text'), isNull);
+  });
+
+  test('a game message returns its push label', () async {
+    expect(await preview(await envelopeOf(const GameBody(GameType.checkers, userId))), '🎲 Started a game of Checkers');
+  });
+
+  test('a move with no stored game returns Moved in', () async {
+    expect(
+      await preview(await envelopeOf(const MoveBody('nope', GameType.chess, 0, {'type': 'play', 'uci': 'e2e4'}))),
+      '♟ Moved in Chess',
+    );
   });
 }

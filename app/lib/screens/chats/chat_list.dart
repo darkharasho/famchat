@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
+import '../../games/labels.dart';
 import '../../push/preview.dart';
 import '../../session/session_controller.dart';
 import '../../settings/time_format.dart';
@@ -203,6 +204,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
   if (c.isDeleted(m.id)) return '${who}Deleted a message';
   return switch (m.kind) {
     'text' || 'photo' || 'voice' || 'gif' || 'video' => '$who${messageSnippet(m, c)}',
+    'game' || 'move' => '$who${gameListLabel(m) ?? 'Unsupported message'}',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
@@ -214,7 +216,7 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
     'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
-    _ => mediaLabel(m.kind) ?? 'Message',
+    _ => gameListLabel(m) ?? mediaLabel(m.kind) ?? 'Message',
   };
 }
 

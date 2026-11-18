@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../crypto/encoding.dart';
+import '../games/rules.dart';
 
 const maxTextLength = 4000;
 
@@ -86,6 +87,20 @@ sealed class Plaintext {
         return GifBody._fromJson(j);
       case 'video':
         return VideoBody._fromJson(j);
+      case 'game':
+        final game = j['game'], first = j['first'];
+        if (first is! String || first.isEmpty) throw const FormatException('bad first');
+        if (game is! String) throw const FormatException('bad game');
+        final type = GameType.fromWire(game);
+        return type == null ? UnknownBody(kind, j) : GameBody(type, first);
+      case 'move':
+        final target = j['target'], game = j['game'], ply = j['ply'], action = j['action'];
+        if (target is! String || target.isEmpty) throw const FormatException('bad move target');
+        if (game is! String) throw const FormatException('bad game');
+        if (ply is! int || ply < 0) throw const FormatException('bad ply');
+        if (action is! Map<String, Object?> || action['type'] is! String) throw const FormatException('bad action');
+        final type = GameType.fromWire(game);
+        return type == null ? UnknownBody(kind, j) : MoveBody(target, type, ply, action);
       default:
         return UnknownBody(kind, j);
     }
@@ -474,6 +489,32 @@ String _mime(Map<String, Object?> j) {
   final mime = j['mime'];
   if (mime is! String || mime.isEmpty || mime.length > 64) throw const FormatException('bad mime');
   return mime;
+}
+
+/// Starts a game in a direct chat; the message's id is the game's id (docs/protocol.md "Games").
+/// [first] is the user who moves first (X, dark, white).
+class GameBody extends Plaintext {
+  const GameBody(this.game, this.first);
+  final GameType game;
+  final String first;
+  @override
+  String get kind => 'game';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'game': game.wire, 'first': first};
+}
+
+/// One action in the game [target] (a `game` message id) at move number [ply]. [action] has a string
+/// `type` (play, resign, draw_offer, draw_accept, draw_decline) and the game's move fields.
+class MoveBody extends Plaintext {
+  const MoveBody(this.target, this.game, this.ply, this.action);
+  final String target;
+  final GameType game;
+  final int ply;
+  final Map<String, Object?> action;
+  @override
+  String get kind => 'move';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'game': game.wire, 'ply': ply, 'action': action};
 }
 
 /// A kind this version doesn't know (a newer version's).

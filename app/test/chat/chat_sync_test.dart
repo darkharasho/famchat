@@ -10,6 +10,7 @@ import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/reactions.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/games/rules.dart';
 import 'package:famchat/pairing/bundle.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -826,5 +827,80 @@ void main() {
     expect((await d.db.messageById('M1'))!.kind, 'voice');
     expect((await d.db.messageById('M2'))!.kind, 'unknown');
     expect((await d.db.messageById('M3'))!.kind, 'invalid');
+  });
+
+  test('sendMove stores a pending move row with targetId and sends it without silent', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final gameId = await alice.sync.startGame(chatId, GameType.tictactoe, first: alice.d.userId);
+    final id = await alice.sync.sendMove(chatId, gameId, GameType.tictactoe, 0, {'type': 'play', 'cell': 4});
+    final row = (await alice.d.db.messageById(id))!;
+    expect(row.kind, 'move');
+    expect(row.targetId, gameId);
+    await until(() async => (await bob.rows(chatId)).length == 2);
+    expect(backend.silentIds, isEmpty);
+    final theirs = (await bob.d.db.messageById(id))!;
+    expect(theirs.kind, 'move');
+    expect(theirs.targetId, gameId);
+    expect((await bob.d.db.messageById(gameId))!.kind, 'game');
+  });
+
+  test('incoming game and move rows are classified as game/move', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final gameId = await alice.sync.startGame(chatId, GameType.chess, first: bob.d.userId);
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    await bob.sync.sendMove(chatId, gameId, GameType.chess, 0, {'type': 'play', 'uci': 'e2e4'});
+    await until(() async => (await alice.rows(chatId)).length == 2);
+    final kinds = (await alice.rows(chatId)).map((r) => r.kind).toSet();
+    expect(kinds, {'game', 'move'});
+  });
+
+  test("a stored unknown 'game' body reclassifies after update", () async {
+    final d = await backend.addUser('Alice');
+    await d.db.bindDevice(d.deviceId);
+    await d.db.insertMessageIfAbsent(
+      MessageRow(
+        id: 'G1',
+        chatId: 'C',
+        seq: 1,
+        senderUserId: 'U',
+        senderDeviceId: 'D',
+        kind: 'unknown',
+        body: jsonEncode({'kind': 'game', 'game': 'chess', 'first': 'U'}),
+        targetId: null,
+        envelope: null,
+        createdAt: 1,
+        state: 'sent',
+      ),
+    );
+    await d.db.insertMessageIfAbsent(
+      MessageRow(
+        id: 'M1',
+        chatId: 'C',
+        seq: 2,
+        senderUserId: 'U',
+        senderDeviceId: 'D',
+        kind: 'unknown',
+        body: jsonEncode({
+          'kind': 'move',
+          'target': 'G1',
+          'game': 'chess',
+          'ply': 0,
+          'action': {'type': 'resign'},
+        }),
+        targetId: null,
+        envelope: null,
+        createdAt: 2,
+        state: 'sent',
+      ),
+    );
+    await start(d);
+    expect((await d.db.messageById('G1'))!.kind, 'game');
+    final m = (await d.db.messageById('M1'))!;
+    expect(m.kind, 'move');
+    expect(m.targetId, 'G1');
   });
 }

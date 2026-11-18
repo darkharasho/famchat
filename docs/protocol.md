@@ -106,6 +106,37 @@ A deleted message shows as "This message was deleted" and loses its reactions; r
 chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
+### Games
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`) and chess (`chess`). Both are plain messages.
+
+```
+{"kind":"game", "game":"tictactoe|checkers|chess", "first":"<userId>"}
+{"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
+```
+
+The game's id is the `game` message's id; `first` is who moves first (X, dark, white), the other moves second.
+A rematch is a new `game` message. A `move` has the game's `target`, a `ply` (0-based move number, so the first
+move is 0) and an `action` with a string `type`:
+
+```
+{"type":"play", ...}                  a move; ply = number of moves played so far
+{"type":"resign"} {"type":"draw_offer"} {"type":"draw_accept"} {"type":"draw_decline"}
+```
+
+Resign and draw actions carry the current next ply and don't advance it. Moves are not changes: they are sent
+without `silent`, count as activity and as unread, and the timeline does not show them as messages. A game or move
+with an unknown `game` name is kept as `unknown` and shown once a newer version knows it; a `game` without a
+non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `action` with a `type`, is invalid.
+
+Move fields of `play`:
+
+- Tic-tac-toe: `{"cell": 0..8}`, row-major; the first player is X.
+- Checkers: `{"path":[from, landing1, ...]}`: squares are the 32 dark squares, numbered `0..31`, with
+  `row = sq ~/ 4` (row 0 is the first player's back rank) and `col = 2 * (sq % 4) + (row.isOdd ? 1 : 0)`.
+  The first player's men start on 0-11, the second's on 20-31. A multi-jump is one move (one `path`).
+- Chess: `{"uci":"e2e4"}`, UCI long algebraic notation. A promotion adds `q`, `r`, `b` or `n` (`e7e8q`), exactly
+  when the move promotes and never otherwise.
+
 ### Link previews
 A text may carry a card for its first link, made by the sender:
 `{"kind":"text", "text":"look https://…", "preview": {"url", "title", "description"?, "siteName"?,
