@@ -39,18 +39,27 @@ class DisplaySettingsGroup extends ConsumerWidget {
       builder: (context) => SimpleDialog(
         title: const Text('Time format'),
         children: [
+          // Each row pops its own value on tap (a radio doesn't fire onChanged for its current
+          // value, which would leave the dialog open); the radios only show the selection.
           RadioGroup<TimeFormat>(
             groupValue: current,
-            onChanged: (f) => Navigator.of(context).pop(f),
+            onChanged: (_) {},
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               for (final f in TimeFormat.values)
-                RadioListTile<TimeFormat>(key: Key('time-format-${f.name}'), value: f, title: Text(_labels[f]!)),
+                ListTile(
+                  key: Key('time-format-${f.name}'),
+                  leading: IgnorePointer(child: Radio<TimeFormat>(value: f)),
+                  title: Text(_labels[f]!),
+                  onTap: () => Navigator.of(context).pop(f),
+                ),
             ]),
           ),
         ],
       ),
     );
-    if (picked != null) await ref.read(timeFormatProvider.notifier).set(picked);
+    if (picked != null && picked != current && context.mounted) {
+      await ref.read(timeFormatProvider.notifier).set(picked);
+    }
   }
 
   @override

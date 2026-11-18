@@ -77,4 +77,33 @@ void main() {
     expect(find.text('12-hour'), findsOneWidget);
     expect(find.text('Automatic'), findsNothing);
   });
+
+  Future<FakeTimeFormat> pumpGroup(WidgetTester t, TimeFormat initial) async {
+    final fake = FakeTimeFormat(initial);
+    await t.pumpWidget(ProviderScope(
+      overrides: [timeFormatProvider.overrideWith(() => fake)],
+      child: const MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DisplaySettingsGroup()))),
+    ));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('settings-time-format')));
+    await t.pumpAndSettle();
+    return fake;
+  }
+
+  testWidgets('Display group: choosing 24-hour', (t) async {
+    final fake = await pumpGroup(t, TimeFormat.automatic);
+    await t.tap(find.text('24-hour'));
+    await t.pumpAndSettle();
+    expect(fake.sets, [TimeFormat.h24]);
+    expect(find.text('24-hour'), findsOneWidget);
+  });
+
+  testWidgets('Display group: tapping the current choice closes the dialog without a change', (t) async {
+    final fake = await pumpGroup(t, TimeFormat.automatic);
+    expect(find.byType(SimpleDialog), findsOneWidget);
+    await t.tap(find.descendant(of: find.byType(SimpleDialog), matching: find.text('Automatic')));
+    await t.pumpAndSettle();
+    expect(find.byType(SimpleDialog), findsNothing);
+    expect(fake.sets, isEmpty);
+  });
 }
