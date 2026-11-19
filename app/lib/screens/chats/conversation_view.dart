@@ -1198,7 +1198,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   ),
                 ],
               ),
-            for (final g in active) GameBar(key: ValueKey(g.id), chatId: chatId, game: g),
+            if (active.isNotEmpty) GameBar(chatId: chatId, games: active),
             Expanded(
               // Phones: a tap on the messages (not on a link or button in one) puts the keyboard
               // or emoji picker away.

@@ -28,21 +28,81 @@ String gameGlyph(GameType t) => switch (t) {
 /// How long after my poke in a game I can poke again.
 const pokeCooldown = Duration(minutes: 10);
 
-/// Pinned under the header of a direct chat while [game] is unfinished:
-/// `♟ Chess with Mom · Mom's turn  👉 Poke`. Tap to open the board. While
-/// it's the other player's turn I can poke them, at most once per
-/// [pokeCooldown].
-class GameBar extends ConsumerStatefulWidget {
-  const GameBar({super.key, required this.chatId, required this.game});
+/// Pinned under the header of a direct chat while it has unfinished
+/// [games] (long game first, from `activeGames`). One game fills the bar:
+/// `♟ Chess with Mom · Mom's turn  👉 Poke  ›`. Two share it, split down the
+/// middle: `🏠 Landlord · Mom's turn 👉 │ ✕ Tic-tac-toe · Your turn`. Each
+/// part opens its own board.
+class GameBar extends StatelessWidget {
+  const GameBar({super.key, required this.chatId, required this.games})
+    : assert(games.length > 0);
+
+  final String chatId;
+  final List<GameState> games;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    final split = games.length > 1;
+    Widget segment(GameState g) => GameBarSegment(
+      key: Key('game-bar-${g.id}'),
+      chatId: chatId,
+      game: g,
+      compact: split,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+      child: Material(
+        key: const Key('game-bar'),
+        color: s.surfaceContainerLowest,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.md),
+          side: BorderSide(color: s.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: split
+            ? IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: segment(games[0])),
+                    VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: s.outlineVariant,
+                    ),
+                    Expanded(child: segment(games[1])),
+                  ],
+                ),
+              )
+            : segment(games.single),
+      ),
+    );
+  }
+}
+
+/// One game's part of the [GameBar]: its glyph, title and turn, tappable to
+/// open the board. While it's the other player's turn I can poke them, at
+/// most once per [pokeCooldown]. [compact] (two games sharing the bar) drops
+/// the opponent's name and the chevron and shrinks Poke to an icon whose
+/// tooltip carries the cooldown.
+class GameBarSegment extends ConsumerStatefulWidget {
+  const GameBarSegment({
+    super.key,
+    required this.chatId,
+    required this.game,
+    required this.compact,
+  });
 
   final String chatId;
   final GameState game;
+  final bool compact;
 
   @override
-  ConsumerState<GameBar> createState() => _GameBarState();
+  ConsumerState<GameBarSegment> createState() => _GameBarSegmentState();
 }
 
-class _GameBarState extends ConsumerState<GameBar> {
+class _GameBarSegmentState extends ConsumerState<GameBarSegment> {
   /// Redraws when the cooldown's minutes left change.
   Timer? _tick;
   bool _sending = false;
@@ -107,86 +167,83 @@ class _GameBarState extends ConsumerState<GameBar> {
     }
     final opponentName = viewer.nameOf(opponent).split(' ').first;
     final style = theme.textTheme.bodyMedium?.copyWith(color: s.onSurface);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
-      child: Material(
-        key: const Key('game-bar'),
-        color: s.surfaceContainerLowest,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Radii.md),
-          side: BorderSide(color: s.outlineVariant),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => openGame(context, chatId, g.id),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              Space.lg,
-              Space.sm,
-              Space.sm,
-              Space.sm,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text.rich(
+    final compact = widget.compact;
+    final pokeLabel = minutesLeft > 0 ? 'Poked · ${minutesLeft}m' : null;
+    final onPoke = minutesLeft > 0 || _sending
+        ? null
+        : () => _poke(g, opponentName);
+    return InkWell(
+      onTap: () => openGame(context, chatId, g.id),
+      child: Padding(
+        padding: compact
+            ? const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.xs, Space.sm)
+            : const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.sm, Space.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  style: style,
+                  children: [
                     TextSpan(
-                      style: style,
-                      children: [
-                        TextSpan(
-                          text: gameGlyph(g.type),
-                          style: TextStyle(
-                            fontFamily: g.type == GameType.tictactoe
-                                ? null
-                                : 'NotoSansSymbols2',
-                            color: s.tertiary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        TextSpan(
-                          text:
-                              ' ${g.type.title} with ${viewer.nameOf(opponent)} · ',
-                        ),
-                        TextSpan(
-                          text: viewer.status(g),
-                          style: myTurn
-                              ? TextStyle(
-                                  color: s.tertiary,
-                                  fontWeight: FontWeight.w600,
-                                )
-                              : null,
-                        ),
-                      ],
+                      text: gameGlyph(g.type),
+                      style: TextStyle(
+                        fontFamily: g.type == GameType.tictactoe
+                            ? null
+                            : 'NotoSansSymbols2',
+                        color: s.tertiary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                    TextSpan(
+                      text: compact
+                          ? ' ${g.type.title} · '
+                          : ' ${g.type.title} with ${viewer.nameOf(opponent)} · ',
+                    ),
+                    TextSpan(
+                      text: viewer.status(g),
+                      style: myTurn
+                          ? TextStyle(
+                              color: s.tertiary,
+                              fontWeight: FontWeight.w600,
+                            )
+                          : null,
+                    ),
+                  ],
                 ),
-                if (canPoke)
-                  Padding(
-                    padding: const EdgeInsets.only(left: Space.xs),
-                    child: TextButton(
-                      key: const Key('poke'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: Space.sm,
-                        ),
-                        foregroundColor: s.tertiary,
-                      ),
-                      onPressed: minutesLeft > 0 || _sending
-                          ? null
-                          : () => _poke(g, opponentName),
-                      child: Text(
-                        minutesLeft > 0 ? 'Poked · ${minutesLeft}m' : '👉 Poke',
-                      ),
-                    ),
-                  ),
-                Icon(Icons.chevron_right_rounded, color: s.onSurfaceVariant),
-              ],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
+            if (canPoke && compact)
+              IconButton(
+                key: const Key('poke'),
+                tooltip: pokeLabel ?? 'Poke',
+                visualDensity: VisualDensity.compact,
+                onPressed: onPoke,
+                icon: Opacity(
+                  opacity: onPoke == null ? 0.5 : 1,
+                  child: const Text('👉'),
+                ),
+              )
+            else if (canPoke)
+              Padding(
+                padding: const EdgeInsets.only(left: Space.xs),
+                child: TextButton(
+                  key: const Key('poke'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: Space.sm),
+                    foregroundColor: s.tertiary,
+                  ),
+                  onPressed: onPoke,
+                  child: Text(pokeLabel ?? '👉 Poke'),
+                ),
+              ),
+            if (!compact)
+              Icon(Icons.chevron_right_rounded, color: s.onSurfaceVariant),
+          ],
         ),
       ),
     );
