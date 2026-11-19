@@ -87,9 +87,12 @@ jobs:
     timeout-minutes: 60
     defaults:
       run: { working-directory: app }
+    outputs:
+      # NAME+NUMBER once TestFlight has the build: a release patches may target (patch.yml).
+      shipped: ${{ steps.shipped.outputs.version }}
     env:
       NAME: ${{ needs.version.outputs.name }}
-      NUMBER: ${{ needs.version.outputs.number }}
+      BASE_NUMBER: ${{ needs.version.outputs.number }}
       SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -99,6 +102,10 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - uses: shorebirdtech/setup-shorebird@v1
+      # Shorebird allows one release per version and platform, so "Re-run failed jobs" (which reuses
+      # the version job's number) builds as NUMBER + attempt - 1: still unique and still increasing.
+      - name: Build number for this attempt
+        run: echo "NUMBER=$((BASE_NUMBER + GITHUB_RUN_ATTEMPT - 1))" >> "$GITHUB_ENV"
 
       - name: Write the App Store Connect key
         env:
@@ -210,6 +217,11 @@ jobs:
             mkdir -p ../dist && cp "$RUNNER_TEMP"/export/*.ipa "../dist/FamChat-$NAME-$NUMBER.ipa"
           fi
 
+      - name: Shipped
+        id: shipped
+        if: steps.store.outputs.upload == 'true'
+        run: echo "version=$NAME+$NUMBER" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v7
         if: steps.store.outputs.upload != 'true'
         with: { name: ios-ipa, path: dist/, if-no-files-found: error }
@@ -225,9 +237,12 @@ jobs:
     timeout-minutes: 45
     defaults:
       run: { working-directory: app }
+    outputs:
+      # NAME+NUMBER once Play has the bundle: a release patches may target (patch.yml).
+      shipped: ${{ steps.shipped.outputs.version }}
     env:
       NAME: ${{ needs.version.outputs.name }}
-      NUMBER: ${{ needs.version.outputs.number }}
+      BASE_NUMBER: ${{ needs.version.outputs.number }}
       SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
     steps:
       - uses: actions/checkout@v7
@@ -236,6 +251,10 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - uses: shorebirdtech/setup-shorebird@v1
+      # Shorebird allows one release per version and platform, so "Re-run failed jobs" (which reuses
+      # the version job's number) builds as NUMBER + attempt - 1: still unique and still increasing.
+      - name: Build number for this attempt
+        run: echo "NUMBER=$((BASE_NUMBER + GITHUB_RUN_ATTEMPT - 1))" >> "$GITHUB_ENV"
 
       - name: Build the signed app bundle
         env:
@@ -300,6 +319,40 @@ jobs:
           releaseName: ${{ env.NAME }} (${{ env.NUMBER }})
           tracks: internal
           status: draft
+
+      - name: Shipped
+        id: shipped
+        if: steps.store.outputs.upload == 'true'
+        run: echo "version=$NAME+$NUMBER" >> "$GITHUB_OUTPUT"
+
+  # Tags each Shorebird release that reached TestFlight or Play as shorebird/<platform>/<NAME+NUMBER>.
+  # patch.yml patches the newest tagged one, so dry runs and failed uploads (Shorebird releases no
+  # phone has) are never patched by default. Tags pushed with GITHUB_TOKEN start no workflows.
+  shorebird-shipped:
+    needs: [ios, android]
+    if: always() && (needs.ios.outputs.shipped != '' || needs.android.outputs.shipped != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the shipped releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IOS: ${{ needs.ios.outputs.shipped }}
+          ANDROID: ${{ needs.android.outputs.shipped }}
+        run: |
+          for pair in "ios:$IOS" "android:$ANDROID"; do
+            platform="${pair%%:*}" version="${pair#*:}"
+            [ -n "$version" ] || continue
+            ref="refs/tags/shorebird/$platform/$version"
+            if gh api "repos/$GITHUB_REPOSITORY/git/$ref" --silent 2>/dev/null; then
+              echo "$ref already exists"
+            else
+              gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="$ref" -f sha="$GITHUB_SHA" --silent
+              echo "Tagged $ref" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
   macos:
     needs: version

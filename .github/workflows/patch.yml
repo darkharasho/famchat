@@ -5,10 +5,13 @@ name: patch
 # Patches can't change native code, plugins, permissions or the Flutter version: Shorebird stops
 # on a native change (no --allow-native-diffs here), and those need a release tag instead.
 #
-# Run by hand (gh workflow run patch.yml [-f platforms=ios] [-f release_version=1.0.17+29380123])
-# or push a `patch-*` tag. Each platform patches its newest Shorebird release unless a release
-# version is given. FAMCHAT_VERSION/FAMCHAT_BUILD are set from that release, so the app's About
-# screen keeps showing the version the store installed.
+# Run by hand (gh workflow run patch.yml [-f platforms=ios] [-f release_version=1.0.17+29380123]
+# [-f track=staging]) or push a `patch-*` tag. Each platform patches its newest release that
+# reached TestFlight or Play (release.yml tags it shorebird/<platform>/<NAME+NUMBER>; dry runs and
+# failed uploads aren't tagged) unless a release version is given. FAMCHAT_VERSION/FAMCHAT_BUILD
+# are set from that release, so the app's About screen keeps showing the version the store installed.
+# Patches go to the stable track (every phone) unless track=staging: staging patches reach only
+# devices set to staging, and are promoted to stable in the Shorebird console.
 #
 # Secret: SHOREBIRD_TOKEN (Shorebird console API key, "Release and patch only").
 
@@ -21,8 +24,13 @@ on:
         description: "Comma-separated subset of ios,android"
         default: "ios,android"
       release_version:
-        description: "Release to patch (e.g. 1.0.17+29380123), or latest for each platform's newest"
+        description: "Release to patch (e.g. 1.0.17+29380123), or latest for each platform's newest shipped one"
         default: "latest"
+      track:
+        description: "Shorebird track: stable (every phone) or staging"
+        type: choice
+        options: [stable, staging]
+        default: stable
 
 concurrency:
   group: patch-${{ github.ref }}
@@ -37,6 +45,7 @@ env:
   FLUTTER_VERSION: "3.47.9"
   SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
   RELEASE_VERSION: ${{ inputs.release_version || 'latest' }}
+  TRACK: ${{ inputs.track || 'stable' }}
 
 jobs:
   ios:
@@ -62,10 +71,10 @@ jobs:
           NUMBER: ${{ steps.release.outputs.number }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          shorebird patch ios --no-codesign --release-version="$VERSION" -- \
+          shorebird patch ios --no-codesign --release-version="$VERSION" --track="$TRACK" -- \
             --build-name "$NAME" --build-number "$NUMBER" \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
-          echo "Patched iOS release $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Patched iOS release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
 
   android:
     if: github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'android')
@@ -91,7 +100,7 @@ jobs:
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
         run: |
-          shorebird patch android --release-version="$VERSION" -- \
+          shorebird patch android --release-version="$VERSION" --track="$TRACK" -- \
             --build-name "$NAME" --build-number "$NUMBER" \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
-          echo "Patched Android release $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Patched Android release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
