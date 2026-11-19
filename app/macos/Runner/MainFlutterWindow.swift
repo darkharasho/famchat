@@ -24,6 +24,14 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     // The smallest window the phone layout still fits in.
     self.contentMinSize = NSSize(width: 380, height: 500)
 
+    // Open where and at the size it was last time: AppKit saves the frame to the user defaults as
+    // the window moves and resizes, and the autosave name restores it. After the setFrame above,
+    // so the saved frame wins over the nib's; setFrameUsingName makes the restore explicit and
+    // keeps the default frame when nothing is saved yet. AppKit keeps the frame on screen.
+    let autosaveName = "FamChatMainWindow"
+    self.setFrameUsingName(autosaveName)
+    self.setFrameAutosaveName(autosaveName)
+
     let channel = FlutterMethodChannel(
       name: "famchat/window", binaryMessenger: flutterViewController.engine.binaryMessenger)
     channel.setMethodCallHandler { [weak self] call, result in
