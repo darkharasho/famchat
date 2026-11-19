@@ -26,7 +26,7 @@ import '../../games/providers.dart';
 import '../../games/widgets/game_bar.dart';
 import '../../games/widgets/game_card.dart';
 import '../../games/widgets/game_event_line.dart';
-import '../../games/labels.dart' show gameEventOf;
+import '../../games/labels.dart' show gameEventsOf;
 import '../../games/widgets/start_game_sheet.dart';
 import '../../gifs/gif_picker.dart';
 import '../../gifs/providers.dart';
@@ -1007,12 +1007,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
-    // Resigns and draw offers show as a line in the timeline; plays only move the card's board.
+    // Plays, pokes, resigns and draw offers show as lines in the timeline.
     String firstNameOf(String userId) => nameOf(userId).split(' ').first;
-    final gameEvents = {
-      for (final m in messages)
-        if (m.kind == 'move') m.id: ?gameEventOf(m, firstNameOf(m.senderUserId)),
-    };
+    final gameEvents = gameEventsOf(
+      messages,
+      plays: ref.watch(gamePlaysProvider(chatId)),
+      games: ref.watch(gamesProvider(chatId)),
+      me: me,
+      nameOf: firstNameOf,
+      shown: (m) => !timelineHiddenKinds.contains(m.kind),
+      readOnly: readOnly,
+    );
     final visible =
         messages.where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id)).toList();
     final byId = {for (final m in visible) m.id: m};
@@ -1048,7 +1053,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
               child: KeyedSubtree(
                 key: _keyFor(m.id),
-                child: GameEventLine(chatId: chatId, gameId: gameEvents[m.id]!.gameId, text: gameEvents[m.id]!.text),
+                child: GameEventLine(
+                  chatId: chatId,
+                  gameId: gameEvents[m.id]!.gameId,
+                  text: gameEvents[m.id]!.text,
+                  suffix: gameEvents[m.id]!.suffix,
+                  poke: gameEvents[m.id]!.poke,
+                ),
               ),
             ),
           MessageEntry(message: final m) when m.kind == 'game' => AppearIn(

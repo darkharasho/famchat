@@ -209,7 +209,7 @@ void main() {
     );
   });
 
-  chatTestWidgets('resigns and draw offers show as lines in the chat; plays do not', (
+  chatTestWidgets('plays, resigns and draw offers show as lines in the chat', (
     tester,
   ) async {
     await open(
@@ -217,18 +217,46 @@ void main() {
       messages: [
         game('g1', GameType.chess, alice.userId),
         ...[
-          move(alice.userId, 'g1', GameType.chess, 0, {'type': 'play', 'from': 12, 'to': 28}),
+          move(alice.userId, 'g1', GameType.chess, 0, {'type': 'play', 'uci': 'e2e4'}),
           move(bob.userId, 'g1', GameType.chess, 1, {'type': 'draw_offer'}),
           move(alice.userId, 'g1', GameType.chess, 1, {'type': 'draw_decline'}),
           move(alice.userId, 'g1', GameType.chess, 1, {'type': 'resign'}),
         ],
       ],
     );
-    expect(find.byType(GameEventLine), findsNWidgets(3));
+    expect(find.byType(GameEventLine), findsNWidgets(4));
+    expect(find.text('♟ You moved in Chess', findRichText: true), findsOneWidget);
     expect(find.text('🤝 Bob offered a draw in Chess'), findsOneWidget);
     expect(find.text('You declined a draw in Chess'), findsOneWidget);
     expect(find.text('🏳 You resigned at Chess'), findsOneWidget);
     await tester.tap(find.text('🏳 You resigned at Chess'));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+  });
+
+  chatTestWidgets('a run of plays shows one line with Your turn; pokes are tinted', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 4, 8]),
+        move(alice.userId, 'g1', GameType.tictactoe, 3, {'type': 'poke'}),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 4, 8, 2]).skip(3),
+      ],
+    );
+    final lines = find.byType(GameEventLine);
+    expect(lines, findsNWidgets(3));
+    expect(find.text('♟ You moved in Tic-tac-toe', findRichText: true), findsOneWidget);
+    expect(find.text('👉 You poked Bob · Tic-tac-toe', findRichText: true), findsOneWidget);
+    expect(
+      find.text('♟ Bob moved in Tic-tac-toe · Your turn', findRichText: true),
+      findsOneWidget,
+    );
+    final poke = tester.widgetList<GameEventLine>(lines).where((l) => l.poke);
+    expect(poke.single.text, '👉 You poked Bob · Tic-tac-toe');
+    await tester.tap(find.text('♟ Bob moved in Tic-tac-toe · Your turn', findRichText: true));
     await settle(tester);
     expect(find.byType(GameScreen), findsOneWidget);
   });

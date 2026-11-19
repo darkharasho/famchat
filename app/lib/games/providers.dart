@@ -23,3 +23,15 @@ final gamesProvider = Provider.family<List<GameState>, String>((ref, chatId) {
     for (final m in members) m.userId,
   ], direct: kind == 'direct');
 });
+
+/// A chat's plays the rules applied: move id → the game's state right after it
+/// (see [playResults]). Empty while loading, like [gamesProvider].
+final gamePlaysProvider = Provider.family<Map<String, GameState>, String>((ref, chatId) {
+  final kind = ref.watch(chatProvider(chatId).select((c) => c.value?.kind));
+  final rows = ref.watch(messagesProvider(chatId)).value;
+  final members = ref.watch(membersProvider(chatId)).value;
+  if (kind == null || rows == null || members == null) return const {};
+  return playResults(rows, [
+    for (final m in members) m.userId,
+  ], direct: kind == 'direct');
+});
