@@ -24,6 +24,10 @@ defaults:
 #
 # The Mac jobs (ios-preview-core, macos, ios) skip PRs: GitHub's few Mac runners queued behind
 # each other and timed out. They run on main and on demand; label a PR mac-ci to run them there.
+# Shorebird supports this Flutter; move it only to versions Shorebird lists (shorebird flutter versions list).
+env:
+  FLUTTER_VERSION: "3.47.9"
+
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
@@ -31,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
@@ -53,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - name: Install Linux build deps (incl. libsecret for flutter_secure_storage), libmpv and a null audio sink
         run: |
           sudo apt-get update
@@ -87,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - uses: nanasess/setup-chromedriver@v3
       - name: Start echo server and chromedriver
         run: |
@@ -113,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
       - name: Integration test
@@ -134,7 +138,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
       - name: Integration test
@@ -155,7 +159,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - name: Boot an iPhone simulator
         run: |
           UDID=$(xcrun simctl list devices available | grep -m1 -E '^\s+iPhone' | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
@@ -189,7 +193,7 @@ jobs:
       - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: "21" }
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - name: Start echo server
         run: nohup dart run tool/echo_server.dart > echo.log 2>&1 &
       - name: Integration test (emulator, API 34)

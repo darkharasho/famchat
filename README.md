@@ -30,3 +30,22 @@ How it works: `FamilyHub` puts a job on the `famchat-push` Queue for members wit
 (sockets silent for 90 s are dropped first); the Worker's `queue()` handler sends one FCM HTTP v1
 message per device token with the sender's name and the chat title only, never message content, and
 clears tokens FCM reports as gone. See `docs/protocol.md` ("Push").
+
+## Updates without store review (Shorebird)
+
+iPhone and Android builds are [Shorebird](https://shorebird.dev) releases, so Dart-only changes
+can reach installed phones as patches, with no store build or review. Phones download a patch in
+the background and apply it the next time the app opens. Web and desktop already update
+themselves (deploy on main; Sparkle / GitHub releases).
+
+- **Patch** (UI tweaks, small features, fixes in `app/lib`): `gh workflow run patch.yml`, or push
+  a `patch-*` tag. Each platform patches its newest release that reached TestFlight or Play (tagged
+  `shorebird/<platform>/<NAME+NUMBER>` by `release.yml`; dry runs aren't); pass
+  `-f release_version=1.0.17+N` or `-f platforms=ios` to narrow it. Patches go to every phone;
+  `-f track=staging` sends one only to staging devices first (promote it in the Shorebird console).
+- A failed iOS or Android release job can be re-run ("Re-run failed jobs"): each attempt builds as
+  a new build number, since Shorebird allows one release per version.
+- **Release tag** (`v*`) for anything native: plugins, permissions, entitlements, iOS/Android
+  project files, or a Flutter upgrade. Shorebird refuses a patch with native changes.
+- Flutter is pinned (`FLUTTER_VERSION` in the workflows) to a version Shorebird supports; check
+  `shorebird flutter versions list` before moving it, and move every workflow together.
