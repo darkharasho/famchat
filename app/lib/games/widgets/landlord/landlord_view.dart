@@ -367,7 +367,8 @@ class _Centre extends StatelessWidget {
       children: [
         balances,
         const SizedBox(height: 12),
-        if (dice != null) ...[_Dice(values: dice, roll: _lastRoll(b)), const SizedBox(height: 10)],
+        _Dice(values: dice, roll: _lastRoll(b)),
+        const SizedBox(height: 10),
         if (_drawnThisTurn(b) case final draw?) ...[
           _Dealt(
             key: ObjectKey(draw),

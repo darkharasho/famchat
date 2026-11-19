@@ -16,7 +16,7 @@ LandlordEvent? _lastRoll(LandlordBoard b) {
 }
 
 /// How long the dice tumble before the token starts to walk.
-const _tumble = Duration(milliseconds: 650);
+const _tumble = Duration(milliseconds: 950);
 
 /// One hop from a space to the next; a long jump (jail, a card) is one glide.
 const _hop = Duration(milliseconds: 170);
@@ -194,11 +194,14 @@ class _WalkerState extends State<_Walker> with SingleTickerProviderStateMixin {
   }
 }
 
-/// Two dice that tumble in when [roll] (the roll event) changes.
+/// Two dice, thrown in whenever [roll] (the roll event) changes: they fly
+/// in from either side on an arc, spinning with their faces flickering,
+/// then land with a squash and a couple of shrinking bounces. Before the
+/// first roll ([values] null) they wait dimmed and blank.
 class _Dice extends StatefulWidget {
   const _Dice({required this.values, required this.roll});
 
-  final (int, int) values;
+  final (int, int)? values;
   final Object? roll;
 
   @override
@@ -211,7 +214,7 @@ class _DiceState extends State<_Dice> with SingleTickerProviderStateMixin {
   @override
   void didUpdateWidget(_Dice old) {
     super.didUpdateWidget(old);
-    if (!identical(widget.roll, old.roll) && !_still(context)) _c.forward(from: 0);
+    if (widget.roll != null && !identical(widget.roll, old.roll) && !_still(context)) _c.forward(from: 0);
   }
 
   @override
@@ -220,34 +223,87 @@ class _DiceState extends State<_Dice> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
+  /// One die on its own clock (the second starts [lag] later), thrown from
+  /// [fromX] pixels to the side.
+  Widget _die(int real, int salt, double fromX, double lag) {
+    final t = ((_c.value - lag) / (1 - lag)).clamp(0.0, 1.0);
+    const land = 0.6;
+    final double x, y, angle, squash;
+    final int face;
+    if (t < land) {
+      final f = t / land;
+      x = fromX * (1 - Curves.easeOut.transform(f));
+      y = -sin(pi * f) * 44 - (1 - f) * 8;
+      angle = (1 - Curves.easeOut.transform(f)) * 4 * pi * fromX.sign;
+      face = (real + (t * 24).floor() * (salt + 2) + salt) % 6 + 1;
+      squash = 1;
+    } else {
+      final f = (t - land) / (1 - land);
+      final fade = pow(1 - f, 2).toDouble();
+      x = 0;
+      y = -sin(f * pi * 2.4).abs() * 12 * fade;
+      angle = sin(f * pi * 3) * 0.2 * fade * fromX.sign;
+      face = real;
+      squash = f < 0.12 ? 1 - 0.14 * sin(f / 0.12 * pi) : 1;
+    }
+    final height = -y;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // The shadow stays on the felt and shrinks as the die rises.
+          Positioned(
+            left: 2 + x,
+            width: 36,
+            bottom: -5,
+            height: 8,
+            child: Transform.scale(
+              scale: 1 - min(height, 50) / 80,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Color.fromRGBO(0, 0, 0, 0.35 - min(height, 50) / 250),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+          Transform.translate(
+            offset: Offset(x, y),
+            child: Transform.rotate(
+              angle: angle,
+              child: Transform.scale(
+                scaleX: 2 - squash,
+                scaleY: squash,
+                alignment: Alignment.bottomCenter,
+                child: _Die(face),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final (a, b) = widget.values;
+    final v = widget.values;
+    if (v == null) {
+      return const Opacity(
+        opacity: 0.3,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [_Die(0), SizedBox(width: 10), _Die(0)]),
+      );
+    }
+    final (a, b) = v;
     return Semantics(
       label: 'Dice: $a and $b',
       child: AnimatedBuilder(
         animation: _c,
-        builder: (context, _) {
-          final t = _c.value;
-          // Faces flicker while the dice are in the air, then settle.
-          final frame = (t * 12).floor();
-          int face(int real, int salt) => t >= 0.7 ? real : (real + frame * (salt + 2) + salt) % 6 + 1;
-          Widget die(int real, int salt, double spin) {
-            final e = Curves.easeOutBack.transform(t);
-            return Transform.translate(
-              offset: Offset(0, (1 - Curves.easeOutCubic.transform(t)) * -26),
-              child: Transform.rotate(
-                angle: (1 - Curves.easeOutCubic.transform(t)) * spin,
-                child: Transform.scale(scale: 0.55 + 0.45 * e, child: _Die(face(real, salt))),
-              ),
-            );
-          }
-
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [die(a, 1, -pi * 1.5), const SizedBox(width: 8), die(b, 3, pi * 1.75)],
-          );
-        },
+        builder: (context, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [_die(a, 1, -80, 0), const SizedBox(width: 10), _die(b, 3, 80, 0.08)],
+        ),
       ),
     );
   }

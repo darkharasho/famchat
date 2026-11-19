@@ -205,6 +205,19 @@ void main() {
       expect(dest.contains(tester.getCenter(token)), isTrue);
     });
 
+    testWidgets('the dice are thrown in, even on the first roll', (tester) async {
+      final before = LandlordBoard.custom(rng: rollsSeed([(2, 4)]));
+      await tester.pumpWidget(view(before));
+      await tester.pumpWidget(view(act(before, 'roll')));
+      final die = find.descendant(of: find.bySemanticsLabel('Dice: 2 and 4'), matching: find.byType(CustomPaint)).first;
+      await tester.pump(const Duration(milliseconds: 200));
+      final midAir = tester.getCenter(die);
+      await tester.pumpAndSettle();
+      final landed = tester.getCenter(die);
+      expect(midAir.dy, lessThan(landed.dy - 10), reason: 'in the air');
+      expect(midAir.dx, lessThan(landed.dx - 10), reason: 'thrown in from the left');
+    });
+
     testWidgets('a thumbnail has no ring', (tester) async {
       await tester.pumpWidget(view(LandlordBoard.setup(1), thumbnail: true));
       expect(anySpace, findsNothing);
