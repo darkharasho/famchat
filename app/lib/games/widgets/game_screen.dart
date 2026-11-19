@@ -359,7 +359,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (outcome != null) {
       final reason = outcome.reason == 'resigned'
           ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} resigned'
-          : outcome.reason == 'discs' || outcome.reason == 'boxes'
+          : outcome.reason == 'bankrupt'
+          ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} went bankrupt'
+          : outcome.reason == 'discs' ||
+                outcome.reason == 'boxes' ||
+                outcome.reason == 'books'
           ? _finalScore(g.board, outcome)
           : _reasons[outcome.reason];
       if (reason != null) status = '$status · $reason';

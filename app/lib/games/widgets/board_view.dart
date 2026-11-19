@@ -5,6 +5,7 @@ import '../chess_board.dart';
 import '../dots_and_boxes.dart';
 import '../four_in_a_row.dart';
 import '../go_fish.dart';
+import '../landlord/landlord.dart';
 import '../reversi.dart';
 import '../rules.dart';
 import '../tictactoe.dart';
@@ -13,6 +14,7 @@ import 'chess_view.dart';
 import 'dots_and_boxes_view.dart';
 import 'four_in_a_row_view.dart';
 import 'go_fish_view.dart';
+import 'landlord/landlord_view.dart';
 import 'reversi_view.dart';
 import 'tictactoe_view.dart';
 
@@ -116,6 +118,14 @@ class _BoardViewState extends State<BoardView> {
         thumbnail: widget.thumbnail,
         names: widget.names,
       ),
+      LandlordBoard() => LandlordView(
+        board: b,
+        mySide: widget.mySide,
+        onPlay: widget.onPlay,
+        interactive: interactive,
+        thumbnail: widget.thumbnail,
+        names: widget.names,
+      ),
       _ => const SizedBox.shrink(),
     };
     if (!widget.thumbnail) return view;
@@ -124,10 +134,11 @@ class _BoardViewState extends State<BoardView> {
 }
 
 /// The display aspect ratio (width / height) of [b]'s board: square, except
-/// Four in a Row and Go Fish (whose card picture is counts only).
+/// Four in a Row, Go Fish and Landlord (whose card pictures are counts and
+/// balances only).
 double boardAspectRatio(Board b) => switch (b) {
   FourInARowBoard() => FourInARowBoard.columns / FourInARowBoard.rows,
-  GoFishBoard() => 3 / 2,
+  GoFishBoard() || LandlordBoard() => 3 / 2,
   _ => 1,
 };
 
