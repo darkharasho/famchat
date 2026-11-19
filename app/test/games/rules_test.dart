@@ -1,3 +1,4 @@
+import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,5 +15,14 @@ void main() {
     expect(wireInt('3'), isNull);
     expect(wireInt(null), isNull);
     expect(wireInt(true), isNull);
+  });
+
+  test('initialBoard deals Go Fish from the seed', () {
+    final b = initialBoard(GameType.gofish, 1) as GoFishBoard;
+    expect(b.hand(Side.first), GoFishBoard.deal(1).hand(Side.first));
+    expect(GameType.gofish.seeded, isTrue);
+    expect(GameType.chess.seeded, isFalse);
+    expect(GameType.fromWire('gofish'), GameType.gofish);
+    expect(GameType.gofish.title, 'Go Fish');
   });
 }

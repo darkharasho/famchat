@@ -8,6 +8,7 @@ import 'package:famchat/chat/providers.dart';
 import 'package:famchat/games/checkers.dart';
 import 'package:famchat/games/chess_board.dart';
 import 'package:famchat/games/game_state.dart';
+import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/providers.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/tictactoe.dart';
@@ -27,6 +28,13 @@ String fingerprint(GameState g) {
       for (final f in 'abcdefgh'.split(''))
         for (var r = 1; r <= 8; r++)
           '${b.at('$f$r')?.side.name}${b.at('$f$r')?.role.name}',
+    ].join(','),
+    GoFishBoard() => [
+      b.hand(Side.first),
+      b.hand(Side.second),
+      b.books(Side.first),
+      b.books(Side.second),
+      b.stockCount,
     ].join(','),
     _ => '?',
   };
@@ -110,6 +118,11 @@ Map<String, Object?> randomPlay(Random rnd, GameState g) {
       if (plays.isEmpty) return {'type': 'play', 'uci': 'e2e4'};
       return {'type': 'play', 'uci': plays[rnd.nextInt(plays.length)]};
   }
+  if (b is GoFishBoard) {
+    final hand = b.hand(b.toMove);
+    if (hand.isEmpty) return {'type': 'play', 'rank': 1};
+    return {'type': 'play', 'rank': GoFishBoard.rankOf(hand[rnd.nextInt(hand.length)])};
+  }
   return {'type': 'play'};
 }
 
@@ -129,7 +142,9 @@ void main() {
         if (roll < 8 || games.isEmpty) {
           final t = GameType.values[rnd.nextInt(GameType.values.length)];
           final first = rnd.nextBool() ? 'A' : 'B';
-          msgs.add(_Msg('g${n++}', first, GameBody(t, first)));
+          // Seeded games usually get a seed; sometimes not (inert).
+          final seed = t.seeded && rnd.nextInt(6) != 0 ? rnd.nextInt(1 << 32) : null;
+          msgs.add(_Msg('g${n++}', first, GameBody(t, first, seed: seed)));
         } else if (roll < 60) {
           final g = rnd.nextInt(4) == 0
               ? games[rnd.nextInt(games.length)]

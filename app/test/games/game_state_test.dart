@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/games/game_state.dart';
+import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/tictactoe.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,8 +32,8 @@ MessageRow row(
   );
 }
 
-MessageRow game(String id, GameType t, String first, {String state = 'sent'}) =>
-    row(first, GameBody(t, first), id: id, state: state);
+MessageRow game(String id, GameType t, String first, {String state = 'sent', int? seed}) =>
+    row(first, GameBody(t, first, seed: seed), id: id, state: state);
 
 MessageRow move(
   String sender,
@@ -58,6 +59,42 @@ MessageRow uci(String sender, String g, int ply, String u) =>
 const members = ['A', 'B'];
 
 void main() {
+  test('gofish without a seed is inert', () {
+    final g = deriveGames([game('g', GameType.gofish, 'A')], members).single;
+    expect(g.inert, isTrue);
+    // ...so it doesn't block a new game.
+    final both = deriveGames([
+      game('g', GameType.gofish, 'A'),
+      game('h', GameType.chess, 'B'),
+    ], members);
+    expect(both.last.inert, isFalse);
+  });
+
+  test('gofish with a seed deals from it and replays asks', () {
+    final dealt = GoFishBoard.deal(7);
+    final rank = GoFishBoard.rankOf(dealt.hand(Side.first).first);
+    final next = dealt.play({'rank': rank})!;
+    final g = deriveGames([
+      game('g', GameType.gofish, 'A', seed: 7),
+      move('A', 'g', GameType.gofish, 0, {'type': 'play', 'rank': rank}),
+    ], members).single;
+    expect(g.inert, isFalse);
+    expect(g.ply, 1);
+    final b = g.board as GoFishBoard;
+    expect(b.hand(Side.first), (next as GoFishBoard).hand(Side.first));
+    expect(b.hand(Side.second), next.hand(Side.second));
+    expect(g.toMoveUserId, next.toMove == Side.first ? 'A' : 'B');
+  });
+
+  test('chess with a stray seed plays normally', () {
+    final g = deriveGames([
+      game('g', GameType.chess, 'A', seed: 5),
+      uci('A', 'g', 0, 'e2e4'),
+    ], members).single;
+    expect(g.inert, isFalse);
+    expect(g.ply, 1);
+  });
+
   test('a played game advances and alternates turns', () {
     final games = deriveGames([
       game('g', GameType.tictactoe, 'A'),

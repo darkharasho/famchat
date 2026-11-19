@@ -104,8 +104,9 @@ List<GameState> _walk(
           memberIds.length != 2 ||
           !memberIds.contains(body.first) ||
           second == null ||
+          (body.game.seeded && body.seed == null) ||
           games.any((g) => !g.inert && g.outcome == null);
-      final g = _Game(r.id, body.game, body.first, second ?? '', inert, r.seq);
+      final g = _Game(r.id, body.game, body.first, second ?? '', inert, r.seq, body.seed);
       games.add(g);
       byId[r.id] = g;
     } else if (r.kind == 'move') {
@@ -175,6 +176,7 @@ class GameCache {
           memberIds.length != 2 ||
           !memberIds.contains(first) ||
           second == null ||
+          (s.body.game.seeded && s.body.seed == null) ||
           done.any((d) => !d.$2.game.inert && !_endedBefore(d, s.pos));
       done.add((s, _entryFor(s, second ?? '', inert)));
     }
@@ -219,7 +221,7 @@ class GameCache {
       end = old.end;
       from = old.moves.length;
     } else {
-      g = _Game(r.id, s.body.game, s.body.first, second, inert, r.seq);
+      g = _Game(r.id, s.body.game, s.body.first, second, inert, r.seq, s.body.seed);
     }
     for (var i = from; i < moves.length; i++) {
       applied++;
@@ -287,7 +289,8 @@ class _Game {
     this.second,
     this.inert,
     this.startedSeq,
-  ) : board = initialBoard(type);
+    int? seed,
+  ) : board = initialBoard(type, seed);
 
   final String id;
   final GameType type;

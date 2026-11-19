@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`) and Dots and Boxes (`dotsandboxes`). All are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`), Dots and Boxes (`dotsandboxes`) and Go Fish (`gofish`). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes", "first":"<userId>"}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes|gofish", "first":"<userId>", "seed":3735928559}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -133,6 +133,18 @@ non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `
 Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
+Games with luck (`gofish`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
+generator when starting a game or a rematch. A `gofish` game without a valid seed (missing, out of range, not an
+integer) is inert like a game started while another was running. Other games never send a seed and ignore one.
+Every device turns the seed into the same shuffle with this generator, which is permanent (changing it would
+change every past game):
+
+- xorshift32: the state starts as the seed, or `0x9E3779B9` if the seed is 0. Each step is
+  `x ^= (x << 13) & 0xFFFFFFFF; x ^= x >> 17; x ^= (x << 5) & 0xFFFFFFFF` and returns `x` (unsigned 32-bit). Only
+  shifts, xor and masks, so 32-bit (web) and 64-bit integers agree.
+- `randInt(n)` = next value `% n`.
+- Shuffle: Fisher–Yates from the end: for `i` from `len-1` down to 1, swap item `i` with item `randInt(i + 1)`.
+
 Move fields of `play`:
 
 - Tic-tac-toe: `{"cell": 0..8}`, row-major; the first player is X.
@@ -154,6 +166,15 @@ Move fields of `play`:
   `21 + row * 5 + col`. An already drawn line is illegal. The first player moves first; completing one or two boxes
   claims them for the mover, who moves again (the next `play` comes from the same player), otherwise the turn
   passes. The game ends when all 40 lines are drawn: most boxes wins (reason `boxes`), 8-8 draws. No draw offers.
+- Go Fish: `{"rank": 1..13}`. Cards are `0..51`: rank = `card ~/ 4 + 1` (1 ace … 11 jack, 12 queen, 13 king), suit
+  = `card % 4` (♠ ♥ ♦ ♣). The deck `0..51` is shuffled with the seed; 7 cards each are dealt alternately from the
+  top (index 0), starting with the first player, and the rest is the stock, drawn from the top. The mover must hold
+  the rank. If the opponent holds it they hand over all of it and the mover goes again; otherwise the mover draws
+  the top stock card ("Go fish") and goes again only if it is the asked rank (with an empty stock the turn just
+  passes). After every play (and after the deal) each four of a kind becomes a book for its holder, the mover's
+  hand first; then a player with no cards draws one from the stock, the mover first. A player to move with no cards
+  and an empty stock is passed over automatically (no message). The game ends at 13 books: more books wins (reason
+  `books`). No draw offers. Hands are hidden by the clients' screens only.
 
 ### Link previews
 A text may carry a card for its first link, made by the sender:

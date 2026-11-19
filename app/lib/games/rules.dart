@@ -2,6 +2,7 @@ import 'checkers.dart';
 import 'chess_board.dart';
 import 'dots_and_boxes.dart';
 import 'four_in_a_row.dart';
+import 'go_fish.dart';
 import 'reversi.dart';
 import 'tictactoe.dart';
 
@@ -28,11 +29,16 @@ enum GameType {
   chess('chess', 'Chess'),
   fourinarow('fourinarow', 'Four in a Row'),
   reversi('reversi', 'Reversi'),
-  dotsandboxes('dotsandboxes', 'Dots and Boxes');
+  dotsandboxes('dotsandboxes', 'Dots and Boxes'),
+  gofish('gofish', 'Go Fish');
 
   const GameType(this.wire, this.title);
 
   final String wire, title;
+
+  /// Whether the game needs the `game` message's `seed` (it shuffles or
+  /// rolls). Without a valid seed such a game is inert.
+  bool get seeded => this == gofish;
 
   static GameType? fromWire(String s) {
     for (final t in values) {
@@ -43,7 +49,7 @@ enum GameType {
 }
 
 /// [winner] null means a draw. [reason] is one of 'line', 'full', 'no_moves',
-/// 'checkmate', 'stalemate', 'discs', 'boxes', 'threefold', 'fifty_moves',
+/// 'checkmate', 'stalemate', 'discs', 'boxes', 'books', 'threefold', 'fifty_moves',
 /// 'insufficient', 'resigned' or 'agreed'.
 class Outcome {
   const Outcome(this.winner, this.reason);
@@ -68,7 +74,10 @@ abstract class Board {
   bool get drawOffers;
 }
 
-Board initialBoard(GameType t) {
+/// The starting position of [t]. [seed] is the `game` message's seed, used
+/// by [GameType.seeded] games (a missing one deals from 0; such games are
+/// inert anyway).
+Board initialBoard(GameType t, [int? seed]) {
   switch (t) {
     case GameType.tictactoe:
       return TicTacToeBoard.initial();
@@ -82,5 +91,7 @@ Board initialBoard(GameType t) {
       return ReversiBoard.initial();
     case GameType.dotsandboxes:
       return DotsAndBoxesBoard.initial();
+    case GameType.gofish:
+      return GoFishBoard.deal(seed ?? 0);
   }
 }
