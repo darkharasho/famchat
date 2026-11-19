@@ -329,6 +329,291 @@
         "preview": "1"
       },
       "expected": "the text"
+    },
+    {
+      "name": "game-start",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"FhcYGRobHB0eHyAhIiMkJSYnKCkqKywt\",\"ct\":\"AJa_1mbefLSiB7lHJcKbEANgs232kFRdAQc4GwTV-r4WMEpj0syn8RBoqMvGSb5jkvdHq99-QzhHldBx-7dUPclXc--D00kH\",\"sig\":\"tIpBXrTvPQRNWL33-S9boknU0-D-3aSuRofm91PK7EOqejimfuusU7u01sntiPiVs5UP51v0Msp3euzfjyuuDQ\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "🎲 Started a game of Landlord"
+    },
+    {
+      "name": "game-start-group",
+      "userInfo": {
+        "chatId": "G1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"FxgZGhscHR4fICEiIyQlJicoKSorLC0u\",\"ct\":\"DJYKYXIwlf3FBXgLM6etU_Xj7m2CzOLJm3q5pI_98lLl0ACJ2HpZhY5OSZHGgPt5maYF4NJekCtq-Yb6FZJkZQ\",\"sig\":\"ybMVQZIAQV9hlDg9rhfzuvngosTRmbuRGz8AdJsLoWM2U2q3g6KwVaDlQSfJCPqnBOp7jcLZSYnnPeWC52fdDQ\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "Bob: 🎲 Started a game of Tic-tac-toe"
+    },
+    {
+      "name": "game-unknown-type",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"GBkaGxwdHh8gISIjJCUmJygpKissLS4v\",\"ct\":\"KygQtQMc5Xzzm-XgZYYk1qGXrVKC8SYfTYvT8PT0idig0HZAvoTgZeq8wt08DBJp_ZfG_4Z0ObWumdedjqQ\",\"sig\":\"Stx24gRoqRPwKF26QlpcygUiCCTTti6GNE6YysRBJPyN77SNVCBf58yz-UQR72J4TauQNkXALVZTIniPyx-bCw\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "game-bad-first",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"GRobHB0eHyAhIiMkJSYnKCkqKywtLi8w\",\"ct\":\"kY-NqtIxafK0g7H1ziXRvMTs7zTG2aH6UmHwbQDc-IZylnxh5q0D9tAtNGH1v1539iu9eKFzlKzZ\",\"sig\":\"Xvr2W1kII00wK5-vVh7vDrRvcXKqrGLvy2lWSJcVhVem1xjHqWvx0UMaOjSRjxmKv8sS37-_CjzICLbpH99JAQ\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-play",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"GhscHR4fICEiIyQlJicoKSorLC0uLzAx\",\"ct\":\"rjLWuNeKmtrdwdeTXsLV8XBarrIkNXdjtvT-5zpbJFTrqDR6qZKbj3e7GpeJWGHKSY2vZJ2-IbEGXPG-r8GdOeJFABsIeKKmHq2h_5vZlq2tbq-TWTev6yxMQOO3\",\"sig\":\"IzUkUyVwVCuJDVfl3U_vZntFSpamP6MfDGRT6PUfF6EQbVhsRN33yowJbuZ0ig8FIGwff6bqJ79Wugbuv7Y5Dg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "♟ Moved in Chess"
+    },
+    {
+      "name": "move-resign",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"GxwdHh8gISIjJCUmJygpKissLS4vMDEy\",\"ct\":\"IyVuPD8E9ONxWUQXaRmCJuqg918Hi9uN-WcCoQ7ZKLBt_XtfFp32ngsZvvoiRRWD9O7vQIEAkfCQlE8ReM-C5RI31vgzI64ZlJgwKxOttxVtPdyLzApMM_hS4eCEEqM\",\"sig\":\"ZMTfHqKNZdhnMw_HuKL92m94JfapF8UrlIAnTFfySGGcAmkAp2WUuMu6tlCHBWEEe0_SVWTB2N6mENJHcdHCBg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "🏳 Resigned at Chess"
+    },
+    {
+      "name": "move-draw_offer",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"HB0eHyAhIiMkJSYnKCkqKywtLi8wMTIz\",\"ct\":\"LyHhVw_z_Hmq0JrjCI4CpSbvleR6-ygrq8uLR2o_7CKB4Xanyu1Or_8bgplCqAu_VUi-RdQizwjoyOYxtvYyW9lpQnPygRV8MZf-EuYpny8HiBLEA4s4gx4QvUTajg8bvK9-\",\"sig\":\"whveTAJtDSj7z5AR3phIVm9NhsdyESangPt0t4LU6Ma6Zxg5dE_LMVqkC4s_8atMDPURL7QXgqOBPq8r2x3hCw\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "🤝 Offered a draw in Chess"
+    },
+    {
+      "name": "move-draw_accept",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"HR4fICEiIyQlJicoKSorLC0uLzAxMjM0\",\"ct\":\"uyCfOZZJ5viCivn2kNKCJ70HPhOrwM2I5f7HJJ9fQz1zC99LA3TYqeZKpvWVx3EuxaecDNblli0_ZE5hiRhheAE5bMeu9KRuSh0PXSaggzYGlkiMsxFpO_9Wf6JeqOclpzrkXw\",\"sig\":\"aUeV2eenJjCYXXncsx_C2GbxGVmSIkPIl4pclJ5RvpXLx8OIEylOMuj85FwO_97YUSqXb_5We62TUiPlDvH0Bw\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "🤝 Draw in Chess"
+    },
+    {
+      "name": "move-draw_decline",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"Hh8gISIjJCUmJygpKissLS4vMDEyMzQ1\",\"ct\":\"jCeyiBEk4G9DKKpRS27hp0iyj6sYvKZFnjfOxAFx10H8U5J81xqy1moVIF-tEN9wEfmhNhTTTjihIaLXXdm5SIpFEPSITT-LhdiUPsEhiGCIPtcoDYSID6SFVkFrh-YcmekT6ew\",\"sig\":\"Cy9D2p6QvfTKIlemxjVXb6BzrOC17rBgA8jXtBjbGhZVhQt9NJbN6zKRF5dMUdh73Q7ha9O3kPYHYzE8Y1N9DQ\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "Declined a draw in Chess"
+    },
+    {
+      "name": "move-poke",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"HyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2\",\"ct\":\"4bbD51PD_9_qGMVM0Oi4fm2xjjIcYlJiiMKwLjmZWe-YYsOU5oeRKXpPbEZoVOSXf0AMfraDbmQs7gxTjMzHNViTNwUagt8mEiQpXGBmut9mvxJBeURcjnqwCTgQ\",\"sig\":\"tSAGGSBirSKcAz1v-EOjx9fBaQRjLriDf7XyG6aHLtFLADac1sI_FGtp7c5LTZDnXuP_Pee58A2W-bwccT16CA\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "👉 Poked you · your turn in Chess"
+    },
+    {
+      "name": "move-undo",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3\",\"ct\":\"ZnsmohVTNrEa0z_LLWUt80k0o1u65ySPwyZsCyMbjWNcJAJ444BOayHXF2Kf4Vp9S-me586mnqC5_xwtRqMdXVwnRNF57HQdf0XvkcAZcKWwmhAOnnoodWWrWGC6\",\"sig\":\"zg8BsphpyR9IS50m67Uq8mxKhHEJ6LVGXNbudgHoXqD5zWJshqRx7jLpp36c8Qc0JylGqko4FN-jeXh6gdtMAA\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-dots",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4\",\"ct\":\"E_UAchc_pq_B5UWI41O008-XrsHzjJPadmF17Wi-FzM_zMpGi2e3PLdfu4sz3_XXYqBKz8Y7A7Lra2It82olDQcLOy_DmAavxslXee8CNFIhzLFaS2S_c2EqNmFKjbsWgsAoGg\",\"sig\":\"4M3nYmkkw-ro-hzS-6Hk-4Ppyy-oPD72JtrGX4qlo5r-HLWTq2LVdtTH4JHyb8iIYDOSbUofwXFBDob2FkcyAg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "👉 Poked you · your turn in Dots and Boxes"
+    },
+    {
+      "name": "move-unknown-type",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"IiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5\",\"ct\":\"9r_eHkN7iGVitTgBf-DuAXsZ0NZ0FWOlcP0NFcCoUNalALb_iEWNQnbuqvQGb0LZkKNRBPfDECJ9d3xPOdba4efaQHv4VcP-zjWS07xAAFd-juIrZFqX1Y7qmwbt9vI\",\"sig\":\"TMedbNZ60q2E-2-OyisFqJgHn6ZlKvbGryXT72ibONe369-u_PU6NRbmp0OAVaXPNBezoZaEHTZ7LebgS1sRBg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-ply-float",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"IyQlJicoKSorLC0uLzAxMjM0NTY3ODk6\",\"ct\":\"f0TN22wvMsBbL6HrEyD9W4pnC32vC-WEiDpxzyYq3GsodQYdu7vJnJXlxIuI8lJG0I9yfvl8kDJTeQD-n2a-HyiHXnW1JukZIOxjfWPvJvISybGCWN7UHAAzhhIhxV4\",\"sig\":\"IA119vzYKtQNjyhPbyqbPN4nj-OQpXMVgDzErPW2SVivsX329yteTIjC284Rb2bzv13qVpW8n3QAOIqCAaQ1Dw\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-ply-integral-float",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"JCUmJygpKissLS4vMDEyMzQ1Njc4OTo7\",\"ct\":\"NWdVLcAfywjJdtHTzOhYZj0v9OaZRMVRtL4TiF8hmU7jjCGK7K0Z47k_nKiXDhI_8WAZgXM0rSGQgVFrOKRDcpna3bDpDeJ3XEj22a1VlfTv1D0Gj0oaxqMlQ4LuUzRV6A\",\"sig\":\"VbFJHTpHaQTioZj5Ut0FCaUeka2nadaAmGGgCgbUH0qJW-7WMw0yIhw9YUl5R1tYlz5GV6SF9ImVdEzzCLakDA\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": "🏳 Resigned at Chess"
+    },
+    {
+      "name": "move-ply-negative",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"JSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8\",\"ct\":\"PXu3CgAv6jdlK91CpJAR7IYSDzFV7hU2AZx3BcB-5DYoea5c6hrXQ4SI9ELVpnxDoYMJTBKOM3rgitVrjuSclh2U91DIam_eTS_YhT-4tfHerkpXUyuX5woFdwOUJw\",\"sig\":\"YBBXuYXjvg-husIGIRgpyRVxE8AbZEEhM-hvznbzPvzo8OD77qI8m1RvER-ZCBWX-51pUmt2-3Toe7Vc3VSbAg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-ply-bool",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"JicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9\",\"ct\":\"H1u7g8v4AM1t47azQ2GWCr7DTgr25cAGQa79BkAUrHhETT0prD6pmqt7cLRhoNpLM9R7T0JU4QWIJKOWKXK1UQJ3qSsl26S4SVMD01FyL8ih2y-PJggPg9BLLFIzwbgc\",\"sig\":\"pzvuvU0KGJWRRCfneH1h07E1KDStb2rAd9kexJdWxsEDjV8Z3Gc9JH5HCESIu9MMCdonFZvtBvdhnYMYcK-yDg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-no-target",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"JygpKissLS4vMDEyMzQ1Njc4OTo7PD0-\",\"ct\":\"efJVf0g3f26WpAk33-X0r3zcuye2BA3lBXSUWKm1ekqdMcsBLmErTnSCEcVv69vvT3v2HEwm5T8JVNd9fh0I-XQBBYH3te7D4f8rkL3AMRG7lsSDRGcW0uQddQ\",\"sig\":\"zcG59GNOGHX6Nbyctd2hUtEOPhx4525rfTz9y_OkQB884Ku9I6eMhejSJ3xmlLjZgTfhqCd9VWB2BquAF8l1Dg\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
+    },
+    {
+      "name": "move-action-no-type",
+      "userInfo": {
+        "chatId": "D1",
+        "messageId": "M1",
+        "senderUserId": "bob",
+        "senderDeviceId": "bob-d",
+        "epoch": "1",
+        "env": "{\"v\":1,\"epoch\":1,\"nonce\":\"KCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_\",\"ct\":\"VqH_tGypxVqnBGkgdKV7wYk_DFyi8lqAE9cp0RziW9tuCBqxsDs-X6u41N0q2X3LjCrMKYbqG76eVaUNq4Edm9OvrP2wwOi0F_Zmb15_nayn7pM2aQ\",\"sig\":\"5RbRYIg4vXITBk0iyIk9r_aQYVoS5tfoOPsK3N1oU6AxvBpt0riXxUAF9i9fnx07x8DXYpbU6jev7MuEAvE_DA\"}",
+        "title": "FamChat",
+        "body": "New message",
+        "preview": "1"
+      },
+      "expected": null
     }
   ]
 }
