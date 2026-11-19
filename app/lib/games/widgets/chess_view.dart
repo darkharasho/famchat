@@ -24,7 +24,9 @@ const _promotions = [
 ];
 
 /// Chess. White at the bottom for first (and spectators), flipped for second.
-/// Tap a piece, then a target; a promotion asks which piece to take.
+/// Tap a piece, then a target; a promotion asks which piece to take. A move
+/// slides its piece (and a castling rook) across; a captured piece fades as
+/// it is taken, and a promoted pawn turns into its new piece as it lands.
 class ChessView extends StatefulWidget {
   const ChessView({
     super.key,
@@ -44,8 +46,73 @@ class ChessView extends StatefulWidget {
   State<ChessView> createState() => _ChessViewState();
 }
 
-class _ChessViewState extends State<ChessView> {
+class _ChessViewState extends MoveMotionState<ChessView> {
   String? _selected;
+
+  /// The move playing out: each sliding piece's (from, to, piece before,
+  /// piece after), and each captured square with the piece taken there.
+  List<(String, String, ChessPieceAt, ChessPieceAt)> _slides = const [];
+  Map<String, ChessPieceAt> _taken = const {};
+
+  static bool _same(ChessPieceAt? a, ChessPieceAt? b) =>
+      a?.side == b?.side && a?.role == b?.role;
+
+  static String _sq(int file, int rank) => '${_files[file]}${rank + 1}';
+
+  void _plan(ChessBoard a) {
+    final b = widget.board, last = b.lastMove;
+    if (widget.thumbnail || last == null || last == a.lastMove) return;
+    final (from, to) = last;
+    final mover = a.at(from), landed = b.at(to);
+    if (mover == null ||
+        landed == null ||
+        mover.side != landed.side ||
+        b.at(from) != null) {
+      return;
+    }
+    final slides = [(from, to, mover, landed)];
+    final taken = <String, ChessPieceAt>{};
+    final gone = <String>[], came = <String>[];
+    for (var f = 0; f < 8; f++) {
+      for (var r = 0; r < 8; r++) {
+        final sq = _sq(f, r);
+        if (sq == from || sq == to) {
+          final was = a.at(sq);
+          if (sq == to && was != null) taken[sq] = was;
+          continue;
+        }
+        final was = a.at(sq), now = b.at(sq);
+        if (_same(was, now)) continue;
+        if (was != null && was.side != mover.side && now == null) {
+          taken[sq] = was; // en passant
+        } else if (was != null && was.side == mover.side && now == null) {
+          gone.add(sq);
+        } else if (was == null && now?.side == mover.side) {
+          came.add(sq);
+        } else {
+          return;
+        }
+      }
+    }
+    // Castling: the rook's one square left and one arrived.
+    if (gone.length != came.length || gone.length > 1) return;
+    if (gone.length == 1) {
+      final rook = a.at(gone.single)!;
+      slides.add((gone.single, came.single, rook, rook));
+    }
+    _slides = slides;
+    _taken = taken;
+    playMove(340);
+  }
+
+  /// [sq] in display cells from the top left (column, row).
+  static Offset _cellOf(String sq, bool flipped) {
+    final file = _files.indexOf(sq[0]), rank = int.parse(sq[1]) - 1;
+    return Offset(
+      (flipped ? 7 - file : file).toDouble(),
+      (flipped ? rank : 7 - rank).toDouble(),
+    );
+  }
 
   /// The destination waiting on the promotion picker.
   String? _promoTo;
@@ -59,6 +126,7 @@ class _ChessViewState extends State<ChessView> {
       _selected = null;
       _promoTo = null;
     }
+    if (!_samePosition(old.board, widget.board)) _plan(old.board);
   }
 
   /// Games are re-derived (new Board objects) on every chat update, so the
@@ -101,10 +169,19 @@ class _ChessViewState extends State<ChessView> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: clock,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
     final colors = BoardColors.of(context);
     final flipped = widget.mySide == Side.second;
-    final canPlay = _canPlay;
+    final animating = moving && _slides.isNotEmpty;
+    final canPlay = _canPlay && !animating;
+    final slide = phase(0, 1, Curves.easeInOutCubic);
+    final fade = phase(0.55, 1, Curves.easeIn);
+    final landing = {for (final s in _slides) s.$2};
     final board = widget.board;
     final selected = widget.thumbnail ? null : _selected;
     final targets = selected == null
@@ -142,7 +219,21 @@ class _ChessViewState extends State<ChessView> {
                   rankLabel: c == 0 ? '${rank + 1}' : null,
                   color: dark ? colors.light : colors.dark,
                 ),
-          piece: piece == null ? null : ChessGlyph(piece: piece),
+          piece: animating && _taken.containsKey(sq)
+              ? Opacity(
+                  opacity: 1 - fade,
+                  child: Transform.scale(
+                    scale: 1 - 0.3 * fade,
+                    child: ChessGlyph(piece: _taken[sq]!),
+                  ),
+                )
+              : piece == null || animating && landing.contains(sq)
+              ? null
+              : AnimatedScale(
+                  scale: sq == selected ? 1.12 : 1,
+                  duration: const Duration(milliseconds: 140),
+                  child: ChessGlyph(piece: piece),
+                ),
           target: !targets.contains(sq)
               ? TargetMark.none
               : piece != null
@@ -154,11 +245,57 @@ class _ChessViewState extends State<ChessView> {
         );
       },
     );
+    final Widget shown = !animating
+        ? grid
+        : Stack(
+            children: [
+              grid,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      final cell = box.biggest.shortestSide / 8;
+                      return Stack(
+                        children: [
+                          for (final (a, b, before, after) in _slides)
+                            Positioned(
+                              left:
+                                  Offset.lerp(
+                                    _cellOf(a, flipped),
+                                    _cellOf(b, flipped),
+                                    slide,
+                                  )!.dx *
+                                  cell,
+                              top:
+                                  Offset.lerp(
+                                    _cellOf(a, flipped),
+                                    _cellOf(b, flipped),
+                                    slide,
+                                  )!.dy *
+                                  cell,
+                              width: cell,
+                              height: cell,
+                              child: Transform.scale(
+                                // Lifts a touch mid-slide.
+                                scale: 1 + 0.1 * (1 - (2 * slide - 1).abs()),
+                                child: ChessGlyph(
+                                  piece: slide < 0.8 ? before : after,
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          );
     final from = _selected, to = _promoTo;
-    if (from == null || to == null || widget.thumbnail) return grid;
+    if (from == null || to == null || widget.thumbnail) return shown;
     return Stack(
       children: [
-        grid,
+        shown,
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,

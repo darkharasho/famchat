@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../checkers.dart';
@@ -7,6 +9,8 @@ import 'board_parts.dart';
 /// Checkers. The viewer's back rank is at the bottom: row 0 for first (and
 /// spectators), rotated 180° for second. A move is built tap by tap: the
 /// piece, then each landing square; it is sent once it is a full legal path.
+/// A move plays out hop by hop: the piece lifts and lands on each square, a
+/// jumped piece shrinks away as it is passed, and a crown pops on at the end.
 class CheckersView extends StatefulWidget {
   const CheckersView({
     super.key,
@@ -26,9 +30,17 @@ class CheckersView extends StatefulWidget {
   State<CheckersView> createState() => _CheckersViewState();
 }
 
-class _CheckersViewState extends State<CheckersView> {
+class _CheckersViewState extends MoveMotionState<CheckersView> {
   /// The piece and the landings chosen so far; empty when nothing is selected.
   List<int> _prefix = const [];
+
+  /// The move playing out: its path, the piece before and after (a man may
+  /// be crowned), and each jumped square with the hop that passes it.
+  List<int> _path = const [];
+  CheckersSquare? _mover, _landed;
+  Map<int, (int, CheckersSquare)> _jumped = const {};
+
+  static const _hopMs = 300, _crownMs = 260;
 
   @override
   void didUpdateWidget(CheckersView old) {
@@ -38,7 +50,55 @@ class _CheckersViewState extends State<CheckersView> {
         old.interactive != widget.interactive) {
       _prefix = const [];
     }
+    if (!_samePosition(old.board, widget.board)) _plan(old.board);
   }
+
+  static (int, int) _rc(int sq) =>
+      (CheckersBoard.rowOf(sq), CheckersBoard.colOf(sq));
+
+  void _plan(CheckersBoard a) {
+    final b = widget.board, path = b.lastPath;
+    if (widget.thumbnail || path == null || path.length < 2) return;
+    final mover = a.at(path.first), landed = b.at(path.last);
+    if (mover == null ||
+        landed == null ||
+        mover.side != landed.side ||
+        b.at(path.first) != null && path.first != path.last) {
+      return;
+    }
+    final jumped = <int, (int, CheckersSquare)>{};
+    for (var sq = 0; sq < 32; sq++) {
+      final was = a.at(sq), now = b.at(sq);
+      if (sq == path.first || sq == path.last) continue;
+      if (was == null && now == null) continue;
+      if (was != null &&
+          now != null &&
+          was.side == now.side &&
+          was.piece == now.piece) {
+        continue;
+      }
+      // Only the mover's opponents may vanish; anything else is not one move.
+      if (was == null || now != null || was.side == mover.side) return;
+      final (r, c) = _rc(sq);
+      var hop = -1;
+      for (var h = 0; h + 1 < path.length; h++) {
+        final (r1, c1) = _rc(path[h]);
+        final (r2, c2) = _rc(path[h + 1]);
+        if (r1 + r2 == 2 * r && c1 + c2 == 2 * c) hop = h;
+      }
+      if (hop < 0) return;
+      jumped[sq] = (hop, was);
+    }
+    _path = path;
+    _mover = mover;
+    _landed = landed;
+    _jumped = jumped;
+    final crowned = mover.piece != landed.piece;
+    playMove((path.length - 1) * _hopMs + (crowned ? _crownMs : 0));
+  }
+
+  int get _hopsMs => (_path.length - 1) * _hopMs;
+  double get _hopsEnd => _hopsMs / (clock.duration?.inMilliseconds ?? _hopsMs);
 
   /// Games are re-derived (new Board objects) on every chat update, so the
   /// selection clears only when the position actually changed.
@@ -98,14 +158,42 @@ class _CheckersViewState extends State<CheckersView> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: clock,
+    builder: (context, _) => _build(context),
+  );
+
+  /// Where the moving piece is, in display cells from the top left (column,
+  /// row), and how high it is lifted (0 on a square, 1 mid-hop).
+  (Offset, double) _flight(bool flipped) {
+    final hops = _path.length - 1;
+    final t = (clock.value / _hopsEnd).clamp(0.0, 1.0) * hops;
+    final h = math.min(t.floor(), hops - 1);
+    final f = Curves.easeInOut.transform(t - h);
+    Offset at(int sq) {
+      final (r, c) = _rc(sq);
+      return Offset(
+        (flipped ? 7 - c : c).toDouble(),
+        (flipped ? r : 7 - r).toDouble(),
+      );
+    }
+
+    return (
+      Offset.lerp(at(_path[h]), at(_path[h + 1]), f)!,
+      math.sin(math.pi * f),
+    );
+  }
+
+  Widget _build(BuildContext context) {
     final colors = BoardColors.of(context);
     final flipped = widget.mySide == Side.second;
-    final canPlay = _canPlay;
+    final animating = moving && _mover != null;
+    final canPlay = _canPlay && !animating;
     final targets = _targets;
     final last = widget.board.lastPath ?? const <int>[];
     final selection = widget.thumbnail ? const <int>[] : _prefix;
-    return BoardGrid(
+    final hops = _path.length - 1;
+    final grid = BoardGrid(
       size: 8,
       thumbnail: widget.thumbnail,
       cell: (r, c) {
@@ -113,7 +201,34 @@ class _CheckersViewState extends State<CheckersView> {
         final col = flipped ? 7 - c : c;
         final sq = CheckersBoard.squareAt(row, col);
         if (sq == null) return ColoredBox(color: colors.light);
-        final piece = widget.board.at(sq);
+        var piece = widget.board.at(sq);
+        Widget? drawn = piece == null
+            ? null
+            : AnimatedScale(
+                scale: selection.isNotEmpty && sq == selection.first ? 1.1 : 1,
+                duration: const Duration(milliseconds: 140),
+                child: CheckersDisc(piece: piece),
+              );
+        if (animating) {
+          if (sq == _path.last) drawn = null;
+          final jump = _jumped[sq];
+          if (jump != null) {
+            // Shrinks away as the mover passes overhead (the hop's middle).
+            final start = (jump.$1 + 0.35) / hops * _hopsEnd;
+            final end = (jump.$1 + 0.75) / hops * _hopsEnd;
+            final t = phase(start, end, Curves.easeIn);
+            piece = jump.$2;
+            drawn = t >= 1
+                ? null
+                : Opacity(
+                    opacity: 1 - t,
+                    child: Transform.scale(
+                      scale: 1 - 0.6 * t,
+                      child: CheckersDisc(piece: jump.$2),
+                    ),
+                  );
+          }
+        }
         final tappable =
             canPlay &&
             (_isStart(sq) || targets.contains(sq) || _prefix.isNotEmpty);
@@ -128,13 +243,59 @@ class _CheckersViewState extends State<CheckersView> {
           outline: selection.isNotEmpty && sq == selection.last
               ? colors.selected
               : null,
-          piece: piece == null ? null : CheckersDisc(piece: piece),
+          piece: drawn,
           target: targets.contains(sq) ? TargetMark.dot : TargetMark.none,
           targetColor: colors.target,
           onTap: tappable ? () => _tap(sq) : null,
-          label: widget.thumbnail ? null : _label(sq, piece),
+          label: widget.thumbnail ? null : _label(sq, widget.board.at(sq)),
         );
       },
+    );
+    if (!animating) return grid;
+    final (at, lift) = _flight(flipped);
+    final crowned = _mover!.piece != _landed!.piece;
+    final crown = crowned ? phase(_hopsEnd, 1, Curves.easeOutBack) : 0.0;
+    return Stack(
+      children: [
+        grid,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final cell = box.biggest.shortestSide / 8;
+                return Stack(
+                  children: [
+                    Positioned(
+                      left: at.dx * cell,
+                      top: at.dy * cell - lift * cell * 0.18,
+                      width: cell,
+                      height: cell,
+                      child: Transform.scale(
+                        scale: 1 + 0.18 * lift,
+                        child: crown > 0
+                            ? Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  CheckersDisc(piece: _mover!),
+                                  Opacity(
+                                    opacity: crown.clamp(0.0, 1.0),
+                                    child: Transform.scale(
+                                      scale: 1.6 - 0.6 * crown,
+                                      child: CheckersDisc(piece: _landed!),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : CheckersDisc(piece: _mover!),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
