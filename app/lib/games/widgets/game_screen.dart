@@ -15,6 +15,7 @@ import '../go_fish.dart';
 import '../landlord/landlord.dart';
 import '../providers.dart';
 import '../rules.dart';
+import '../war.dart';
 import 'board_view.dart';
 
 /// Who is looking at a chat's games: me, names, and whether the chat is
@@ -410,7 +411,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} went bankrupt'
           : outcome.reason == 'discs' ||
                 outcome.reason == 'boxes' ||
-                outcome.reason == 'books'
+                outcome.reason == 'books' ||
+                outcome.reason == 'cards'
           ? _finalScore(g.board, outcome)
           : _reasons[outcome.reason];
       if (reason != null) status = '$status · $reason';
@@ -500,7 +502,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         // Landlord's ring and the Go Fish table stretch to any shape, so they
         // fill the panel instead.
         _boardSlot(
-          fill: g.board is LandlordBoard || g.board is GoFishBoard,
+          fill:
+              g.board is LandlordBoard ||
+              g.board is GoFishBoard ||
+              g.board is WarBoard,
           phone: MediaQuery.sizeOf(context).width < 600,
           child: BoardView(
             board: g.board,

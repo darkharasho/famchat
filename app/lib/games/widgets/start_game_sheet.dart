@@ -118,6 +118,8 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
       title: Text(t.title),
       subtitle: t.long
           ? const Text('A long game, played over days')
+          : t == GameType.war
+          ? const Text('Flip cards, higher wins. Most cards after one deck')
           : t == GameType.checkers
           ? Text(
               _optionalJumps

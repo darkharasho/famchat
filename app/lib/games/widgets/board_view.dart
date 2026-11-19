@@ -9,6 +9,7 @@ import '../landlord/landlord.dart';
 import '../reversi.dart';
 import '../rules.dart';
 import '../tictactoe.dart';
+import '../war.dart';
 import 'checkers_view.dart';
 import 'chess_view.dart';
 import 'dots_and_boxes_view.dart';
@@ -17,6 +18,7 @@ import 'go_fish_view.dart';
 import 'landlord/landlord_view.dart';
 import 'reversi_view.dart';
 import 'tictactoe_view.dart';
+import 'war_view.dart';
 
 /// An interactive board for any game, with [mySide] at the bottom. With
 /// [thumbnail] it is a static picture: no interaction, selection or labels.
@@ -118,6 +120,14 @@ class _BoardViewState extends State<BoardView> {
         thumbnail: widget.thumbnail,
         names: widget.names,
       ),
+      WarBoard() => WarView(
+        board: b,
+        mySide: widget.mySide,
+        onPlay: widget.onPlay,
+        interactive: interactive,
+        thumbnail: widget.thumbnail,
+        names: widget.names,
+      ),
       LandlordBoard() => LandlordView(
         board: b,
         mySide: widget.mySide,
@@ -138,7 +148,7 @@ class _BoardViewState extends State<BoardView> {
 /// balances only).
 double boardAspectRatio(Board b) => switch (b) {
   FourInARowBoard() => FourInARowBoard.columns / FourInARowBoard.rows,
-  GoFishBoard() || LandlordBoard() => 3 / 2,
+  GoFishBoard() || WarBoard() || LandlordBoard() => 3 / 2,
   _ => 1,
 };
 
@@ -160,6 +170,7 @@ String sideColourName(Board b, Side side) {
   ReversiBoard() => b.counts,
   DotsAndBoxesBoard() => b.scores,
   GoFishBoard() => b.scores,
+  WarBoard() => b.won,
   _ => null,
 };
 

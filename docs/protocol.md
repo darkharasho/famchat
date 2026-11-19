@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`), Dots and Boxes (`dotsandboxes`), Go Fish (`gofish`) and Landlord (`landlord`, a property-trading game). All are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`), Dots and Boxes (`dotsandboxes`), Go Fish (`gofish`), War (`war`) and Landlord (`landlord`, a property-trading game). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes|gofish|landlord", "first":"<userId>", "seed":3735928559}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes|gofish|war|landlord", "first":"<userId>", "seed":3735928559}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -138,9 +138,9 @@ it, kept by a rematch): then a player may make a plain step even when a capture 
 begun, still continues while it can. Other games, and other values, ignore the field. Versions before the field
 existed treat such a game as mandatory-capture and refuse its steps, so both players need a version that knows it.
 
-Games with luck (`gofish`, `landlord`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
+Games with luck (`gofish`, `war`, `landlord`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
 generator when starting a game or a rematch. A `gofish` or `landlord` game without a valid seed (missing, out of range, not an
-integer) is inert like a game started while another was running. Other games never send a seed and ignore one.
+integer) is inert like a game started while another was running (likewise `war`). Other games never send a seed and ignore one.
 Every device turns the seed into the same shuffle with this generator, which is permanent (changing it would
 change every past game):
 
@@ -180,6 +180,12 @@ Move fields of `play`:
   hand first; then a player with no cards draws one from the stock, the mover first. A player to move with no cards
   and an empty stock is passed over automatically (no message). The game ends at 13 books: more books wins (reason
   `books`). No draw offers. Hands are hidden by the clients' screens only.
+- War: `{"flip": true}`, by the player whose turn it is; turns alternate, the first player first. Cards as in Go
+  Fish, aces high (2 lowest). The deck `0..51` is shuffled with the seed and dealt alternately from the top, 26
+  each, the first player first; each deck is played from its top. A flip turns both top cards: the higher takes
+  both. Equal cards are a war: each lays `min(3, cards left - 1)` cards face down, then flips again, until one is
+  higher; if the decks run out first, each takes back their own cards. Won cards are counted, never played again.
+  When the decks are empty the game ends: more cards won wins (reason `cards`), equal is a draw. No draw offers.
 - Landlord: `{"a": "<action>", ...}`. A two-player property-trading game on a 40-space board (`0..39` clockwise
   from Start; prices, rents and the two 16-card decks, Luck ids `0..15` and Family Fund `16..31`, are fixed in
   `app/lib/games/landlord/`). Setup: the generator is created from the seed, Luck `[0..15]` is shuffled, then
