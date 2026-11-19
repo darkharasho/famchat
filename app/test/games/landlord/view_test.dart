@@ -22,8 +22,7 @@ void main() {
     expect(l(ev(first, LandlordEventKind.rent, amount: 14, space: 16, other: second)), 'You paid Mom \$14 rent');
     expect(l(ev(second, LandlordEventKind.rent, amount: 1050, space: 21, other: first)), 'Mom paid you \$1,050 rent');
     expect(l(ev(first, LandlordEventKind.bought, space: 21, amount: 220)), 'You bought Linden Square for \$220');
-    expect(l(ev(second, LandlordEventKind.auctionWon, space: 13, amount: 90)), 'Auction: Mom won Garden Road for \$90');
-    expect(l(ev(first, LandlordEventKind.auctionUnsold, space: 13)), 'Auction: nobody bought Garden Road');
+    expect(l(ev(second, LandlordEventKind.declined, space: 13)), 'Mom passed on Garden Road');
     expect(l(ev(second, LandlordEventKind.drew, card: LandlordCard.luckBack3)), 'Mom drew Luck: Go back 3 spaces');
     expect(l(ev(first, LandlordEventKind.drew, card: LandlordCard.fundPay100)), 'You drew Family Fund: The roof sprang a leak: pay \$100');
     expect(l(ev(second, LandlordEventKind.jailed)), 'Mom went to jail');
@@ -83,23 +82,13 @@ void main() {
       expect(played, [{'a': 'roll'}]);
     });
 
-    testWidgets('buy or auction', (tester) async {
+    testWidgets('buy or not', (tester) async {
       final b = act(LandlordBoard.custom(rng: rollsSeed([(2, 4)])), 'roll');
       await tester.pumpWidget(view(b));
       expect(find.text('Buy for \$100'), findsOneWidget);
+      expect(find.text("Don't buy"), findsOneWidget);
       await tester.tap(find.byKey(const Key('act-decline')));
       expect(played, [{'a': 'decline'}]);
-    });
-
-    testWidgets('bid buttons raise the high bid; unaffordable ones hide', (tester) async {
-      final b = act(act(LandlordBoard.custom(rng: rollsSeed([(2, 4)]), cash: (1500, 45)), 'roll'), 'decline');
-      final mine = act(b, 'bid', {'amount': 20});
-      // Second (cash 45) is to bid: as second, +1 and +10 show, +50 doesn't.
-      await tester.pumpWidget(view(mine, mySide: second));
-      expect(find.byKey(const Key('act-bid-50')), findsNothing);
-      await tester.tap(find.byKey(const Key('act-bid-10')));
-      await tester.tap(find.byKey(const Key('act-pass')));
-      expect(played, [{'a': 'bid', 'amount': 30}, {'a': 'pass'}]);
     });
 
     testWidgets('a trade offer to me: accept or reject', (tester) async {
@@ -130,18 +119,6 @@ void main() {
       await tester.tap(find.byKey(const Key('act-raise')));
       await tester.pumpAndSettle();
       expect(find.text('Acorn Lane'), findsOneWidget, reason: 'the properties sheet');
-    });
-
-    testWidgets('any bid amount can be typed', (tester) async {
-      final b = act(LandlordBoard.custom(rng: rollsSeed([(2, 4)])), 'roll');
-      await tester.pumpWidget(view(act(b, 'decline')));
-      await tester.tap(find.byKey(const Key('act-bid-custom')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('bid-amount')), '300');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('bid-confirm')));
-      await tester.pumpAndSettle();
-      expect(played, [{'a': 'bid', 'amount': 300}]);
     });
 
     testWidgets('a tap right after the board changes is ignored', (tester) async {

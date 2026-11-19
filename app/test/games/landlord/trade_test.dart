@@ -16,67 +16,20 @@ Map<String, Object?> offer({int giveCash = 0, List<int> giveSpaces = const [], i
 };
 
 void main() {
-  test('declining starts an auction; the decliner bids first', () {
+  test('declining leaves the property with the bank; no auction', () {
     final b = declined();
-    expect(b.phase, LandlordPhase.auction);
-    expect(b.toMove, first);
-    expect(b.auction!.space, 6);
-    expect(b.auction!.high, 0);
-  });
-
-  test('bids must rise and be affordable', () {
-    final b = act(declined(), 'bid', {'amount': 10});
-    expect(b.toMove, second);
-    expect((b.auction!.high, b.auction!.highBidder), (10, first));
-    expect(legal(b, 'bid', {'amount': 10}), isFalse);
-    expect(legal(b, 'bid', {'amount': 1501}), isFalse);
-    expect(legal(b, 'bid', {'amount': 11}), isTrue);
-    for (final bad in [0, -5, '20', null, 12.5]) {
-      expect(legal(declined(), 'bid', {'amount': bad}), isFalse, reason: '$bad');
+    expect(b.owner(6), isNull);
+    expect(b.cash(first), 1500);
+    expect((b.phase, b.toMove), (LandlordPhase.end, first));
+    expect(b.events.last.kind, LandlordEventKind.declined);
+    for (final a in ['bid', 'pass']) {
+      expect(legal(b, a, {'amount': 10}), isFalse, reason: a);
     }
   });
 
-  test('a pass while a bid stands: the high bidder wins', () {
-    final b = act(act(declined(), 'bid', {'amount': 10}), 'pass');
-    expect(b.owner(6), first);
-    expect(b.cash(first), 1490);
-    expect(b.auction, isNull);
-    expect(b.phase, LandlordPhase.end);
-    expect(b.events.last.kind, LandlordEventKind.auctionWon);
-    expect((b.events.last.actor, b.events.last.amount, b.events.last.space), (first, 10, 6));
-  });
-
-  test('first passes with no bid (drops out), second bids: second wins at once', () {
-    var b = act(declined(), 'pass');
-    expect(b.toMove, second);
-    b = act(b, 'bid', {'amount': 40});
-    expect(b.auction, isNull);
-    expect((b.owner(6), b.cash(second)), (second, 1460));
-    expect(b.events.last.kind, LandlordEventKind.auctionWon);
-    expect(b.toMove, first);
-    expect(b.phase, LandlordPhase.end);
-  });
-
-  test('two passes with no bid: the bank keeps it', () {
-    final b = act(act(declined(), 'pass'), 'pass');
-    expect(b.owner(6), isNull);
-    expect(b.events.last.kind, LandlordEventKind.auctionUnsold);
-    expect(b.phase, LandlordPhase.end);
-  });
-
-  test('after a doubles landing the auction returns to roll', () {
-    final b = act(act(declined(roll: (3, 3)), 'pass'), 'pass');
-    expect(b.phase, LandlordPhase.roll);
-    expect(b.turn, first);
-  });
-
-  test('a bidder may mortgage to afford a bid but not build', () {
-    var b = act(declined(owners: {1: second, 3: second}), 'bid', {'amount': 5});
-    expect(b.toMove, second);
-    b = act(b, 'mortgage', {'space': 1});
-    expect(b.toMove, second);
-    expect(b.phase, LandlordPhase.auction);
-    expect(legal(b, 'build', {'space': 3}), isFalse);
+  test('declining after doubles returns to roll', () {
+    final b = declined(roll: (3, 3));
+    expect((b.phase, b.turn), (LandlordPhase.roll, first));
   });
 
   test('offer validation', () {
@@ -135,11 +88,10 @@ void main() {
   test('during a trade only accept or reject', () {
     final b = LandlordBoard.custom(owners: {1: first, 6: second, 9: second});
     final o = act(b, 'offer', offer(giveSpaces: [1], getSpaces: [6]));
-    for (final a in ['roll', 'end_turn', 'pass']) {
+    for (final a in ['roll', 'end_turn']) {
       expect(legal(o, a), isFalse, reason: a);
     }
     expect(legal(o, 'mortgage', {'space': 9}), isFalse);
     expect(legal(o, 'sell', {'space': 9}), isFalse);
-    expect(legal(o, 'bid', {'amount': 5}), isFalse);
   });
 }

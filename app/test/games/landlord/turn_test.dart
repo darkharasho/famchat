@@ -155,7 +155,7 @@ void main() {
     expect(b.inJail(first), isFalse);
     expect(b.position(first), 14);
     expect(b.phase, LandlordPhase.buy);
-    expect(act(b, 'decline').phase, LandlordPhase.auction);
+    expect(act(b, 'decline').phase, LandlordPhase.end);
   });
 
   test('in jail: failed rolls stay; the third pays 50 and moves', () {

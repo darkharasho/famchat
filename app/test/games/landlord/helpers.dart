@@ -30,12 +30,10 @@ bool legal(LandlordBoard b, String a, [Map<String, Object?> f = const {}]) =>
 /// favouring the ones that move the game along. Null if none is legal.
 Map<String, Object?>? randomLandlordAction(Random rnd, LandlordBoard b) {
   final me = b.toMove;
-  final au = b.auction;
   final owned = [for (var s = 0; s < 40; s++) if (b.owner(s) == me) s];
   final theirs = [for (var s = 0; s < 40; s++) if (b.owner(s) == me.other) s];
   final progress = <Map<String, Object?>>[
-    {'a': 'roll'}, {'a': 'buy'}, {'a': 'end_turn'}, {'a': 'pass'}, {'a': 'accept'}, //
-    if (au != null) ...[{'a': 'bid', 'amount': au.high + 1}, {'a': 'bid', 'amount': au.high + 25}],
+    {'a': 'roll'}, {'a': 'buy'}, {'a': 'end_turn'}, {'a': 'accept'},
   ];
   final other = <Map<String, Object?>>[
     {'a': 'decline'}, {'a': 'pay_bail'}, {'a': 'use_card'}, {'a': 'reject'},

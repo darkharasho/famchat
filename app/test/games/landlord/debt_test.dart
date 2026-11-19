@@ -140,7 +140,6 @@ void main() {
       final a = switch (b.phase) {
         LandlordPhase.roll => 'roll',
         LandlordPhase.buy => 'decline',
-        LandlordPhase.auction => 'pass',
         LandlordPhase.end => 'end_turn',
         final p => throw StateError('$p'),
       };

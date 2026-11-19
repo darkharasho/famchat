@@ -53,7 +53,7 @@ String offerSummary(LandlordOffer o, Side viewer, (String, String) names) {
   ].join(' · ');
 }
 
-/// What is going on, for [viewer]: "Your turn", "Mom is bidding", "You owe
+/// What is going on, for [viewer]: "Your turn", "Mom is deciding", "You owe
 /// Mom $200 — sell or mortgage".
 String landlordStatus(LandlordBoard b, Side viewer, (String, String) names) {
   final o = b.outcome;
@@ -66,12 +66,6 @@ String landlordStatus(LandlordBoard b, Side viewer, (String, String) names) {
       final d = b.debts.first;
       final to = d.creditor == null ? 'the bank' : (d.creditor == viewer ? 'you' : _name(names, d.creditor!));
       return me ? 'You owe $to ${money(d.amount)} — sell or mortgage' : '$n owes $to ${money(d.amount)}';
-    case LandlordPhase.auction:
-      final a = b.auction!;
-      final high = a.highBidder == null
-          ? 'no bids yet'
-          : 'high bid ${money(a.high)} (${a.highBidder == viewer ? 'you' : _name(names, a.highBidder!)})';
-      return '${landlordSpaces[a.space].name}: $high · ${me ? 'your bid' : '$n is bidding'}';
     case LandlordPhase.trade:
       return me ? '${_name(names, who.other)} offers a trade' : '$n is considering your offer';
     case LandlordPhase.buy:
@@ -185,6 +179,7 @@ class _LandlordViewState extends State<LandlordView> {
                       key: ValueKey('space-$i'),
                       board: board,
                       index: i,
+                      unit: u,
                       onTap: () => showSpaceSheet(context, board, i, me, names, w._legal, w.onPlay),
                     ),
                   ),
@@ -195,7 +190,9 @@ class _LandlordViewState extends State<LandlordView> {
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: SizedBox(
-                        width: 320,
+                        // Narrow enough that on a phone the centre draws at
+                        // about full size instead of shrunk to fit.
+                        width: 250,
                         child: _Centre(view: w, armed: _settle == null, balances: balances),
                       ),
                     ),
@@ -326,22 +323,7 @@ class _Centre extends StatelessWidget {
       case LandlordPhase.buy:
         final price = landlordSpaces[b.position(b.turn)].price;
         add('buy', 'Buy for ${money(price)}', {'a': 'buy'});
-        add('decline', 'Auction', {'a': 'decline'}, primary: false);
-      case LandlordPhase.auction:
-        final high = b.auction!.high;
-        for (final step in [1, 10, 50]) {
-          add('bid-$step', '+${money(step)}', {'a': 'bid', 'amount': high + step});
-        }
-        if (view._legal({'a': 'bid', 'amount': high + 1})) {
-          out.add(
-            OutlinedButton(
-              key: const Key('act-bid-custom'),
-              onPressed: () => _bidDialog(context, high),
-              child: const Text('Bid…'),
-            ),
-          );
-        }
-        add('pass', 'Pass', {'a': 'pass'}, primary: false);
+        add('decline', "Don't buy", {'a': 'decline'}, primary: false);
       case LandlordPhase.trade:
         add('accept', 'Accept', {'a': 'accept'});
         add('reject', 'Reject', {'a': 'reject'}, primary: false);
@@ -371,17 +353,6 @@ class _Centre extends StatelessWidget {
         );
     }
     return out;
-  }
-
-  Future<void> _bidDialog(BuildContext context, int high) async {
-    final amount = await showDialog<int>(
-      context: context,
-      builder: (context) => _BidDialog(
-        high: high,
-        legal: (n) => view._legal({'a': 'bid', 'amount': n}),
-      ),
-    );
-    if (amount != null) view.onPlay({'a': 'bid', 'amount': amount});
   }
 
   Future<void> _confirmBankrupt(BuildContext context) async {
@@ -436,9 +407,12 @@ class _Centre extends StatelessWidget {
 /// One space on the ring: colour band, short name, owner dot, buildings and
 /// tokens. Mortgaged spaces are dimmed.
 class _SpaceTile extends StatelessWidget {
-  const _SpaceTile({super.key, required this.board, required this.index, required this.onTap});
+  const _SpaceTile({super.key, required this.board, required this.index, required this.unit, required this.onTap});
 
   final LandlordBoard board;
+
+  /// One board unit in pixels (a side tile is one unit wide); labels scale with it.
+  final double unit;
   final int index;
   final VoidCallback onTap;
 
@@ -485,7 +459,11 @@ class _SpaceTile extends StatelessWidget {
               child: Text(
                 label,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(fontSize: 9, height: 1.1),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: (unit * 0.38).clamp(10.0, 20.0),
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -606,48 +584,6 @@ class _Buildings extends StatelessWidget {
               );
         return Center(child: FittedBox(fit: BoxFit.scaleDown, child: piece));
       },
-    );
-  }
-}
-
-/// Asks for a bid of any amount above [high] that [legal] accepts.
-class _BidDialog extends StatefulWidget {
-  const _BidDialog({required this.high, required this.legal});
-
-  final int high;
-  final bool Function(int amount) legal;
-
-  @override
-  State<_BidDialog> createState() => _BidDialogState();
-}
-
-class _BidDialogState extends State<_BidDialog> {
-  int? _amount;
-
-  @override
-  Widget build(BuildContext context) {
-    final n = _amount;
-    final ok = n != null && widget.legal(n);
-    return AlertDialog(
-      title: const Text('Your bid'),
-      content: TextField(
-        key: const Key('bid-amount'),
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        decoration: InputDecoration(prefixText: '\$', helperText: 'More than ${money(widget.high)}'),
-        onChanged: (v) => setState(() => _amount = int.tryParse(v.trim())),
-        onSubmitted: (_) {
-          if (ok) Navigator.pop(context, n);
-        },
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(
-          key: const Key('bid-confirm'),
-          onPressed: ok ? () => Navigator.pop(context, n) : null,
-          child: const Text('Bid'),
-        ),
-      ],
     );
   }
 }

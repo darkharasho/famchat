@@ -11,24 +11,11 @@ export 'events.dart';
 export 'spaces.dart';
 
 /// What the player who must act now is doing.
-enum LandlordPhase { roll, buy, end, auction, trade, debt }
+enum LandlordPhase { roll, buy, end, trade, debt }
 
 /// The turn player's own stage. [jailMove] is the third failed jail roll
 /// waiting for its bail debt to be paid; it is never a visible phase.
 enum _Stage { roll, buy, end, jailMove }
-
-/// A running auction for [space]. [high] 0 means no bid yet.
-@immutable
-class LandlordAuction {
-  const LandlordAuction(this.space, this.high, this.highBidder, this.toBid, this.noBidPass);
-
-  final int space, high;
-  final Side? highBidder;
-  final Side toBid;
-
-  /// Whether one player has already passed with no bid standing.
-  final bool noBidPass;
-}
 
 /// A pending trade offer from [from] to the other player.
 @immutable
@@ -98,7 +85,6 @@ class LandlordBoard implements Board {
       _again = s.again,
       _doubles = s.doubles,
       dice = s.dice,
-      auction = s.auction,
       trade = s.trade,
       debts = List.unmodifiable(s.debts),
       events = List.unmodifiable(s.events),
@@ -170,7 +156,6 @@ class LandlordBoard implements Board {
 
   /// The last roll, or null before the first.
   final (int, int)? dice;
-  final LandlordAuction? auction;
   final LandlordOffer? trade;
 
   /// Debts still to pay, oldest first.
@@ -198,7 +183,6 @@ class LandlordBoard implements Board {
 
   LandlordPhase get phase {
     if (debts.isNotEmpty) return LandlordPhase.debt;
-    if (auction != null) return LandlordPhase.auction;
     if (trade != null) return LandlordPhase.trade;
     return switch (_stage) {
       _Stage.roll || _Stage.jailMove => LandlordPhase.roll,
@@ -254,7 +238,6 @@ class LandlordBoard implements Board {
     again: _again,
     doubles: _doubles,
     dice: dice,
-    auction: auction,
     trade: trade,
     debts: List.of(debts),
     events: List.of(events),
@@ -281,7 +264,6 @@ class _State {
     required this.again,
     required this.doubles,
     required this.dice,
-    required this.auction,
     required this.trade,
     required this.debts,
     required this.events,
@@ -305,7 +287,6 @@ class _State {
     again: false,
     doubles: 0,
     dice: null,
-    auction: null,
     trade: null,
     debts: [],
     events: [],
@@ -323,7 +304,6 @@ class _State {
   bool again;
   int doubles;
   (int, int)? dice;
-  LandlordAuction? auction;
   LandlordOffer? trade;
   List<LandlordDebt> debts;
   List<LandlordEvent> events;
@@ -335,14 +315,12 @@ class _State {
 
   Side get toMove {
     if (debts.isNotEmpty) return debts.first.debtor;
-    final au = auction;
-    if (au != null) return au.toBid;
     final t = trade;
     if (t != null) return t.from.other;
     return turn;
   }
 
-  bool get _turnActs => debts.isEmpty && auction == null && trade == null;
+  bool get _turnActs => debts.isEmpty && trade == null;
 
   void log(LandlordEvent e) => events.add(e);
 
@@ -387,8 +365,8 @@ class _State {
       case 'decline':
         if (!_turnActs || stage != _Stage.buy) return false;
         final sp = pos[_i(me)];
+        // No auction: the property stays with the bank.
         log(LandlordEvent(me, LandlordEventKind.declined, space: sp));
-        auction = LandlordAuction(sp, 0, null, me, false);
         _continue();
       case 'end_turn':
         if (!_turnActs || stage != _Stage.end) return false;
@@ -425,39 +403,6 @@ class _State {
         mortgaged[sp] = true;
         cash[_i(who)] += space.mortgageValue;
         log(LandlordEvent(who, LandlordEventKind.mortgaged, space: sp, amount: space.mortgageValue));
-      case 'bid':
-        final au = auction;
-        final amount = wireInt(m['amount']);
-        if (au == null || debts.isNotEmpty || amount == null) return false;
-        final who = au.toBid;
-        if (amount <= au.high || amount > cash[_i(who)]) return false;
-        log(LandlordEvent(who, LandlordEventKind.bid, space: au.space, amount: amount));
-        if (au.noBidPass) {
-          // The other player dropped out: the first bid wins.
-          auction = null;
-          cash[_i(who)] -= amount;
-          owner[au.space] = who;
-          log(LandlordEvent(who, LandlordEventKind.auctionWon, space: au.space, amount: amount));
-        } else {
-          auction = LandlordAuction(au.space, amount, who, who.other, false);
-        }
-      case 'pass':
-        final au = auction;
-        if (au == null || debts.isNotEmpty) return false;
-        final who = au.toBid;
-        log(LandlordEvent(who, LandlordEventKind.passed, space: au.space));
-        final high = au.highBidder;
-        if (high != null) {
-          auction = null;
-          cash[_i(high)] -= au.high;
-          owner[au.space] = high;
-          log(LandlordEvent(high, LandlordEventKind.auctionWon, space: au.space, amount: au.high));
-        } else if (au.noBidPass) {
-          auction = null;
-          log(LandlordEvent(who, LandlordEventKind.auctionUnsold, space: au.space));
-        } else {
-          auction = LandlordAuction(au.space, 0, null, who.other, true);
-        }
       case 'bankrupt':
         if (debts.isEmpty) return false;
         _bankrupt(debts.first.debtor);
@@ -606,7 +551,7 @@ class _State {
     return total;
   }
 
-  /// After a landing, buy or auction: roll again on doubles, else end.
+  /// After a landing, buy or decline: roll again on doubles, else end.
   void _continue() => stage = again ? _Stage.roll : _Stage.end;
 
   void _leaveJail(Side s) {
