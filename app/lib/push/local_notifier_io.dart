@@ -13,7 +13,12 @@ LocalNotifier? createLocalNotifier() => switch (defaultTargetPlatform) {
     };
 
 class DesktopLocalNotifier implements LocalNotifier {
-  final _plugin = FlutterLocalNotificationsPlugin();
+  DesktopLocalNotifier({FlutterLocalNotificationsPlugin? plugin, TargetPlatform? platform})
+      : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+        _platform = platform ?? defaultTargetPlatform;
+
+  final FlutterLocalNotificationsPlugin _plugin;
+  final TargetPlatform _platform;
   bool _ready = false;
 
   @override
@@ -57,7 +62,7 @@ class DesktopLocalNotifier implements LocalNotifier {
   @override
   Future<bool> requestPermission() async {
     if (!_ready) return false;
-    if (defaultTargetPlatform != TargetPlatform.macOS) return true;
+    if (_platform != TargetPlatform.macOS) return true;
     final mac = _plugin.resolvePlatformSpecificImplementation<MacOSFlutterLocalNotificationsPlugin>();
     return await mac?.requestPermissions(alert: true, sound: true) ?? false;
   }
@@ -66,6 +71,11 @@ class DesktopLocalNotifier implements LocalNotifier {
   Future<void> show({required int id, required String title, required String body, required String route}) async {
     if (!_ready) return;
     try {
+      // Linux: the plugin sends a notification that reuses an id as a replacement of the last one
+      // (Notify's replaces_id), and Plasma only updates a replaced notification in its history, with
+      // no popup. Closing the chat's last notification first makes each message a new one that pops
+      // up; the chat still keeps a single notification.
+      if (_platform == TargetPlatform.linux) await _plugin.cancel(id: id);
       await _plugin.show(
         id: id,
         title: title,
