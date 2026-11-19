@@ -5,6 +5,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
+import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
 import 'package:famchat/games/widgets/game_card.dart';
@@ -56,8 +57,8 @@ MessageRow msg(String from, Plaintext p, {String? id}) {
   );
 }
 
-MessageRow game(String id, GameType t, String first) =>
-    msg(first, GameBody(t, first), id: id);
+MessageRow game(String id, GameType t, String first, {int? seed}) =>
+    msg(first, GameBody(t, first, seed: seed), id: id);
 
 MessageRow move(
   String from,
@@ -123,6 +124,19 @@ void main() {
     await tester.tap(find.byType(GameCard).last);
     await settle(tester);
   }
+
+  chatTestWidgets('a Go Fish game opens and asks send a rank', (tester) async {
+    await open(tester, messages: [game('g1', GameType.gofish, alice.userId, seed: 1)]);
+    await openBoard(tester);
+    expect(find.text('38 in the stock'), findsOneWidget);
+    expect(find.text('7 cards'), findsOneWidget);
+    final rank = GoFishBoard.rankOf(GoFishBoard.deal(1).hand(Side.first).first);
+    await tester.tap(find.byKey(Key('rank-$rank')).last);
+    await settle(tester);
+    final sent = (await outbox(tester)).last;
+    expect(sent['kind'], 'move');
+    expect(sent['action'], {'type': 'play', 'rank': rank});
+  });
 
   chatTestWidgets('game card shows Your turn and opens the board', (
     tester,
