@@ -4,6 +4,7 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/games/game_state.dart';
 import 'package:famchat/games/rules.dart';
+import 'package:famchat/games/tictactoe.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 var _n = 0;
@@ -396,5 +397,55 @@ void main() {
     expect(g.ply, 1);
     expect(g.outcome!.winner, isNull);
     expect(g.outcome!.reason, 'agreed');
+  });
+
+  test('a poke leaves the game unchanged', () {
+    final g = game('g', GameType.tictactoe, 'A');
+    final a = ttt('A', 'g', 0, 4);
+    final poke = move('A', 'g', GameType.tictactoe, 1, {'type': 'poke'});
+    final before = deriveGames([g, a], members).single;
+    final after = deriveGames([g, a, poke], members).single;
+    expect(after.ply, before.ply);
+    expect(after.toMoveUserId, 'B');
+    expect(
+      (after.board as TicTacToeBoard).cells,
+      (before.board as TicTacToeBoard).cells,
+    );
+    expect(after.drawOfferedBy, isNull);
+  });
+
+  test('playResults holds the state after each applied play only', () {
+    final g = game('g', GameType.tictactoe, 'A');
+    final p0 = ttt('A', 'g', 0, 0);
+    final stale = ttt('B', 'g', 0, 1); // wrong ply
+    final illegal = ttt('B', 'g', 1, 0); // taken cell
+    final p1 = ttt('B', 'g', 1, 3);
+    final resign = move('A', 'g', GameType.tictactoe, 2, {'type': 'resign'});
+    final failed = ttt('A', 'g', 2, 1, state: 'failed');
+    final results = playResults([g, p0, stale, illegal, p1, failed, resign], members);
+    expect(results.keys, unorderedEquals([p0.id, p1.id]));
+    expect(results[p0.id]!.ply, 1);
+    expect(results[p0.id]!.toMoveUserId, 'B');
+    expect(results[p1.id]!.ply, 2);
+    expect(results[p1.id]!.over, isFalse);
+  });
+
+  test('playResults records the game-ending play', () {
+    final rows = [
+      game('g', GameType.tictactoe, 'A'),
+      ttt('A', 'g', 0, 0),
+      ttt('B', 'g', 1, 3),
+      ttt('A', 'g', 2, 1),
+      ttt('B', 'g', 3, 4),
+      ttt('A', 'g', 4, 2),
+    ];
+    final last = playResults(rows, members)[rows.last.id]!;
+    expect(last.over, isTrue);
+    expect(last.winnerUserId, 'A');
+  });
+
+  test('playResults skips plays of inert games', () {
+    final rows = [game('g', GameType.tictactoe, 'A'), ttt('A', 'g', 0, 0)];
+    expect(playResults(rows, members, direct: false), isEmpty);
   });
 }

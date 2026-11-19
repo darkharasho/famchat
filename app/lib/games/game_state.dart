@@ -68,7 +68,29 @@ List<GameState> deriveGames(
   List<MessageRow> rows,
   List<String> memberIds, {
   bool direct = true,
+}) => _walk(rows, memberIds, direct, null);
+
+/// Move row id → its game's state right after that `play`, for every play in
+/// [rows] the rules applied (a stale, illegal or out-of-turn play, or one in an
+/// inert or finished game, has no entry). Same input as [deriveGames].
+Map<String, GameState> playResults(
+  List<MessageRow> rows,
+  List<String> memberIds, {
+  bool direct = true,
 }) {
+  final out = <String, GameState>{};
+  _walk(rows, memberIds, direct, (r, g, plyBefore) {
+    if (g.ply != plyBefore) out[r.id] = g.freeze();
+  });
+  return out;
+}
+
+List<GameState> _walk(
+  List<MessageRow> rows,
+  List<String> memberIds,
+  bool direct,
+  void Function(MessageRow row, _Game game, int plyBefore)? onMove,
+) {
   final games = <_Game>[];
   final byId = <String, _Game>{};
   for (final r in rows) {
@@ -89,7 +111,11 @@ List<GameState> deriveGames(
     } else if (r.kind == 'move') {
       final body = _decode(r);
       if (body is! MoveBody) continue;
-      byId[body.target]?.apply(r.senderUserId, body);
+      final g = byId[body.target];
+      if (g == null) continue;
+      final ply = g.ply;
+      g.apply(r.senderUserId, body);
+      onMove?.call(r, g, ply);
     }
   }
   return [for (final g in games) g.freeze()];
