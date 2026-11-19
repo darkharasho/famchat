@@ -408,10 +408,118 @@ class _State {
         mortgaged[sp] = true;
         cash[_i(who)] += space.mortgageValue;
         log(LandlordEvent(who, LandlordEventKind.mortgaged, space: sp, amount: space.mortgageValue));
+      case 'bid':
+        final au = auction;
+        final amount = wireInt(m['amount']);
+        if (au == null || debts.isNotEmpty || amount == null) return false;
+        final who = au.toBid;
+        if (amount <= au.high || amount > cash[_i(who)]) return false;
+        auction = LandlordAuction(au.space, amount, who, who.other, au.noBidPass);
+        log(LandlordEvent(who, LandlordEventKind.bid, space: au.space, amount: amount));
+      case 'pass':
+        final au = auction;
+        if (au == null || debts.isNotEmpty) return false;
+        final who = au.toBid;
+        log(LandlordEvent(who, LandlordEventKind.passed, space: au.space));
+        final high = au.highBidder;
+        if (high != null) {
+          auction = null;
+          cash[_i(high)] -= au.high;
+          owner[au.space] = high;
+          log(LandlordEvent(high, LandlordEventKind.auctionWon, space: au.space, amount: au.high));
+        } else if (au.noBidPass) {
+          auction = null;
+          log(LandlordEvent(who, LandlordEventKind.auctionUnsold, space: au.space));
+        } else {
+          auction = LandlordAuction(au.space, 0, null, who.other, true);
+        }
+      case 'offer':
+        if (!_turnActs || !(stage == _Stage.roll || stage == _Stage.end)) return false;
+        final o = _parseOffer(me, m);
+        if (o == null) return false;
+        trade = o;
+        log(LandlordEvent(me, LandlordEventKind.offered));
+      case 'accept':
+        final o = trade;
+        if (o == null || debts.isNotEmpty) return false;
+        _exchange(o);
+      case 'reject':
+        final o = trade;
+        if (o == null || debts.isNotEmpty) return false;
+        trade = null;
+        log(LandlordEvent(o.from.other, LandlordEventKind.rejected));
       default:
         return false;
     }
     return true;
+  }
+
+  /// A valid offer from [me] in [m], or null.
+  LandlordOffer? _parseOffer(Side me, Map<String, Object?> m) {
+    (int, List<int>, int)? part(Object? v, Side giver) {
+      if (v == null) return (0, const [], 0);
+      if (v is! Map) return null;
+      final c = v['cash'] == null ? 0 : wireInt(v['cash']);
+      final k = v['cards'] == null ? 0 : wireInt(v['cards']);
+      final raw = v['spaces'] ?? const [];
+      if (c == null || k == null || c < 0 || k < 0 || raw is! List) return null;
+      final spaces = <int>[];
+      for (final x in raw) {
+        final sp = wireInt(x);
+        if (sp == null || sp < 0 || sp >= 40 || spaces.contains(sp)) return null;
+        if (owner[sp] != giver) return null;
+        final g = landlordSpaces[sp].group!;
+        if (groupSpaces(g).any((y) => level[y] > 0)) return null;
+        spaces.add(sp);
+      }
+      if (c > cash[_i(giver)] || k > held[_i(giver)].length) return null;
+      return (c, spaces, k);
+    }
+
+    final give = part(m['give'], me), get = part(m['get'], me.other);
+    if (give == null || get == null) return null;
+    final empty = give.$1 == 0 && give.$2.isEmpty && give.$3 == 0 && get.$1 == 0 && get.$2.isEmpty && get.$3 == 0;
+    if (empty) return null;
+    return LandlordOffer(
+      from: me,
+      giveCash: give.$1,
+      giveSpaces: List.unmodifiable(give.$2),
+      giveCards: give.$3,
+      getCash: get.$1,
+      getSpaces: List.unmodifiable(get.$2),
+      getCards: get.$3,
+    );
+  }
+
+  /// Carries out an accepted offer, then charges mortgage interest: the
+  /// offerer's first.
+  void _exchange(LandlordOffer o) {
+    final a = o.from, b = o.from.other;
+    trade = null;
+    cash[_i(a)] += o.getCash - o.giveCash;
+    cash[_i(b)] += o.giveCash - o.getCash;
+    for (final sp in o.giveSpaces) {
+      owner[sp] = b;
+    }
+    for (final sp in o.getSpaces) {
+      owner[sp] = a;
+    }
+    final aCards = held[_i(a)].sublist(0, o.giveCards);
+    final bCards = held[_i(b)].sublist(0, o.getCards);
+    held[_i(a)]
+      ..removeRange(0, o.giveCards)
+      ..addAll(bCards);
+    held[_i(b)]
+      ..removeRange(0, o.getCards)
+      ..addAll(aCards);
+    log(LandlordEvent(b, LandlordEventKind.accepted, other: a));
+    for (final (to, spaces) in [(a, o.getSpaces), (b, o.giveSpaces)]) {
+      for (final sp in spaces) {
+        if (!mortgaged[sp]) continue;
+        final mv = landlordSpaces[sp].mortgageValue;
+        _charge(to, null, (mv + 9) ~/ 10, LandlordEventKind.interest, space: sp);
+      }
+    }
   }
 
   /// The `space` field, if it is a valid space index.
