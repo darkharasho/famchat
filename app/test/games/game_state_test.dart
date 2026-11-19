@@ -422,7 +422,15 @@ void main() {
     final p1 = ttt('B', 'g', 1, 3);
     final resign = move('A', 'g', GameType.tictactoe, 2, {'type': 'resign'});
     final failed = ttt('A', 'g', 2, 1, state: 'failed');
-    final results = playResults([g, p0, stale, illegal, p1, failed, resign], members);
+    final results = playResults([
+      g,
+      p0,
+      stale,
+      illegal,
+      p1,
+      failed,
+      resign,
+    ], members);
     expect(results.keys, unorderedEquals([p0.id, p1.id]));
     expect(results[p0.id]!.ply, 1);
     expect(results[p0.id]!.toMoveUserId, 'B');
