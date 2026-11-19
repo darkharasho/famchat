@@ -168,8 +168,9 @@ Map<String, GameEvent> gameEventsOf(
         e = (gameId: p.target, text: text, suffix: null, poke: true);
       default:
         final r = gameEventOf(m, nameOf(m.senderUserId));
-        if (r != null)
+        if (r != null) {
           e = (gameId: r.gameId, text: r.text, suffix: null, poke: false);
+        }
     }
     if (e == null) continue;
     out[m.id] = e;
@@ -206,11 +207,13 @@ int? lastPokeAt(List<MessageRow> rows, String gameId, String me) {
     if (m.kind != 'move' ||
         m.senderUserId != me ||
         m.targetId != gameId ||
-        m.state == 'failed')
+        m.state == 'failed') {
       continue;
+    }
     final p = _decode(m);
-    if (p is! MoveBody || p.target != gameId || p.action['type'] != 'poke')
+    if (p is! MoveBody || p.target != gameId || p.action['type'] != 'poke') {
       continue;
+    }
     if (last == null || m.createdAt > last) last = m.createdAt;
   }
   return last;
