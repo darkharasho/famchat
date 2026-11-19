@@ -2,49 +2,20 @@
 // as the search placeholder and for results in the order it returns them.
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../chat/plaintext.dart';
 import '../theme/tokens.dart';
 import 'klipy.dart';
 
-/// Shows the picker (a sheet on phones, a dialog on wider screens); returns the GIF picked.
-Future<GifResult?> showGifPicker(BuildContext context, KlipyClient client) {
-  final wide = MediaQuery.sizeOf(context).width >= 720 ||
-      kIsWeb ||
-      {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
-  if (wide) {
-    return showDialog<GifResult>(
-      context: context,
-      builder: (context) => Dialog(
-        clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
-          child: GifPickerPanel(client: client, onPicked: (g) => Navigator.pop(context, g)),
-        ),
-      ),
-    );
-  }
-  return showModalBottomSheet<GifResult>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (context) => SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.75,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: GifPickerPanel(client: client, onPicked: (g) => Navigator.pop(context, g)),
-      ),
-    ),
-  );
-}
-
+/// The picker's search field and results; the emoji picker's GIFs tab. Calls [onPicked] with the GIF
+/// tapped. [autofocus] puts the cursor in the search field (desktop and web, where no keyboard pops up).
 class GifPickerPanel extends StatefulWidget {
-  const GifPickerPanel({super.key, required this.client, required this.onPicked});
+  const GifPickerPanel({super.key, required this.client, required this.onPicked, this.autofocus = true});
 
   final KlipyClient client;
   final ValueChanged<GifResult> onPicked;
+  final bool autofocus;
 
   @override
   State<GifPickerPanel> createState() => _GifPickerPanelState();
@@ -135,7 +106,7 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
         child: TextField(
           key: const Key('gif-search'),
           controller: _field,
-          autofocus: true,
+          autofocus: widget.autofocus,
           textInputAction: TextInputAction.search,
           decoration: const InputDecoration(
             hintText: 'Search KLIPY',

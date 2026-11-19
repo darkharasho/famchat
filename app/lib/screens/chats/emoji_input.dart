@@ -1,32 +1,56 @@
-// The composer's emoji picker (emoji_picker_flutter, themed to match) and `:shortcode:` suggestions.
+// The composer's emoji picker (emoji_picker_flutter, themed to match, with a GIFs tab) and `:shortcode:`
+// suggestions.
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as ep;
 import 'package:flutter/foundation.dart';
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart' as legacy show Material, MaterialType;
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/emoji/shortcodes.dart';
+import '../../gifs/gif_picker.dart';
+import '../../gifs/klipy.dart';
 import '../../theme/tokens.dart';
 
 /// Desktop and web show the picker as a popover; phones and tablets show it in place of the keyboard.
 bool get emojiPopover =>
     kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
 
+/// Whether the picker last showed its GIFs tab, remembered while the app runs.
+class PickerOnGifsNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool gifs) => state = gifs;
+}
+
+final pickerOnGifsProvider = NotifierProvider<PickerOnGifsNotifier, bool>(PickerOnGifsNotifier.new);
+
 /// The picker: recently used, categories and search. Calls [onSelected] with each emoji picked, and
 /// [onBackspace] from its backspace key (shown only when given: phones, where it replaces the keyboard).
-class EmojiPanel extends StatefulWidget {
-  const EmojiPanel({super.key, required this.onSelected, this.onBackspace, required this.height});
+/// With [gifs] and [onGif], an "Emoji" | "GIFs" tab bar tops it, and [onGif] gets the GIF picked.
+class EmojiPanel extends ConsumerStatefulWidget {
+  const EmojiPanel({
+    super.key,
+    required this.onSelected,
+    this.onBackspace,
+    required this.height,
+    this.gifs,
+    this.onGif,
+  });
 
   final ValueChanged<String> onSelected;
   final VoidCallback? onBackspace;
   final double height;
+  final KlipyClient? gifs;
+  final ValueChanged<GifResult>? onGif;
 
   @override
-  State<EmojiPanel> createState() => _EmojiPanelState();
+  ConsumerState<EmojiPanel> createState() => _EmojiPanelState();
 }
 
-class _EmojiPanelState extends State<EmojiPanel> {
+class _EmojiPanelState extends ConsumerState<EmojiPanel> {
   /// Null until the recents are read: with none yet, the picker opens on smileys instead of an empty tab.
   bool? _hasRecents;
 
@@ -43,13 +67,33 @@ class _EmojiPanelState extends State<EmojiPanel> {
   Widget build(BuildContext context) {
     final hasRecents = _hasRecents;
     if (hasRecents == null) return SizedBox(height: widget.height);
+    final gifs = widget.gifs, onGif = widget.onGif;
+    if (gifs == null || onGif == null) return _emoji(hasRecents, widget.height);
+    final onGifs = ref.watch(pickerOnGifsProvider);
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: SizedBox(
+        height: widget.height,
+        child: Column(children: [
+          _PickerTabs(gifs: onGifs, onChanged: ref.read(pickerOnGifsProvider.notifier).set),
+          Expanded(
+            child: onGifs
+                ? GifPickerPanel(client: gifs, onPicked: onGif, autofocus: emojiPopover)
+                : _emoji(hasRecents, widget.height - _PickerTabs.height),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _emoji(bool hasRecents, double height) {
     final theme = Theme.of(context);
     final s = theme.colorScheme;
     final bg = s.surfaceContainerLow;
     return LayoutBuilder(builder: (context, c) {
       final columns = (c.maxWidth / 44).floor().clamp(6, 12);
       final config = ep.Config(
-        height: widget.height,
+        height: height,
         checkPlatformCompatibility: true,
         locale: const Locale('en'),
         emojiViewConfig: ep.EmojiViewConfig(
@@ -102,6 +146,50 @@ class _EmojiPanelState extends State<EmojiPanel> {
   }
 }
 
+/// The picker's "Emoji" | "GIFs" tabs, colored like its category bar.
+class _PickerTabs extends StatelessWidget {
+  const _PickerTabs({required this.gifs, required this.onChanged});
+
+  static const height = 40.0;
+
+  final bool gifs;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    Widget tab(String label, bool value) {
+      final selected = gifs == value;
+      return Expanded(
+        child: Semantics(
+          selected: selected,
+          button: true,
+          child: InkWell(
+            onTap: selected ? null : () => onChanged(value),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: selected ? s.tertiary : Colors.transparent, width: 2)),
+              ),
+              child: Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(color: selected ? s.tertiary : s.onSurfaceVariant),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: height,
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: s.outlineVariant))),
+      child: Row(children: [tab('Emoji', false), tab('GIFs', true)]),
+    );
+  }
+}
+
 class _NoRecents extends StatelessWidget {
   const _NoRecents();
 
@@ -146,11 +234,17 @@ class EmojiPopover extends StatelessWidget {
     required this.handle,
     required this.onSelected,
     required this.onClosed,
+    this.gifs,
+    this.onGif,
     required this.child,
   });
 
   final EmojiPopoverHandle handle;
   final ValueChanged<String> onSelected;
+
+  /// The GIFs tab's search and what to do with a GIF picked (see [EmojiPanel]).
+  final KlipyClient? gifs;
+  final ValueChanged<GifResult>? onGif;
 
   /// After the popover closes itself (a pick, Esc or a click outside).
   final VoidCallback onClosed;
@@ -202,6 +296,13 @@ class EmojiPopover extends StatelessWidget {
                             onSelected(e);
                             _close();
                           },
+                          gifs: gifs,
+                          onGif: onGif == null
+                              ? null
+                              : (g) {
+                                  onGif!(g);
+                                  _close();
+                                },
                         ),
                       ),
                     ),

@@ -28,7 +28,7 @@ import '../../games/widgets/game_card.dart';
 import '../../games/widgets/game_event_line.dart';
 import '../../games/labels.dart' show gameEventOf;
 import '../../games/widgets/start_game_sheet.dart';
-import '../../gifs/gif_picker.dart';
+import '../../gifs/klipy.dart' show GifResult;
 import '../../gifs/providers.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
@@ -687,16 +687,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _snack("That message isn't available.");
   }
 
-  Future<void> _pickGif() async {
+  /// Sends a GIF picked in the emoji picker's GIFs tab (the picker closes itself on desktop and web).
+  Future<void> _sendGif(GifResult picked) async {
+    _closePicker();
     final client = ref.read(gifClientProvider).value;
     final sync = ref.read(chatSyncProvider);
-    if (client == null || sync == null) return;
-    _closePicker();
-    if (_emojiPopover.isShowing) _emojiPopover.hide();
-    final picked = await showGifPicker(context, client);
-    if (picked == null) return;
+    if (sync == null) return;
     await sync.enqueueMessage(widget.chatId, picked.body);
-    unawaited(client.share(picked.slug));
+    if (client != null) unawaited(client.share(picked.slug));
   }
 
   /// Photos and videos being compressed and encrypted (before they appear in the list).
@@ -836,13 +834,6 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         style: IconButton.styleFrom(fixedSize: const Size.square(48)),
         onPressed: _attach,
       ),
-      if (ref.watch(gifClientProvider).value != null && _editing == null)
-        IconButton(
-          tooltip: 'GIF',
-          icon: const Icon(Icons.gif_box_outlined),
-          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-          onPressed: _pickGif,
-        ),
       // Where the attach button has no sheet to hold it, Game gets its own button.
       if (!cameraAvailable && _canStartGame && _editing == null)
         IconButton(
@@ -970,6 +961,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final theme = Theme.of(context);
     final tokens = FamTokens.of(context);
     final canRecord = ref.watch(voiceRecordingSupportedProvider).value ?? false;
+    final gifs = ref.watch(gifClientProvider).value;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     if (keyboard > 150) _keyboardHeight = keyboard;
 
@@ -1304,6 +1296,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                             ? EmojiPopover(
                                 handle: _emojiPopover,
                                 onSelected: _insertEmoji,
+                                gifs: _editing == null ? gifs : null,
+                                onGif: _sendGif,
                                 onClosed: () {
                                   if (mounted) _focus.requestFocus();
                                 },
@@ -1316,6 +1310,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       height: _keyboardHeight.clamp(240.0, 360.0),
                       onSelected: _insertEmoji,
                       onBackspace: () => _text.value = deleteBackward(_text.value),
+                      gifs: _editing == null ? gifs : null,
+                      onGif: _sendGif,
                     ),
                 ]),
               ),
