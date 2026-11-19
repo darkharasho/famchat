@@ -43,7 +43,7 @@ jobs:
 
   ios-preview-core:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'mac-ci')
-    runs-on: macos-latest
+    runs-on: xcode-27  # the Xcode release.yml ships iOS with
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -154,7 +154,7 @@ jobs:
 
   ios:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'mac-ci')
-    runs-on: macos-latest
+    runs-on: xcode-27  # the Xcode release.yml ships iOS with
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

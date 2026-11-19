@@ -48,9 +48,31 @@ env:
   TRACK: ${{ inputs.track || 'stable' }}
 
 jobs:
-  ios:
+  # Which iOS release to patch, and the image that builds the patch: Shorebird links a patch
+  # against its release, so it builds with the release's Xcode. Releases up to 1.0.17+29917542
+  # were built with Xcode 26 on macos-26; later ones with Xcode 27 on xcode-27 (release.yml).
+  ios-release:
     if: github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'ios')
-    runs-on: macos-26
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      name: ${{ steps.release.outputs.name }}
+      number: ${{ steps.release.outputs.number }}
+      runner: ${{ steps.runner.outputs.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: release
+        run: scripts/shorebird-release-version.sh ios "$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+      - id: runner
+        env: { NUMBER: "${{ steps.release.outputs.number }}" }
+        run: |
+          if (( NUMBER <= 29917542 )); then runner=macos-26; else runner=xcode-27; fi
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "iOS release ${{ steps.release.outputs.version }} patches on $runner"
+
+  ios:
+    needs: ios-release
+    runs-on: ${{ needs.ios-release.outputs.runner }}
     timeout-minutes: 45
     defaults:
       run: { working-directory: app }
@@ -59,16 +81,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
       - uses: shorebirdtech/setup-shorebird@v1
-      - name: Which release
-        id: release
-        run: ../scripts/shorebird-release-version.sh ios "$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
       # Build exactly as release.yml does (same build name, number and team): Shorebird compares the
       # compiled app against the release and refuses a patch whose native code differs.
       - name: Shorebird patch
         env:
-          VERSION: ${{ steps.release.outputs.version }}
-          NAME: ${{ steps.release.outputs.name }}
-          NUMBER: ${{ steps.release.outputs.number }}
+          VERSION: ${{ needs.ios-release.outputs.version }}
+          NAME: ${{ needs.ios-release.outputs.name }}
+          NUMBER: ${{ needs.ios-release.outputs.number }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           shorebird patch ios --no-codesign --release-version="$VERSION" --track="$TRACK" -- \
