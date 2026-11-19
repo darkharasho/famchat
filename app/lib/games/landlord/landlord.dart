@@ -194,6 +194,9 @@ class LandlordBoard implements Board {
   /// mortgaged). Utilities need [diceTotal].
   int rentFor(int space, {int? diceTotal}) => _state().rentFor(space, diceTotal ?? 0);
 
+  /// [s]'s cash plus everything they could sell or mortgage.
+  int liquidation(Side s) => _state().liquidation(s);
+
   @override
   Side get toMove => _state().toMove;
 
@@ -377,10 +380,94 @@ class _State {
         stage = _Stage.roll;
         again = false;
         doubles = 0;
+      case 'build':
+        final sp = _space(m);
+        if (sp == null || !_turnActs || !(stage == _Stage.roll || stage == _Stage.end)) return false;
+        return _build(me, sp);
+      case 'unmortgage':
+        final sp = _space(m);
+        if (sp == null || !_turnActs || !(stage == _Stage.roll || stage == _Stage.end)) return false;
+        if (owner[sp] != me || !mortgaged[sp]) return false;
+        final mv = landlordSpaces[sp].mortgageValue;
+        final cost = mv + (mv + 9) ~/ 10;
+        if (cash[_i(me)] < cost) return false;
+        cash[_i(me)] -= cost;
+        mortgaged[sp] = false;
+        log(LandlordEvent(me, LandlordEventKind.unmortgaged, space: sp, amount: cost));
+      case 'sell':
+        final sp = _space(m);
+        if (sp == null || trade != null) return false;
+        return _sell(toMove, sp);
+      case 'mortgage':
+        final sp = _space(m);
+        if (sp == null || trade != null) return false;
+        final who = toMove;
+        final space = landlordSpaces[sp];
+        if (owner[sp] != who || mortgaged[sp]) return false;
+        if (groupSpaces(space.group!).any((g) => level[g] > 0)) return false;
+        mortgaged[sp] = true;
+        cash[_i(who)] += space.mortgageValue;
+        log(LandlordEvent(who, LandlordEventKind.mortgaged, space: sp, amount: space.mortgageValue));
       default:
         return false;
     }
     return true;
+  }
+
+  /// The `space` field, if it is a valid space index.
+  static int? _space(Map<String, Object?> m) {
+    final v = wireInt(m['space']);
+    return v == null || v < 0 || v >= 40 ? null : v;
+  }
+
+  bool _build(Side me, int sp) {
+    final space = landlordSpaces[sp];
+    final g = space.group;
+    if (g == null || !g.buildable || owner[sp] != me) return false;
+    final set = groupSpaces(g);
+    if (set.any((x) => owner[x] != me || mortgaged[x])) return false;
+    final l = level[sp];
+    if (l >= 5 || set.any((x) => level[x] < l)) return false;
+    if (cash[_i(me)] < space.houseCost) return false;
+    if (l == 4 ? hotelsLeft < 1 : housesLeft < 1) return false;
+    cash[_i(me)] -= space.houseCost;
+    level[sp] = l + 1;
+    log(LandlordEvent(me, LandlordEventKind.built, space: sp, amount: space.houseCost));
+    return true;
+  }
+
+  bool _sell(Side who, int sp) {
+    final space = landlordSpaces[sp];
+    final l = level[sp];
+    if (owner[sp] != who || l == 0) return false;
+    final half = space.houseCost ~/ 2;
+    if (l == 5) {
+      // Break the hotel down to 4 houses, or as many as the bank has,
+      // selling the rest too (no even-selling check in that case).
+      final keep = housesLeft < 4 ? housesLeft : 4;
+      level[sp] = keep;
+      final got = half * (1 + 4 - keep);
+      cash[_i(who)] += got;
+      log(LandlordEvent(who, LandlordEventKind.sold, space: sp, amount: got));
+      return true;
+    }
+    if (groupSpaces(space.group!).any((x) => level[x] > l)) return false;
+    level[sp] = l - 1;
+    cash[_i(who)] += half;
+    log(LandlordEvent(who, LandlordEventKind.sold, space: sp, amount: half));
+    return true;
+  }
+
+  /// [s]'s cash plus everything they could sell or mortgage.
+  int liquidation(Side s) {
+    var total = cash[_i(s)];
+    for (var sp = 0; sp < 40; sp++) {
+      if (owner[sp] != s) continue;
+      final space = landlordSpaces[sp];
+      total += level[sp] * (space.houseCost ~/ 2);
+      if (!mortgaged[sp]) total += space.mortgageValue;
+    }
+    return total;
   }
 
   /// After a landing, buy or auction: roll again on doubles, else end.
