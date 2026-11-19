@@ -24,6 +24,13 @@ struct _MyApplication {
   gboolean hidden;
   // Quitting for real: closing must not hide.
   gboolean quitting;
+  // The window's size when neither maximized nor full screen, and whether it is
+  // maximized: what window.ini keeps for the next launch.
+  gint saved_width;
+  gint saved_height;
+  gboolean saved_maximized;
+  // A pending debounced write of window.ini, or 0.
+  guint save_source;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -31,6 +38,131 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+// The window's size across launches, in
+// $XDG_CONFIG_HOME/famchat/window.ini. Only the size and the maximized state:
+// Wayland doesn't let an app place its window.
+static constexpr gint kDefaultWidth = 1280;
+static constexpr gint kDefaultHeight = 720;
+// Smaller than the minimum (the view's size request) and larger than any
+// screen: values outside these are junk.
+static constexpr gint kSaneMinWidth = 360;
+static constexpr gint kSaneMinHeight = 480;
+static constexpr gint kSaneMax = 16384;
+static constexpr const gchar* kWindowGroup = "Window";
+
+static gchar* window_ini_path() {
+  return g_build_filename(g_get_user_config_dir(), "famchat", "window.ini",
+                          nullptr);
+}
+
+// Reads window.ini into saved_*, falling back to the defaults; the size is
+// clamped to the monitor's work area.
+static void load_window_geometry(MyApplication* self) {
+  self->saved_width = kDefaultWidth;
+  self->saved_height = kDefaultHeight;
+  self->saved_maximized = FALSE;
+
+  g_autofree gchar* path = window_ini_path();
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  if (g_key_file_load_from_file(file, path, G_KEY_FILE_NONE, nullptr)) {
+    g_autoptr(GError) width_error = nullptr;
+    g_autoptr(GError) height_error = nullptr;
+    const gint width =
+        g_key_file_get_integer(file, kWindowGroup, "width", &width_error);
+    const gint height =
+        g_key_file_get_integer(file, kWindowGroup, "height", &height_error);
+    if (width_error == nullptr && height_error == nullptr &&
+        width >= kSaneMinWidth && width <= kSaneMax &&
+        height >= kSaneMinHeight && height <= kSaneMax) {
+      self->saved_width = width;
+      self->saved_height = height;
+    }
+    self->saved_maximized =
+        g_key_file_get_boolean(file, kWindowGroup, "maximized", nullptr);
+  }
+
+  // Never open larger than the screen (a smaller monitor than last time).
+  GdkDisplay* display = gdk_display_get_default();
+  if (display != nullptr) {
+    GdkMonitor* monitor = gdk_display_get_primary_monitor(display);
+    if (monitor == nullptr && gdk_display_get_n_monitors(display) > 0) {
+      monitor = gdk_display_get_monitor(display, 0);
+    }
+    if (monitor != nullptr) {
+      GdkRectangle area;
+      gdk_monitor_get_workarea(monitor, &area);
+      if (area.width >= kSaneMinWidth && area.height >= kSaneMinHeight) {
+        self->saved_width = MIN(self->saved_width, area.width);
+        self->saved_height = MIN(self->saved_height, area.height);
+      }
+    }
+  }
+}
+
+static void save_window_geometry(MyApplication* self) {
+  if (self->save_source != 0) {
+    g_source_remove(self->save_source);
+    self->save_source = 0;
+  }
+  if (self->saved_width <= 0 || self->saved_height <= 0) return;
+
+  g_autofree gchar* path = window_ini_path();
+  g_autofree gchar* dir = g_path_get_dirname(path);
+  if (g_mkdir_with_parents(dir, 0700) != 0) return;
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  g_key_file_set_integer(file, kWindowGroup, "width", self->saved_width);
+  g_key_file_set_integer(file, kWindowGroup, "height", self->saved_height);
+  g_key_file_set_boolean(file, kWindowGroup, "maximized",
+                         self->saved_maximized);
+  g_autoptr(GError) error = nullptr;
+  if (!g_key_file_save_to_file(file, path, &error)) {
+    g_warning("Failed to save %s: %s", path, error->message);
+  }
+}
+
+static gboolean save_window_geometry_cb(gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  self->save_source = 0;
+  save_window_geometry(self);
+  return G_SOURCE_REMOVE;
+}
+
+// Writes window.ini a moment after the last change, not on every step of a
+// resize drag.
+static void schedule_save_window_geometry(MyApplication* self) {
+  if (self->save_source != 0) g_source_remove(self->save_source);
+  self->save_source = g_timeout_add(500, save_window_geometry_cb, self);
+}
+
+// Whether the window has its own size now, not one the window manager gave it.
+static gboolean window_is_floating(GtkWindow* window) {
+  GdkWindow* gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
+  if (gdk_window == nullptr) return FALSE;
+  const GdkWindowState state = gdk_window_get_state(gdk_window);
+  return (state & (GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN |
+                   GDK_WINDOW_STATE_TILED | GDK_WINDOW_STATE_ICONIFIED)) == 0;
+}
+
+// GTK's advice for keeping a window's size: gtk_window_get_size in
+// configure-event, gtk_window_set_default_size on the next launch.
+static gboolean configure_event_cb(GtkWidget* widget, GdkEventConfigure* event,
+                                   gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  GtkWindow* window = GTK_WINDOW(widget);
+  if (window_is_floating(window)) {
+    gint width = 0;
+    gint height = 0;
+    gtk_window_get_size(window, &width, &height);
+    if (width > 0 && height > 0 &&
+        (width != self->saved_width || height != self->saved_height)) {
+      self->saved_width = width;
+      self->saved_height = height;
+      schedule_save_window_geometry(self);
+    }
+  }
+  return FALSE;
 }
 
 // Keeps a copy of each mouse press, then lets GTK handle it as usual.
@@ -113,6 +245,7 @@ static void quit_app(MyApplication* self) {
 static gboolean delete_event_cb(GtkWidget* widget, GdkEvent* event,
                                 gpointer user_data) {
   MyApplication* self = MY_APPLICATION(user_data);
+  save_window_geometry(self);
   if (!self->quitting && self->close_to_tray && can_hide(self)) {
     hide_window(self);
     return TRUE;
@@ -187,6 +320,15 @@ static void set_tray(MyApplication* self, FlValue* args) {
 static gboolean window_state_cb(GtkWidget* widget, GdkEventWindowState* event,
                                 gpointer user_data) {
   MyApplication* self = MY_APPLICATION(user_data);
+  // Minimizing or full screen leaves the maximized flag as it was.
+  if ((event->changed_mask & GDK_WINDOW_STATE_MAXIMIZED) != 0) {
+    const gboolean maximized =
+        (event->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+    if (maximized != self->saved_maximized) {
+      self->saved_maximized = maximized;
+      schedule_save_window_geometry(self);
+    }
+  }
   if (self->window_channel != nullptr &&
       (event->changed_mask &
        (GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN)) != 0) {
@@ -281,7 +423,11 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-  gtk_window_set_default_size(window, 1280, 720);
+  // The size (and maximized state) it had last time, before it is shown, so
+  // it opens that way.
+  load_window_geometry(self);
+  gtk_window_set_default_size(window, self->saved_width, self->saved_height);
+  if (self->saved_maximized) gtk_window_maximize(window);
   self->window = window;
 
   // FamChat draws its own title bar (lib/window/title_bar.dart). A custom
@@ -293,6 +439,8 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect(window, "window-state-event", G_CALLBACK(window_state_cb),
                    self);
   g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
+  g_signal_connect(window, "configure-event", G_CALLBACK(configure_event_cb),
+                   self);
   const DesktopShellCallbacks shell_callbacks = {
       shell_activate_cb, shell_quit_cb, shell_tray_available_cb, self};
   self->shell = desktop_shell_new(APPLICATION_ID, &shell_callbacks);
@@ -365,9 +513,10 @@ static void my_application_startup(GApplication* application) {
 
 // Implements GApplication::shutdown.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
+  MyApplication* self = MY_APPLICATION(application);
 
-  // Perform any actions required at application shutdown.
+  // A resize still waiting on its debounced write.
+  if (self->save_source != 0) save_window_geometry(self);
 
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }
@@ -375,6 +524,7 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  g_clear_handle_id(&self->save_source, g_source_remove);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->window_channel);
   g_clear_pointer(&self->last_button_press, gdk_event_free);
