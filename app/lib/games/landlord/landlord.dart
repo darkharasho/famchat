@@ -510,6 +510,84 @@ class _State {
       return;
     }
     deck.add(id);
+    _applyCard(s, card);
+  }
+
+  void _applyCard(Side s, LandlordCard c) {
+    void collect(int n) {
+      cash[_i(s)] += n;
+      log(LandlordEvent(s, LandlordEventKind.collected, amount: n));
+    }
+
+    void pay(int n) => _charge(s, null, n, LandlordEventKind.paid);
+
+    int next(List<int> targets) {
+      final at = pos[_i(s)];
+      return targets.firstWhere((t) => t > at, orElse: () => targets.first);
+    }
+
+    int repairs(int house, int hotel) {
+      var total = 0;
+      for (var sp = 0; sp < 40; sp++) {
+        if (owner[sp] != s) continue;
+        final l = level[sp];
+        total += l == 5 ? hotel : l * house;
+      }
+      return total;
+    }
+
+    switch (c) {
+      case LandlordCard.luckToStart || LandlordCard.fundToStart:
+        _moveTo(s, 0);
+      case LandlordCard.luckToNettle:
+        _moveTo(s, 24);
+      case LandlordCard.luckToFern:
+        _moveTo(s, 11);
+      case LandlordCard.luckToNorthStation:
+        _moveTo(s, 5);
+      case LandlordCard.luckToVista:
+        _moveTo(s, 39);
+      case LandlordCard.luckToUtility:
+        _moveTo(s, next(groupSpaces(LandlordGroup.utility)), utilityRoll: true);
+      case LandlordCard.luckToStationA || LandlordCard.luckToStationB:
+        _moveTo(s, next(groupSpaces(LandlordGroup.station)), rentFactor: 2);
+      case LandlordCard.luckBack3:
+        pos[_i(s)] = (pos[_i(s)] + 37) % 40;
+        _resolve(s);
+      case LandlordCard.luckToJail || LandlordCard.fundToJail:
+        _goToJail(s);
+      case LandlordCard.luckRepairs:
+        pay(repairs(25, 100));
+      case LandlordCard.fundRepairs:
+        pay(repairs(40, 115));
+      case LandlordCard.luckPayOther50:
+        _charge(s, s.other, 50, LandlordEventKind.paid);
+      case LandlordCard.fundFromOther:
+        log(LandlordEvent(s, LandlordEventKind.collected, amount: 10, other: s.other));
+        _charge(s.other, s, 10, null);
+      case LandlordCard.luckCollect50 || LandlordCard.fundCollect50:
+        collect(50);
+      case LandlordCard.luckCollect150:
+        collect(150);
+      case LandlordCard.fundCollect200:
+        collect(200);
+      case LandlordCard.fundCollect100a || LandlordCard.fundCollect100b || LandlordCard.fundCollect100c:
+        collect(100);
+      case LandlordCard.fundCollect20:
+        collect(20);
+      case LandlordCard.fundCollect25:
+        collect(25);
+      case LandlordCard.fundCollect10:
+        collect(10);
+      case LandlordCard.luckPay15:
+        pay(15);
+      case LandlordCard.fundPay50 || LandlordCard.fundPay50b:
+        pay(50);
+      case LandlordCard.fundPay100:
+        pay(100);
+      case LandlordCard.luckJailFree || LandlordCard.fundJailFree:
+        break; // Held above.
+    }
   }
 
   int rentFor(int space, int diceTotal) {
@@ -531,10 +609,11 @@ class _State {
   }
 
   /// [from] pays [amount] to [to] (null: the bank) now, or owes it.
-  void _charge(Side from, Side? to, int amount, LandlordEventKind kind, {int? space}) {
+  /// [kind] null logs nothing (the caller already did).
+  void _charge(Side from, Side? to, int amount, LandlordEventKind? kind, {int? space}) {
     if (amount <= 0) return;
     debts.add(LandlordDebt(from, to, amount));
-    log(LandlordEvent(from, kind, amount: amount, space: space, other: to));
+    if (kind != null) log(LandlordEvent(from, kind, amount: amount, space: space, other: to));
   }
 
   /// Pays what can be paid, then runs a waiting jail move.
