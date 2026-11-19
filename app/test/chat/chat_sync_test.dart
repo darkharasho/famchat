@@ -181,6 +181,50 @@ void main() {
     expect((await bob.d.db.chatById(chatId))!.syncedSeq, 2);
   });
 
+  test("a reconnect's catch-up reports the others' new messages per chat, not their silent ones", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await until(() async => await bob.d.db.chatById(chatId) != null, reason: 'bob knows the chat');
+    await bob.sync.idle;
+    final caught = <CaughtUp>[];
+    final sub = bob.sync.caughtUp.listen(caught.add);
+    bob.d.hub.drop();
+    final one = await alice.sync.sendText(chatId, 'one');
+    await until(() async => (await alice.d.db.messageById(one))!.state == 'sent');
+    await alice.sync.react(chatId, one, '👍');
+    await alice.sync.sendText(chatId, 'two');
+    await until(() async => backend.storedMessages(chatId).length == 3);
+    await bob.d.hub.connect();
+    await until(() async => (await bob.texts(chatId)).length == 2, reason: 'bob catches up');
+    await bob.sync.idle;
+    expect(caught.map((c) => c.chatId), [chatId]);
+    expect(caught.single.messages.map((r) => (r.kind, r.seq)), [('text', 1), ('text', 3)]);
+    // Nothing new: the next reconnect reports nothing.
+    bob.d.hub.drop();
+    await bob.d.hub.connect();
+    await bob.sync.idle;
+    expect(caught, hasLength(1));
+    await sub.cancel();
+  });
+
+  test("a chat this device didn't know before the sync (a first download) reports nothing", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bobUser = await backend.addUser('Bob');
+    final chatId = await alice.sync.openDirect(bobUser.userId);
+    await alice.sync.sendText(chatId, 'before you joined');
+    await until(() async => backend.storedMessages(chatId).length == 1);
+    final bob = Node(bobUser);
+    nodes.add(bob);
+    final caught = <CaughtUp>[];
+    final sub = bob.sync.caughtUp.listen(caught.add);
+    await bob.sync.start();
+    await until(() async => (await bob.texts(chatId)).length == 1);
+    await bob.sync.idle;
+    expect(caught, isEmpty);
+    await sub.cancel();
+  });
+
   test('a message decrypts later when its key arrives', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bobDevice = await backend.addUser('Bob');
