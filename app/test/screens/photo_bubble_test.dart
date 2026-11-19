@@ -83,7 +83,7 @@ void main() {
     alice.media.hold = Completer<void>();
     hub.setConnected(true);
     await settle(tester);
-    await tester.tap(find.byTooltip('Attach photo or video'));
+    await tester.tap(find.byTooltip('Attach'));
     await settle(tester);
     if (find.text('Photos and videos').evaluate().isNotEmpty) {
       await tester.tap(find.text('Photos and videos'));

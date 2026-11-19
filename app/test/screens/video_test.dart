@@ -86,7 +86,7 @@ void main() {
 
   chatTestWidgets('a picked video is processed and sent as a video message', (tester) async {
     final chatId = await open(tester, picks: [PickedVideo(XFile.fromData(photoBytes(3000), path: '/videos/clip.mp4'))]);
-    await tester.tap(find.byTooltip('Attach photo or video'));
+    await tester.tap(find.byTooltip('Attach'));
     await settle(tester);
     await tester.tap(find.text('Photos and videos'));
     await settle(tester);
@@ -105,7 +105,7 @@ void main() {
       PickedVideo(XFile.fromData(photoBytes(10), path: '/videos/long.huge')),
       PickedVideo(XFile.fromData(photoBytes(500), path: '/videos/short.mp4')),
     ]);
-    await tester.tap(find.byTooltip('Attach photo or video'));
+    await tester.tap(find.byTooltip('Attach'));
     await settle(tester);
     await tester.tap(find.text('Photos and videos'));
     await settle(tester);
