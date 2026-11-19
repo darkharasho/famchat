@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../theme/motion.dart';
 import '../rules.dart';
 
 /// Board colours derived from the theme, so boards follow light and dark mode.
@@ -41,6 +42,111 @@ class BoardColors {
 }
 
 enum TargetMark { none, dot, ring }
+
+/// A board view that plays each new move out once. [clock] rests at 1
+/// (nothing playing); [playMove] runs it from 0. Views read [clock] in an
+/// [AnimatedBuilder] and draw the move part-way through.
+abstract class MoveMotionState<T extends StatefulWidget> extends State<T>
+    with SingleTickerProviderStateMixin<T> {
+  late final AnimationController clock = AnimationController(
+    vsync: this,
+    value: 1,
+  );
+
+  /// Whether a move is playing out.
+  bool get moving => clock.isAnimating;
+
+  /// Plays a move over [ms] milliseconds. Returns false (and plays nothing)
+  /// when the platform asks for less motion.
+  bool playMove(int ms) {
+    if (Motion.reduced(context)) {
+      clock.value = 1;
+      return false;
+    }
+    clock.duration = Duration(milliseconds: ms);
+    clock.forward(from: 0);
+    return true;
+  }
+
+  /// The clock's progress through [start]..[end] (fractions of the move),
+  /// eased by [curve].
+  double phase(double start, double end, [Curve curve = Curves.linear]) {
+    final t = clock.value;
+    if (t <= start) return 0;
+    if (t >= end) return 1;
+    return curve.transform((t - start) / (end - start));
+  }
+
+  @override
+  void dispose() {
+    clock.dispose();
+    super.dispose();
+  }
+}
+
+/// A lighter and a darker shade of [c], for drawn discs.
+(Color, Color) discShades(Color c) => (
+  Color.lerp(c, const Color(0xFFFFFFFF), 0.38)!,
+  Color.lerp(c, const Color(0xFF000000), 0.32)!,
+);
+
+/// A round disc lit from the top left: [color] with soft radial shading, an
+/// inner rim and a small shadow. [border] rings it (the winning four).
+class ShadedDisc extends StatelessWidget {
+  const ShadedDisc({
+    super.key,
+    required this.color,
+    this.border,
+    this.rim = true,
+  });
+
+  final Color color;
+  final BoxBorder? border;
+  final bool rim;
+
+  @override
+  Widget build(BuildContext context) {
+    final (hi, lo) = discShades(color);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: border,
+        gradient: RadialGradient(
+          center: const Alignment(-0.35, -0.4),
+          radius: 0.95,
+          colors: [hi, color, lo],
+          stops: const [0, 0.55, 1],
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x40000000),
+            blurRadius: 2,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      child: rim
+          ? FractionallySizedBox(
+              widthFactor: 0.64,
+              heightFactor: 0.64,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    center: const Alignment(0.3, 0.35),
+                    radius: 0.9,
+                    colors: [
+                      color.withValues(alpha: 0),
+                      lo.withValues(alpha: 0.35),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+}
 
 /// Whether two outcomes are the same result (Outcome has no ==).
 bool sameOutcome(Outcome? a, Outcome? b) =>
@@ -253,11 +359,14 @@ class ScoreRow extends StatelessWidget {
           ],
           if (n != null) ...[
             const SizedBox(width: 6),
-            Text(
-              '$n',
-              key: Key('count-${side.name}'),
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+            _Bump(
+              value: n,
+              child: Text(
+                '$n',
+                key: Key('count-${side.name}'),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -281,4 +390,52 @@ class ScoreRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// [child] grows and settles once whenever [value] changes, so a score that
+/// moves is noticed.
+class _Bump extends StatefulWidget {
+  const _Bump({required this.value, required this.child});
+
+  final int value;
+  final Widget child;
+
+  @override
+  State<_Bump> createState() => _BumpState();
+}
+
+class _BumpState extends State<_Bump> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+    value: 1,
+  );
+
+  @override
+  void didUpdateWidget(_Bump old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value && !Motion.reduced(context)) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (context, child) {
+      final t = _c.value;
+      // Up to 1.4x by a third of the way, then back.
+      final up = t < 0.3
+          ? Curves.easeOut.transform(t / 0.3)
+          : 1 - Curves.easeInOut.transform((t - 0.3) / 0.7);
+      return Transform.scale(scale: 1 + 0.4 * up, child: child);
+    },
+    child: widget.child,
+  );
 }

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../reversi.dart';
@@ -8,8 +10,9 @@ import 'board_parts.dart';
 /// stand out, with dark discs for the first player and light discs for the
 /// second, each ringed in the other colour. On my turn the legal cells show a
 /// dot; the last disc placed is tinted. Each player's name and disc count sit
-/// above the board (not in thumbnails).
-class ReversiView extends StatelessWidget {
+/// above the board (not in thumbnails). A new disc pops in, then the discs it
+/// turns flip over in a ripple outward from it.
+class ReversiView extends StatefulWidget {
   const ReversiView({
     super.key,
     required this.board,
@@ -47,18 +50,42 @@ class ReversiView extends StatelessWidget {
   }
 
   /// A disc, ringed in the opposite disc colour so it reads on any square.
-  static Widget disc(Side side, {double ring = 1.5}) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: discColor(side),
-      shape: BoxShape.circle,
-      border: Border.all(
-        color: side == Side.first
-            ? _lightDisc.withValues(alpha: 0.35)
-            : _darkDisc.withValues(alpha: 0.75),
-        width: ring,
+  static Widget disc(Side side, {double ring = 1.5}) {
+    final base = discColor(side);
+    final hi = side == Side.first
+        ? const Color(0xFF4A5060)
+        : const Color(0xFFFFFFFF);
+    final lo = side == Side.first
+        ? const Color(0xFF0E1015)
+        : const Color(0xFFCFCFC8);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: base,
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          center: const Alignment(-0.35, -0.4),
+          radius: 0.95,
+          colors: [hi, base, lo],
+          stops: const [0, 0.5, 1],
+        ),
+        boxShadow: ring > 1
+            ? const [
+                BoxShadow(
+                  color: Color(0x40000000),
+                  blurRadius: 2,
+                  offset: Offset(0, 1),
+                ),
+              ]
+            : null,
+        border: Border.all(
+          color: side == Side.first
+              ? _lightDisc.withValues(alpha: 0.35)
+              : _darkDisc.withValues(alpha: 0.75),
+          width: ring,
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   /// The square's name as on a chess board: a1 (56) at the bottom left.
   static String cellName(int i) =>
@@ -67,11 +94,101 @@ class ReversiView extends StatelessWidget {
   static String _colour(Side side) => side == Side.first ? 'dark' : 'light';
 
   @override
-  Widget build(BuildContext context) {
+  State<ReversiView> createState() => _ReversiViewState();
+}
+
+class _ReversiViewState extends MoveMotionState<ReversiView> {
+  static const _n = ReversiBoard.size;
+
+  /// The disc just placed, and each turned disc's flip start and end as
+  /// fractions of the move.
+  int? _placed;
+  Map<int, (double, double)> _flips = const {};
+
+  static const _popMs = 240, _flipMs = 320, _stepMs = 90, _leadMs = 150;
+
+  @override
+  void didUpdateWidget(ReversiView old) {
+    super.didUpdateWidget(old);
+    final a = old.board, b = widget.board, at = b.lastCell;
+    if (widget.thumbnail ||
+        at == null ||
+        a.at(at) != null ||
+        b.at(at) == null) {
+      return;
+    }
+    final flipped = <int>[];
+    for (var i = 0; i < _n * _n; i++) {
+      if (i == at || a.at(i) == b.at(i)) continue;
+      // Anything but a disc turning over is not one move: show it as is.
+      if (a.at(i) == null || b.at(i) == null) return;
+      flipped.add(i);
+    }
+    int dist(int i) =>
+        math.max((i ~/ _n - at ~/ _n).abs(), (i % _n - at % _n).abs());
+    final far = flipped.fold(1, (m, i) => math.max(m, dist(i)));
+    final total = math.max(_popMs, _leadMs + (far - 1) * _stepMs + _flipMs);
+    _placed = at;
+    _flips = {
+      for (final i in flipped)
+        i: (
+          (_leadMs + (dist(i) - 1) * _stepMs) / total,
+          (_leadMs + (dist(i) - 1) * _stepMs + _flipMs) / total,
+        ),
+    };
+    _popEnd = _popMs / total;
+    playMove(total);
+  }
+
+  double _popEnd = 1;
+
+  /// [i]'s disc part-way through the move: the new disc grows in; a turned
+  /// disc narrows to its edge, shows its new colour, and widens again,
+  /// rising a little at the turn.
+  Widget _piece(int i, Side side, bool thumbnail) {
+    var disc = ReversiView.disc(side, ring: thumbnail ? 0.75 : 1.5);
+    if (!moving) return disc;
+    if (i == _placed) {
+      final t = phase(0, _popEnd, Curves.easeOutBack);
+      return Opacity(
+        opacity: phase(0, _popEnd * 0.5).clamp(0.0, 1.0),
+        child: Transform.scale(scale: 0.3 + 0.7 * t, child: disc),
+      );
+    }
+    final f = _flips[i];
+    if (f == null) return disc;
+    final t = phase(f.$1, f.$2, Curves.easeInOut);
+    if (t < 0.5) {
+      disc = ReversiView.disc(side.other, ring: thumbnail ? 0.75 : 1.5);
+    }
+    return Transform(
+      alignment: Alignment.center,
+      transform: Matrix4.diagonal3Values(
+        math.max(0.04, (math.cos(math.pi * t)).abs()) *
+            (1 + 0.15 * math.sin(math.pi * t)),
+        1 + 0.15 * math.sin(math.pi * t),
+        1,
+      ),
+      child: disc,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: clock,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
+    final board = widget.board, thumbnail = widget.thumbnail;
+    final mySide = widget.mySide, names = widget.names;
     final colors = BoardColors.of(context);
-    final (cellColor, gapColor) = surface(context);
+    final (cellColor, gapColor) = ReversiView.surface(context);
     final canPlay =
-        interactive && board.outcome == null && board.toMove == mySide;
+        widget.interactive &&
+        board.outcome == null &&
+        board.toMove == mySide &&
+        !moving;
     final legal = canPlay ? board.legalCells().toSet() : const <int>{};
     final grid = LayoutBuilder(
       builder: (context, box) {
@@ -95,14 +212,14 @@ class ReversiView extends StatelessWidget {
               targetColor: colors.target,
               label: thumbnail
                   ? null
-                  : '${cellName(i)}, '
-                        '${side == null ? 'empty' : '${_colour(side)} disc'}',
-              onTap: playable ? () => onPlay(move) : null,
+                  : '${ReversiView.cellName(i)}, '
+                        '${side == null ? 'empty' : '${ReversiView._colour(side)} disc'}',
+              onTap: playable ? () => widget.onPlay(move) : null,
               piece: side == null
                   ? null
                   : Padding(
                       padding: EdgeInsets.all(thumbnail ? 1 : 3),
-                      child: disc(side, ring: thumbnail ? 0.75 : 1.5),
+                      child: _piece(i, side, thumbnail),
                     ),
             );
           },
@@ -117,11 +234,12 @@ class ReversiView extends StatelessWidget {
         ScoreRow(
           mySide: mySide,
           names: names,
-          swatch: disc,
+          swatch: ReversiView.disc,
           score: (side) => side == Side.first ? first : second,
           describe: (side, name) {
             final n = side == Side.first ? first : second;
-            final what = '$n ${_colour(side)} ${n == 1 ? 'disc' : 'discs'}';
+            final what =
+                '$n ${ReversiView._colour(side)} ${n == 1 ? 'disc' : 'discs'}';
             return name == null ? what : '$name: $what';
           },
         ),

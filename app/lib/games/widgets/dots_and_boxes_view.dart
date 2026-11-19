@@ -9,8 +9,9 @@ import 'board_parts.dart';
 /// boxes are filled with the owner's colour and initial, and the last line is
 /// highlighted. Each undrawn line has an invisible diamond-shaped tap target,
 /// so a tap anywhere in a box picks its nearest side. Each player's name and
-/// score sit above the board (not in thumbnails).
-class DotsAndBoxesView extends StatelessWidget {
+/// score sit above the board (not in thumbnails). A new line draws itself
+/// from dot to dot, and any box it closes pops in after it.
+class DotsAndBoxesView extends StatefulWidget {
   const DotsAndBoxesView({
     super.key,
     required this.board,
@@ -74,21 +75,60 @@ class DotsAndBoxesView extends StatelessWidget {
         : 'right edge of box ${r * _n + c}';
   }
 
+  @override
+  State<DotsAndBoxesView> createState() => _DotsAndBoxesViewState();
+}
+
+class _DotsAndBoxesViewState extends MoveMotionState<DotsAndBoxesView> {
+  static const _n = DotsAndBoxesView._n;
+
+  /// The line drawing in and the boxes it closed.
+  int? _line;
+  Set<int> _boxes = const {};
+
+  @override
+  void didUpdateWidget(DotsAndBoxesView old) {
+    super.didUpdateWidget(old);
+    final a = old.board, b = widget.board, l = b.lastLine;
+    if (widget.thumbnail || l == null || a.drawn(l) || !b.drawn(l)) return;
+    for (var i = 0; i < DotsAndBoxesBoard.lineCount; i++) {
+      if (i != l && a.drawn(i) != b.drawn(i)) return;
+    }
+    _line = l;
+    _boxes = {
+      for (var x = 0; x < DotsAndBoxesBoard.boxCount; x++)
+        if (a.owner(x) == null && b.owner(x) != null) x,
+    };
+    playMove(_boxes.isEmpty ? 320 : 820);
+  }
+
+  double get _drawEnd => _boxes.isEmpty ? 1 : 0.36;
+
   String? _initial(Side side) {
-    final i = initials;
-    if (i == null || thumbnail) return null;
+    final i = widget.initials;
+    if (i == null || widget.thumbnail) return null;
     final s = side == Side.first ? i.$1 : i.$2;
     return s.isEmpty ? null : s;
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: clock,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
+    final board = widget.board, thumbnail = widget.thumbnail;
     final colors = BoardColors.of(context);
     final scheme = Theme.of(context).colorScheme;
     final canPlay =
-        interactive && board.outcome == null && board.toMove == mySide;
-    final first = sideColor(context, Side.first);
-    final second = sideColor(context, Side.second);
+        widget.interactive &&
+        board.outcome == null &&
+        board.toMove == widget.mySide &&
+        !moving;
+    final animating = moving;
+    final first = DotsAndBoxesView.sideColor(context, Side.first);
+    final second = DotsAndBoxesView.sideColor(context, Side.second);
     final grid = AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
@@ -111,7 +151,10 @@ class DotsAndBoxesView extends StatelessWidget {
                         top: dot(b ~/ _n, b % _n).dy,
                         width: cell,
                         height: cell,
-                        child: _box(context, owner, cell, first, second),
+                        child: _pop(
+                          b,
+                          _box(context, owner, cell, first, second),
+                        ),
                       ),
                   Positioned.fill(
                     child: CustomPaint(
@@ -128,6 +171,8 @@ class DotsAndBoxesView extends StatelessWidget {
                         highlight: colors.selected,
                         dots: scheme.onSurface,
                         thumbnail: thumbnail,
+                        drawing: animating ? _line : null,
+                        progress: phase(0, _drawEnd, Curves.easeOutCubic),
                       ),
                     ),
                   ),
@@ -146,8 +191,8 @@ class DotsAndBoxesView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         ScoreRow(
-          mySide: mySide,
-          names: names,
+          mySide: widget.mySide,
+          names: widget.names,
           swatch: (side) => DecoratedBox(
             decoration: BoxDecoration(
               color: side == Side.first ? first : second,
@@ -157,12 +202,25 @@ class DotsAndBoxesView extends StatelessWidget {
           score: (side) => side == Side.first ? a : b,
           describe: (side, name) {
             final n = side == Side.first ? a : b;
-            final what = '$n ${n == 1 ? 'box' : 'boxes'}, ${_colour(side)}';
+            final what =
+                '$n ${n == 1 ? 'box' : 'boxes'}, '
+                '${DotsAndBoxesView._colour(side)}';
             return name == null ? what : '$name: $what';
           },
         ),
         Flexible(child: grid),
       ],
+    );
+  }
+
+  /// A box just closed grows in with a small overshoot once its line is
+  /// drawn; other boxes sit still.
+  Widget _pop(int box, Widget child) {
+    if (!moving || !_boxes.contains(box)) return child;
+    final t = phase(_drawEnd, 1, Curves.easeOutBack);
+    return Opacity(
+      opacity: phase(_drawEnd, _drawEnd + 0.15),
+      child: Transform.scale(scale: 0.4 + 0.6 * t, child: child),
     );
   }
 
@@ -180,7 +238,7 @@ class DotsAndBoxesView extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.28),
-          borderRadius: BorderRadius.circular(thumbnail ? 1 : 4),
+          borderRadius: BorderRadius.circular(widget.thumbnail ? 1 : 6),
         ),
         child: initial == null
             ? null
@@ -207,7 +265,8 @@ class DotsAndBoxesView extends StatelessWidget {
     double cell,
     bool canPlay,
   ) {
-    final ((r1, c1), (r2, c2)) = _ends(line);
+    final ((r1, c1), (r2, c2)) = DotsAndBoxesView._ends(line);
+    final board = widget.board;
     final mid = (dot(r1, c1) + dot(r2, c2)) / 2;
     final playable =
         canPlay && !board.drawn(line) && board.play({'line': line}) != null;
@@ -218,7 +277,7 @@ class DotsAndBoxesView extends StatelessWidget {
       height: cell,
       child: Semantics(
         label:
-            '${lineName(line)}, ${board.drawn(line) ? 'drawn' : 'not drawn'}',
+            '${DotsAndBoxesView.lineName(line)}, ${board.drawn(line) ? 'drawn' : 'not drawn'}',
         button: playable,
         excludeSemantics: true,
         child: ClipPath(
@@ -226,7 +285,7 @@ class DotsAndBoxesView extends StatelessWidget {
           child: GestureDetector(
             key: Key('line-$line'),
             behavior: HitTestBehavior.opaque,
-            onTap: playable ? () => onPlay({'line': line}) : null,
+            onTap: playable ? () => widget.onPlay({'line': line}) : null,
             child: const SizedBox.expand(),
           ),
         ),
@@ -262,6 +321,8 @@ class _LinesPainter extends CustomPainter {
     required this.highlight,
     required this.dots,
     required this.thumbnail,
+    this.drawing,
+    this.progress = 1,
   });
 
   final DotsAndBoxesBoard board;
@@ -269,6 +330,10 @@ class _LinesPainter extends CustomPainter {
   final double cell;
   final Color first, second, neutral, guide, highlight, dots;
   final bool thumbnail;
+
+  /// The line drawing in, [progress] of the way from its first dot.
+  final int? drawing;
+  final double progress;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -280,12 +345,14 @@ class _LinesPainter extends CustomPainter {
     final last = board.lastLine;
     for (var l = 0; l < DotsAndBoxesBoard.lineCount; l++) {
       final ((r1, c1), (r2, c2)) = DotsAndBoxesView._ends(l);
-      final a = dot(r1, c1), b = dot(r2, c2);
-      if (!board.drawn(l)) {
+      final a = dot(r1, c1);
+      var b = dot(r2, c2);
+      if (!board.drawn(l) || l == drawing) {
         if (!thumbnail) canvas.drawLine(a, b, stroke(guide, width * 0.25));
-        continue;
+        if (l != drawing) continue;
+        b = Offset.lerp(a, b, progress)!;
       }
-      if (l == last) {
+      if (l == last && l != drawing) {
         canvas.drawLine(
           a,
           b,
@@ -302,7 +369,7 @@ class _LinesPainter extends CustomPainter {
     final dotPaint = Paint()..color = dots;
     for (var r = 0; r <= DotsAndBoxesBoard.size; r++) {
       for (var c = 0; c <= DotsAndBoxesBoard.size; c++) {
-        canvas.drawCircle(dot(r, c), width * 0.9, dotPaint);
+        canvas.drawCircle(dot(r, c), width * 1.05, dotPaint);
       }
     }
   }
@@ -317,5 +384,7 @@ class _LinesPainter extends CustomPainter {
       old.guide != guide ||
       old.highlight != highlight ||
       old.dots != dots ||
-      old.thumbnail != thumbnail;
+      old.thumbnail != thumbnail ||
+      old.drawing != drawing ||
+      old.progress != progress;
 }

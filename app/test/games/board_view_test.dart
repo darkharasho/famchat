@@ -8,6 +8,8 @@ import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/reversi.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
+import 'package:famchat/games/widgets/checkers_view.dart';
+import 'package:famchat/games/widgets/chess_view.dart';
 import 'package:famchat/games/widgets/go_fish_view.dart';
 import 'package:famchat/games/widgets/reversi_view.dart';
 import 'package:famchat/theme/app_theme.dart';
@@ -34,8 +36,11 @@ final _anyCardFace = find.byWidgetPredicate(
 const _fm = CheckersSquare(Side.first, CheckersPiece.man);
 const _sm = CheckersSquare(Side.second, CheckersPiece.man);
 
+/// Built once, so a rebuilt host doesn't animate between equal themes.
+final _lightTheme = buildTheme(Brightness.light);
+
 Widget host(Widget child) => MaterialApp(
-  theme: buildTheme(Brightness.light),
+  theme: _lightTheme,
   home: Scaffold(
     body: Center(child: SizedBox(width: 400, height: 400, child: child)),
   ),
@@ -782,5 +787,124 @@ void main() {
     expect(played, [
       {'line': 38},
     ]);
+  });
+
+  group('moves play out', () {
+    Widget reduced(Widget child) => MediaQuery(
+      data: const MediaQueryData(disableAnimations: true),
+      child: child,
+    );
+
+    Board oneMove(GameType t) {
+      final b = initialBoard(t);
+      return switch (b) {
+        ReversiBoard() => b.play({'cell': b.legalCells().first})!,
+        CheckersBoard() => b.play({'path': b.legalPaths().first})!,
+        ChessBoard() => b.play({'uci': 'e2e4'})!,
+        DotsAndBoxesBoard() => b.play({'line': 0})!,
+        FourInARowBoard() => b.play({'col': 3})!,
+        _ => b.play({'cell': 4})!,
+      };
+    }
+
+    for (final t in [
+      GameType.tictactoe,
+      GameType.fourinarow,
+      GameType.reversi,
+      GameType.dotsandboxes,
+      GameType.checkers,
+      GameType.chess,
+    ]) {
+      testWidgets('${t.name}: one move animates, then settles', (tester) async {
+        await tester.pumpWidget(view(initialBoard(t)));
+        expect(tester.hasRunningAnimations, isFalse, reason: 'opening is still');
+        await tester.pumpWidget(view(oneMove(t)));
+        await tester.pump(const Duration(milliseconds: 40));
+        expect(tester.hasRunningAnimations, isTrue);
+        await tester.pumpAndSettle();
+        expect(tester.hasRunningAnimations, isFalse);
+      });
+
+      testWidgets('${t.name}: reduced motion shows the move at once', (
+        tester,
+      ) async {
+        await tester.pumpWidget(reduced(view(initialBoard(t))));
+        await tester.pumpWidget(reduced(view(oneMove(t))));
+        await tester.pump();
+        expect(tester.hasRunningAnimations, isFalse);
+      });
+
+      testWidgets('${t.name}: thumbnails never animate', (tester) async {
+        await tester.pumpWidget(view(initialBoard(t), thumbnail: true));
+        await tester.pumpWidget(view(oneMove(t), thumbnail: true));
+        await tester.pump();
+        expect(tester.hasRunningAnimations, isFalse);
+      });
+    }
+
+    testWidgets('chess: the piece slides over, then sits on its square', (
+      tester,
+    ) async {
+      final glyphOn = find.descendant(
+        of: find.byKey(const Key('sq-e4')),
+        matching: find.byType(ChessGlyph),
+      );
+      await tester.pumpWidget(view(initialBoard(GameType.chess)));
+      await tester.pumpWidget(view(oneMove(GameType.chess)));
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(glyphOn, findsNothing, reason: 'still on its way');
+      expect(find.byType(ChessGlyph), findsNWidgets(32));
+      await tester.pumpAndSettle();
+      expect(glyphOn, findsOneWidget);
+    });
+
+    testWidgets('chess: two moves at once just show the position', (
+      tester,
+    ) async {
+      final start = initialBoard(GameType.chess);
+      final two = start.play({'uci': 'e2e4'})!.play({'uci': 'e7e5'})!;
+      await tester.pumpWidget(view(start));
+      await tester.pumpWidget(view(two));
+      await tester.pump();
+      expect(tester.hasRunningAnimations, isFalse);
+    });
+
+    testWidgets('checkers: a jumped piece stays until the mover passes', (
+      tester,
+    ) async {
+      final b = CheckersBoard.custom({9: _fm, 13: _sm}, Side.first);
+      final path = b.legalPaths().single;
+      final after = b.play({'path': path})! as CheckersBoard;
+      final gone = [
+        for (var sq = 0; sq < 32; sq++)
+          if (b.at(sq) != null && after.at(sq) == null && sq != path.first) sq,
+      ].single;
+      Finder discOn(int sq) => find.descendant(
+        of: find.byKey(Key('sq-$sq')),
+        matching: find.byType(CheckersDisc),
+      );
+      await tester.pumpWidget(view(b));
+      await tester.pumpWidget(view(after));
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(discOn(gone), findsOneWidget);
+      expect(discOn(path.last), findsNothing);
+      await tester.pumpAndSettle();
+      expect(discOn(gone), findsNothing);
+      expect(discOn(path.last), findsOneWidget);
+    });
+
+    testWidgets("taps wait for the move to finish", (tester) async {
+      final b = oneMove(GameType.fourinarow);
+      await tester.pumpWidget(view(initialBoard(GameType.fourinarow)));
+      await tester.pumpWidget(view(b, mySide: Side.second));
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.tap(find.byKey(const Key('col-0')), warnIfMissed: false);
+      expect(played, isEmpty);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('col-0')));
+      expect(played, [
+        {'col': 0},
+      ]);
+    });
   });
 }
