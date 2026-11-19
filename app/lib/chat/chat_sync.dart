@@ -5,7 +5,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:drift/drift.dart' show Value;
 
@@ -14,6 +13,7 @@ import '../crypto/encoding.dart';
 import '../crypto/envelope.dart';
 import '../crypto/keys.dart';
 import '../games/rules.dart';
+import '../games/rng.dart' show newSeed;
 import 'chat_keys.dart';
 import 'db/chat_db.dart';
 import 'directory.dart';
@@ -783,11 +783,11 @@ class ChatSync {
       _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
 
   /// Starts [game] in [chatId]; the returned id (the message's) is the game's id. [first] moves first.
-  /// A [GameType.seeded] game gets [seed], or a fresh `Random.secure()` one.
+  /// A [GameType.seeded] game gets [seed], or a fresh [newSeed].
   Future<String> startGame(String chatId, GameType game, {required String first, int? seed}) =>
       _enqueueMessage(
         chatId,
-        GameBody(game, first, seed: game.seeded ? seed ?? Random.secure().nextInt(1 << 32) : null),
+        GameBody(game, first, seed: game.seeded ? seed ?? newSeed() : null),
       );
 
   /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].

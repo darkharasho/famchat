@@ -44,4 +44,13 @@ void main() {
       expect(r.state, x);
     }
   });
+
+  test('newSeed picks a full-range 32-bit seed (web too)', () {
+    final seeds = {for (var i = 0; i < 200; i++) newSeed()};
+    for (final s in seeds) {
+      expect(s, inInclusiveRange(0, 0xFFFFFFFF));
+    }
+    expect(seeds.length, greaterThan(190));
+    expect(seeds.any((s) => s > 0x7FFFFFFF), isTrue, reason: 'upper half reachable');
+  });
 }

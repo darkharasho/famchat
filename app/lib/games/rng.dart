@@ -1,3 +1,5 @@
+import 'dart:math';
+
 /// The shared random generator for games with luck (docs/protocol.md
 /// "Games"): xorshift32 seeded from the `game` message's `seed`.
 ///
@@ -40,3 +42,7 @@ List<T> shuffled<T>(List<T> items, Rng rng) {
   }
   return out;
 }
+
+/// A fresh seed for a new game: secure random, `0..4294967295`. The bound
+/// is a literal: on the web `1 << 32` is 0.
+int newSeed() => Random.secure().nextInt(0x100000000);
