@@ -121,10 +121,13 @@ move is 0) and an `action` with a string `type`:
 ```
 {"type":"play", ...}                  a move; ply = number of moves played so far
 {"type":"resign"} {"type":"draw_offer"} {"type":"draw_accept"} {"type":"draw_decline"}
+{"type":"poke"}                       nudge the player whose turn it is; changes nothing in the game
 ```
 
-Resign and draw actions carry the current next ply and don't advance it. Moves are not changes: they are sent
-without `silent`, count as activity and as unread, and the timeline does not show them as messages. A game or move
+Resign, draw and poke actions carry the current next ply and don't advance it. A player pokes only while it is
+the other player's turn, at most once every 10 minutes per game (clients check their own newest poke). Moves are
+not changes: they are sent without `silent`, count as activity and as unread, and the timeline does not show
+them as messages (it draws plays, pokes, resigns and draw actions as short centred lines instead). A game or move
 with an unknown `game` name is kept as `unknown` and shown once a newer version knows it; a `game` without a
 non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `action` with a `type`, is invalid.
 Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;

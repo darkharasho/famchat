@@ -504,7 +504,7 @@ class GameBody extends Plaintext {
 }
 
 /// One action in the game [target] (a `game` message id) at move number [ply]. [action] has a string
-/// `type` (play, resign, draw_offer, draw_accept, draw_decline) and the game's move fields.
+/// `type` (play, resign, draw_offer, draw_accept, draw_decline, poke) and the game's move fields.
 class MoveBody extends Plaintext {
   const MoveBody(this.target, this.game, this.ply, this.action);
   final String target;

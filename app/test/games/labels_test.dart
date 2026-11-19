@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
+import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
+import 'package:famchat/games/game_state.dart';
 import 'package:famchat/games/labels.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +51,7 @@ void main() {
     expect(l({'type': 'draw_offer'}), '🤝 Offered a draw in Chess');
     expect(l({'type': 'draw_accept'}), '🤝 Accepted a draw in Chess');
     expect(l({'type': 'draw_decline'}), 'Declined a draw in Chess');
+    expect(l({'type': 'poke'}), '👉 Poked in Chess');
   });
 
   test('list label is null for other kinds and undecodable bodies', () {
@@ -101,6 +104,7 @@ void main() {
       expect(await a('draw_offer'), '🤝 Offered a draw in Chess');
       expect(await a('draw_accept'), '🤝 Draw in Chess');
       expect(await a('draw_decline'), 'Declined a draw in Chess');
+      expect(await a('poke'), '👉 Poked you · your turn in Chess');
     });
 
     test('a play is your turn', () async {
@@ -279,6 +283,190 @@ void main() {
         ),
         '♟ Your turn in Dots and Boxes',
       );
+    });
+  });
+
+  group('timeline events', () {
+    const names = {'A': 'Ann', 'B': 'Bob'};
+
+    Map<String, GameEvent> events(
+      List<MessageRow> rows, {
+      String me = 'A',
+      bool readOnly = false,
+    }) => gameEventsOf(
+      rows,
+      plays: playResults(rows, ['A', 'B']),
+      games: deriveGames(rows, ['A', 'B']),
+      me: me,
+      readOnly: readOnly,
+      nameOf: (u) => u == me ? 'You' : names[u]!,
+      shown: (m) => !timelineHiddenKinds.contains(m.kind),
+    );
+
+    MessageRow g() =>
+        row('A', const GameBody(GameType.tictactoe, 'A'), id: 'g');
+    MessageRow p(String who, int ply, int cell) =>
+        mv(who, GameType.tictactoe, ply, {'type': 'play', 'cell': cell});
+    MessageRow poke(String who, int ply) =>
+        mv(who, GameType.tictactoe, ply, {'type': 'poke'});
+    const yourTurn = ' · Your turn';
+
+    test('a play says who moved; the mover to come sees Your turn', () {
+      final rows = [g(), p('A', 0, 4)];
+      expect(events(rows), {
+        rows[1].id: (
+          gameId: 'g',
+          text: '♟ You moved in Tic-tac-toe',
+          suffix: null,
+          poke: false,
+        ),
+      });
+      expect(events(rows, me: 'B')[rows[1].id], (
+        gameId: 'g',
+        text: '♟ Ann moved in Tic-tac-toe',
+        suffix: yourTurn,
+        poke: false,
+      ));
+    });
+
+    test('no Your turn in a read-only chat', () {
+      final rows = [g(), p('A', 0, 4)];
+      expect(events(rows, me: 'B', readOnly: true)[rows[1].id]!.suffix, isNull);
+    });
+
+    test('a run of plays collapses to the newest line', () {
+      final rows = [g(), p('A', 0, 0), p('B', 1, 4), p('A', 2, 8)];
+      expect(events(rows).keys, [rows[3].id]);
+    });
+
+    test('a message between plays keeps both; Your turn on the newest', () {
+      final rows = [
+        g(),
+        p('A', 0, 0),
+        row('B', const TextBody('hi')),
+        p('B', 1, 4),
+      ];
+      final e = events(rows);
+      expect(e.keys, [rows[1].id, rows[3].id]);
+      expect(e[rows[1].id]!.suffix, isNull);
+      expect(e[rows[3].id]!.text, '♟ Bob moved in Tic-tac-toe');
+      expect(e[rows[3].id]!.suffix, yourTurn);
+    });
+
+    test('a hidden row between plays does not break the run', () {
+      final rows = [
+        g(),
+        p('A', 0, 0),
+        row('B', const ReactionBody('g', '👍')),
+        p('B', 1, 4),
+      ];
+      expect(events(rows).keys, [rows[3].id]);
+    });
+
+    test('ignored plays get no line', () {
+      final rows = [
+        g(),
+        p('A', 0, 0),
+        p('B', 0, 4),
+        p('B', 1, 0),
+        p('A', 1, 5),
+      ];
+      expect(events(rows).keys, [rows[1].id]);
+    });
+
+    test('a winning play names the winner', () {
+      final rows = [
+        g(),
+        p('A', 0, 0),
+        p('B', 1, 3),
+        p('A', 2, 1),
+        p('B', 3, 4),
+        p('A', 4, 2),
+      ];
+      expect(events(rows)[rows.last.id], (
+        gameId: 'g',
+        text: '🏆 You won Tic-tac-toe',
+        suffix: null,
+        poke: false,
+      ));
+      expect(
+        events(rows, me: 'B')[rows.last.id]!.text,
+        '🏆 Ann won Tic-tac-toe',
+      );
+    });
+
+    test('a drawing play says Draw in', () {
+      var ply = 0;
+      final rows = [
+        g(),
+        for (final (who, cell) in [
+          ('A', 0),
+          ('B', 1),
+          ('A', 2),
+          ('B', 4),
+          ('A', 3),
+          ('B', 6),
+          ('A', 5),
+          ('B', 8),
+          ('A', 7),
+        ])
+          p(who, ply++, cell),
+      ];
+      expect(events(rows)[rows.last.id]!.text, '🤝 Draw in Tic-tac-toe');
+    });
+
+    test('a game ended by the loser\'s move names the winner', () {
+      final moves =
+          'f34,s44,f29,s22,f45,s43,f53,s46,f39,s62,f51,s47,f54,s61,f15,s42,'
+                  'f63,s25,f50,s31,f52,s20,f11,s60,f18,s55,f59,s26,f24,s16,f38,s32,'
+                  'f23,s58,f49,s13,f57,s17,f4,s19,f9,s21,f14,s3,f33,s40,f12,s30,'
+                  'f10,s8,f2,s6,f37,s0,f5,s48,f41,s1'
+              .split(',');
+      final rows = [
+        row('A', const GameBody(GameType.reversi, 'A'), id: 'g'),
+        for (var i = 0; i < moves.length; i++)
+          mv(moves[i][0] == 'f' ? 'A' : 'B', GameType.reversi, i, {
+            'type': 'play',
+            'cell': int.parse(moves[i].substring(1)),
+          }),
+      ];
+      expect(rows.last.senderUserId, 'B');
+      expect(events(rows)[rows.last.id]!.text, '🏆 You won Reversi');
+    });
+
+    test('pokes read per side, and break a run of plays', () {
+      final rows = [g(), p('A', 0, 0), poke('A', 1), p('B', 1, 4)];
+      final mine = events(rows);
+      expect(mine.keys, [rows[1].id, rows[2].id, rows[3].id]);
+      expect(mine[rows[2].id], (
+        gameId: 'g',
+        text: '👉 You poked Bob · Tic-tac-toe',
+        suffix: null,
+        poke: true,
+      ));
+      expect(
+        events(rows, me: 'B')[rows[2].id]!.text,
+        '👉 Ann poked you · Your turn in Tic-tac-toe',
+      );
+    });
+
+    test('resigns and draw offers still show', () {
+      final rows = [
+        g(),
+        p('A', 0, 0),
+        mv('B', GameType.tictactoe, 1, {'type': 'resign'}),
+      ];
+      final e = events(rows);
+      expect(e[rows[2].id]!.text, '🏳 Bob resigned at Tic-tac-toe');
+      // the play before the resign has no Your turn: the game is over
+      expect(e[rows[1].id]!.suffix, isNull);
+    });
+
+    test('lastPokeAt is my newest poke in that game', () {
+      final rows = [g(), poke('A', 0), poke('A', 0), poke('B', 0)];
+      expect(lastPokeAt(rows, 'g', 'A'), rows[2].createdAt);
+      expect(lastPokeAt(rows, 'other', 'A'), isNull);
+      expect(lastPokeAt([g()], 'g', 'A'), isNull);
     });
   });
 }

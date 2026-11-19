@@ -209,7 +209,7 @@ void main() {
     );
   });
 
-  chatTestWidgets('resigns and draw offers show as lines in the chat; plays do not', (
+  chatTestWidgets('plays, resigns and draw offers show as lines in the chat', (
     tester,
   ) async {
     await open(
@@ -217,20 +217,135 @@ void main() {
       messages: [
         game('g1', GameType.chess, alice.userId),
         ...[
-          move(alice.userId, 'g1', GameType.chess, 0, {'type': 'play', 'from': 12, 'to': 28}),
+          move(alice.userId, 'g1', GameType.chess, 0, {'type': 'play', 'uci': 'e2e4'}),
           move(bob.userId, 'g1', GameType.chess, 1, {'type': 'draw_offer'}),
           move(alice.userId, 'g1', GameType.chess, 1, {'type': 'draw_decline'}),
           move(alice.userId, 'g1', GameType.chess, 1, {'type': 'resign'}),
         ],
       ],
     );
-    expect(find.byType(GameEventLine), findsNWidgets(3));
+    expect(find.byType(GameEventLine), findsNWidgets(4));
+    expect(find.text('♟ You moved in Chess', findRichText: true), findsOneWidget);
     expect(find.text('🤝 Bob offered a draw in Chess'), findsOneWidget);
     expect(find.text('You declined a draw in Chess'), findsOneWidget);
     expect(find.text('🏳 You resigned at Chess'), findsOneWidget);
     await tester.tap(find.text('🏳 You resigned at Chess'));
     await settle(tester);
     expect(find.byType(GameScreen), findsOneWidget);
+  });
+
+  chatTestWidgets('a run of plays shows one line with Your turn; pokes are tinted', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 4, 8]),
+        move(alice.userId, 'g1', GameType.tictactoe, 3, {'type': 'poke'}),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 4, 8, 2]).skip(3),
+      ],
+    );
+    final lines = find.byType(GameEventLine);
+    expect(lines, findsNWidgets(3));
+    expect(find.text('♟ You moved in Tic-tac-toe', findRichText: true), findsOneWidget);
+    expect(find.text('👉 You poked Bob · Tic-tac-toe', findRichText: true), findsOneWidget);
+    expect(
+      find.text('♟ Bob moved in Tic-tac-toe · Your turn', findRichText: true),
+      findsOneWidget,
+    );
+    final poke = tester.widgetList<GameEventLine>(lines).where((l) => l.poke);
+    expect(poke.single.text, '👉 You poked Bob · Tic-tac-toe');
+    await tester.tap(find.text('♟ Bob moved in Tic-tac-toe · Your turn', findRichText: true));
+    await settle(tester);
+    expect(find.byType(GameScreen), findsOneWidget);
+  });
+
+  Finder pokeButton() => find.descendant(
+    of: find.byKey(const Key('game-bar')),
+    matching: find.byKey(const Key('poke')),
+  );
+
+  chatTestWidgets('Poke shows only on the other player\'s turn', (tester) async {
+    await open(tester, messages: [game('g1', GameType.tictactoe, alice.userId)]);
+    expect(find.byKey(const Key('game-bar')), findsOneWidget);
+    expect(pokeButton(), findsNothing);
+  });
+
+  chatTestWidgets('Poke is gone once the game is over', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    expect(pokeButton(), findsNothing);
+  });
+
+  chatTestWidgets('no Poke in a read-only chat', (tester) async {
+    backend.markFormer(bob.userId);
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0]),
+      ],
+    );
+    expect(pokeButton(), findsNothing);
+  });
+
+  chatTestWidgets('Poke sends a poke move at the current ply', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0]),
+      ],
+    );
+    expect(find.descendant(of: pokeButton(), matching: find.text('👉 Poke')), findsOneWidget);
+    await tester.tap(pokeButton());
+    await settle(tester);
+    final sent = await outbox(tester);
+    expect(sent, [
+      {
+        'kind': 'move',
+        'target': 'g1',
+        'game': 'tictactoe',
+        'ply': 1,
+        'action': {'type': 'poke'},
+      },
+    ]);
+    expect(find.text('Poked Bob'), findsOneWidget);
+    expect(find.text('👉 You poked Bob · Tic-tac-toe', findRichText: true), findsOneWidget);
+    expect(find.descendant(of: pokeButton(), matching: find.text('Poked · 10m')), findsOneWidget);
+  });
+
+  chatTestWidgets('after a poke the button waits out the cooldown', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0]),
+        move(alice.userId, 'g1', GameType.tictactoe, 1, {'type': 'poke'}),
+      ],
+    );
+    expect(find.descendant(of: pokeButton(), matching: find.text('Poked · 10m')), findsOneWidget);
+    expect(tester.widget<TextButton>(pokeButton()).onPressed, isNull);
+  });
+
+  chatTestWidgets('an old poke no longer blocks', (tester) async {
+    final old = move(alice.userId, 'g1', GameType.tictactoe, 1, {'type': 'poke'});
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0]),
+        old.copyWith(createdAt: DateTime.now().millisecondsSinceEpoch - 11 * 60 * 1000),
+      ],
+    );
+    expect(find.descendant(of: pokeButton(), matching: find.text('👉 Poke')), findsOneWidget);
+    expect(tester.widget<TextButton>(pokeButton()).onPressed, isNotNull);
   });
 
   chatTestWidgets('resign asks for confirmation then sends resign', (
