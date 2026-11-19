@@ -51,11 +51,14 @@ class LandlordOffer {
 /// [debtor] owes [amount] to [creditor] (null: the bank).
 @immutable
 class LandlordDebt {
-  const LandlordDebt(this.debtor, this.creditor, this.amount);
+  const LandlordDebt(this.debtor, this.creditor, this.amount, {this.announced = false});
 
   final Side debtor;
   final Side? creditor;
   final int amount;
+
+  /// Whether it couldn't be paid at once (an `owes` event was logged).
+  final bool announced;
 }
 
 int _i(Side s) => s == Side.first ? 0 : 1;
@@ -433,6 +436,9 @@ class _State {
         } else {
           auction = LandlordAuction(au.space, 0, null, who.other, true);
         }
+      case 'bankrupt':
+        if (debts.isEmpty) return false;
+        _bankrupt(debts.first.debtor);
       case 'offer':
         if (!_turnActs || !(stage == _Stage.roll || stage == _Stage.end)) return false;
         final o = _parseOffer(me, m);
@@ -811,16 +817,33 @@ class _State {
     if (kind != null) log(LandlordEvent(from, kind, amount: amount, space: space, other: to));
   }
 
-  /// Pays what can be paid, then runs a waiting jail move.
+  void _bankrupt(Side s) {
+    outcome = Outcome(s.other, 'bankrupt');
+    log(LandlordEvent(s, LandlordEventKind.bankrupt));
+  }
+
+  /// Pays what can be paid, then runs a waiting jail move. A debtor who
+  /// can't raise enough even by selling everything goes bankrupt.
   void settle() {
     while (outcome == null) {
       if (debts.isNotEmpty) {
         final d = debts.first;
-        if (cash[_i(d.debtor)] < d.amount) return;
+        if (cash[_i(d.debtor)] < d.amount) {
+          if (liquidation(d.debtor) < d.amount) {
+            _bankrupt(d.debtor);
+          } else if (!d.announced) {
+            debts[0] = LandlordDebt(d.debtor, d.creditor, d.amount, announced: true);
+            log(LandlordEvent(d.debtor, LandlordEventKind.owes, amount: d.amount, other: d.creditor));
+          }
+          return;
+        }
         debts.removeAt(0);
         cash[_i(d.debtor)] -= d.amount;
         final c = d.creditor;
         if (c != null) cash[_i(c)] += d.amount;
+        if (d.announced) {
+          log(LandlordEvent(d.debtor, LandlordEventKind.debtPaid, amount: d.amount, other: c));
+        }
         continue;
       }
       if (stage == _Stage.jailMove) {
