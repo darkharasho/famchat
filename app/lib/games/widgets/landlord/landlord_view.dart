@@ -69,9 +69,7 @@ ThemeData _feltTheme(ThemeData base) {
     textButtonTheme: TextButtonThemeData(
       style: base.textButtonTheme.style?.copyWith(
         padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.disabled) ? muted.withValues(alpha: 0.5) : _Palette.gold,
-        ),
+        foregroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.disabled) ? muted.withValues(alpha: 0.5) : _Palette.gold),
       ),
     ),
   );
@@ -80,17 +78,55 @@ ThemeData _feltTheme(ThemeData base) {
 /// A player's token colour (red for the first player, blue for the second).
 Color landlordTokenColor(BuildContext context, Side s) => DotsAndBoxesView.sideColor(context, s);
 
-/// Where space [i] sits on a ring of 13 units: corners are 2×2, edges 1×2.
-/// Start is bottom right; play runs clockwise (left along the bottom).
-Rect _cell(int i) {
-  if (i == 0) return const Rect.fromLTWH(11, 11, 2, 2);
-  if (i < 10) return Rect.fromLTWH(11.0 - i, 11, 1, 2);
-  if (i == 10) return const Rect.fromLTWH(0, 11, 2, 2);
-  if (i < 20) return Rect.fromLTWH(0, 21.0 - i, 2, 1);
-  if (i == 20) return const Rect.fromLTWH(0, 0, 2, 2);
-  if (i < 30) return Rect.fromLTWH(i - 19.0, 0, 1, 2);
-  if (i == 30) return const Rect.fromLTWH(11, 0, 2, 2);
-  return Rect.fromLTWH(11, i - 29.0, 2, 1);
+/// The board's ring of spaces in pixels. Start is bottom right; play runs
+/// clockwise (left along the bottom).
+///
+/// On a wide screen it's square: 13 units across, corners 2×2, edges 1×2.
+/// On a tall phone it stretches to fill the height: deeper top and bottom
+/// rows (their names turned to run along them) and wider, taller sides.
+class _Ring {
+  const _Ring._(this.width, this.height, this.unit, this.side, this.depth, this.tall);
+
+  factory _Ring(Size box) {
+    final w = box.width, h = box.height;
+    if (h > w * 1.15) {
+      final unit = w / 14;
+      return _Ring._(w, min(h, w * 1.75), unit, unit * 2.5, unit * 2.8, true);
+    }
+    final unit = box.shortestSide / 13;
+    return _Ring._(box.shortestSide, box.shortestSide, unit, unit * 2, unit * 2, false);
+  }
+
+  final double width, height;
+
+  /// A top or bottom space's width; icons and labels scale with it.
+  final double unit;
+
+  /// The width of the left and right columns (and the corners).
+  final double side;
+
+  /// The height of the top and bottom rows (and the corners).
+  final double depth;
+
+  /// Stretched for a tall screen.
+  final bool tall;
+
+  /// A left or right space's height.
+  double get step => (height - 2 * depth) / 9;
+
+  Rect get centre => Rect.fromLTWH(side, depth, width - 2 * side, height - 2 * depth);
+
+  Rect rect(int i) {
+    final right = width - side, bottom = height - depth;
+    if (i == 0) return Rect.fromLTWH(right, bottom, side, depth);
+    if (i < 10) return Rect.fromLTWH(right - i * unit, bottom, unit, depth);
+    if (i == 10) return Rect.fromLTWH(0, bottom, side, depth);
+    if (i < 20) return Rect.fromLTWH(0, bottom - (i - 10) * step, side, step);
+    if (i == 20) return Rect.fromLTWH(0, 0, side, depth);
+    if (i < 30) return Rect.fromLTWH(side + (i - 21) * unit, 0, unit, depth);
+    if (i == 30) return Rect.fromLTWH(right, 0, side, depth);
+    return Rect.fromLTWH(right, depth + (i - 31) * step, side, step);
+  }
 }
 
 /// Which edge of space [i] faces the centre (its colour band goes there).
@@ -162,8 +198,7 @@ class LandlordView extends StatefulWidget {
   /// (first, second) players' display names, or null.
   final (String, String)? names;
 
-  (String, String) get _names =>
-      names ?? ((mySide ?? Side.first) == Side.first ? ('You', 'Opponent') : ('Opponent', 'You'));
+  (String, String) get _names => names ?? ((mySide ?? Side.first) == Side.first ? ('You', 'Opponent') : ('Opponent', 'You'));
 
   bool get _canAct => interactive && mySide != null && board.outcome == null && board.toMove == mySide;
 
@@ -246,18 +281,19 @@ class _LandlordViewState extends State<LandlordView> {
     }
     return LayoutBuilder(
       builder: (context, box) {
-        final side = box.biggest.shortestSide;
-        final u = side / 13;
+        final ring = _Ring(box.biggest);
+        final u = ring.unit;
         final paper = _paperTheme(theme);
         return Center(
-          child: SizedBox.square(
-            dimension: side,
+          child: SizedBox(
+            width: ring.width,
+            height: ring.height,
             child: Stack(
               children: [
                 const Positioned.fill(child: ColoredBox(color: _Palette.felt)),
                 for (var i = 0; i < 40; i++)
                   Positioned.fromRect(
-                    rect: Rect.fromLTWH(_cell(i).left * u, _cell(i).top * u, _cell(i).width * u, _cell(i).height * u),
+                    rect: ring.rect(i),
                     child: Theme(
                       data: paper,
                       child: _SpaceTile(
@@ -265,12 +301,13 @@ class _LandlordViewState extends State<LandlordView> {
                         board: board,
                         index: i,
                         unit: u,
+                        turned: ring.tall,
                         onTap: () => showSpaceSheet(context, board, i, me, names, w._legal, w.onPlay),
                       ),
                     ),
                   ),
                 Positioned.fromRect(
-                  rect: Rect.fromLTWH(2 * u, 2 * u, 9 * u, 9 * u),
+                  rect: ring.centre,
                   child: Padding(
                     padding: EdgeInsets.all(u * 0.25),
                     // Drawn 250 wide and scaled with the board (about full
@@ -287,13 +324,7 @@ class _LandlordViewState extends State<LandlordView> {
                             width: 250,
                             child: Theme(
                               data: _feltTheme(theme),
-                              child: _Centre(
-                                view: w,
-                                armed: _settle == null,
-                                balances: balances,
-                                host: context,
-                                arrival: _arrival,
-                              ),
+                              child: _Centre(view: w, armed: _settle == null, balances: balances, host: context, arrival: _arrival),
                             ),
                           ),
                         ),
@@ -317,7 +348,7 @@ class _LandlordViewState extends State<LandlordView> {
                             if (board.position(q) == i) q,
                         ];
                         final k = here.indexOf(p);
-                        return _tokenCentre(i, k < 0 ? 0 : k, k < 0 ? 1 : here.length, u);
+                        return _tokenCentre(i, k < 0 ? 0 : k, k < 0 ? 1 : here.length, ring);
                       },
                     ),
                   ),
@@ -331,13 +362,7 @@ class _LandlordViewState extends State<LandlordView> {
 }
 
 class _Centre extends StatelessWidget {
-  const _Centre({
-    required this.view,
-    required this.armed,
-    required this.balances,
-    required this.host,
-    required this.arrival,
-  });
+  const _Centre({required this.view, required this.armed, required this.balances, required this.host, required this.arrival});
 
   /// How long until the moving token lands; the deed is dealt then.
   final Duration arrival;
@@ -428,11 +453,7 @@ class _Centre extends StatelessWidget {
               ),
             ),
           if (away.length > shown.length)
-            TextButton(
-              key: const Key('away-more'),
-              onPressed: () => _showLog(host),
-              child: Text('+${away.length - shown.length} more'),
-            ),
+            TextButton(key: const Key('away-more'), onPressed: () => _showLog(host), child: Text('+${away.length - shown.length} more')),
         ],
         const SizedBox(height: 8),
         Wrap(
@@ -447,8 +468,7 @@ class _Centre extends StatelessWidget {
             if (view.mySide != null)
               TextButton(
                 key: const Key('open-trade'),
-                onPressed:
-                    view._canAct && b.turn == me && (b.phase == LandlordPhase.roll || b.phase == LandlordPhase.end)
+                onPressed: view._canAct && b.turn == me && (b.phase == LandlordPhase.roll || b.phase == LandlordPhase.end)
                     ? () => showTradeSheet(host, b, me, names, view.onPlay)
                     : null,
                 child: const Text('Trade'),
@@ -470,11 +490,7 @@ class _Centre extends StatelessWidget {
         if (armed) view.onPlay(move);
       }
 
-      out.add(
-        primary
-            ? FilledButton(key: Key('act-$key'), onPressed: tap, child: child)
-            : OutlinedButton(key: Key('act-$key'), onPressed: tap, child: child),
-      );
+      out.add(primary ? FilledButton(key: Key('act-$key'), onPressed: tap, child: child) : OutlinedButton(key: Key('act-$key'), onPressed: tap, child: child));
     }
 
     switch (b.phase) {
@@ -495,18 +511,11 @@ class _Centre extends StatelessWidget {
         out.add(
           FilledButton(
             key: const Key('act-raise'),
-            onPressed: () =>
-                showPropertiesSheet(host, b, view.mySide ?? Side.first, view._names, view._legal, view.onPlay),
+            onPressed: () => showPropertiesSheet(host, b, view.mySide ?? Side.first, view._names, view._legal, view.onPlay),
             child: const Text('Raise cash'),
           ),
         );
-        out.add(
-          OutlinedButton(
-            key: const Key('act-bankrupt'),
-            onPressed: () => _confirmBankrupt(host),
-            child: const Text('Declare bankruptcy'),
-          ),
-        );
+        out.add(OutlinedButton(key: const Key('act-bankrupt'), onPressed: () => _confirmBankrupt(host), child: const Text('Declare bankruptcy')));
     }
     return out;
   }
@@ -575,12 +584,15 @@ class _Centre extends StatelessWidget {
 /// One space on the ring: colour band, short name, owner dot, buildings and
 /// tokens. Mortgaged spaces are dimmed.
 class _SpaceTile extends StatelessWidget {
-  const _SpaceTile({super.key, required this.board, required this.index, required this.unit, required this.onTap});
+  const _SpaceTile({super.key, required this.board, required this.index, required this.unit, this.turned = false, required this.onTap});
 
   final LandlordBoard board;
 
   /// One board unit in pixels (a side tile is one unit wide); labels scale with it.
   final double unit;
+
+  /// Top and bottom names run up the space (a tall phone's deep, narrow rows).
+  final bool turned;
   final int index;
   final VoidCallback onTap;
 
@@ -647,13 +659,16 @@ class _SpaceTile extends StatelessWidget {
                     Icon(icon, size: unit * (index % 10 == 0 ? 0.7 : 0.5), color: theme.colorScheme.onSurfaceVariant),
                     if (!(index % 10 == 0 || vertical)) SizedBox(width: unit * 0.08),
                   ],
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: (unit * 0.38).clamp(10.0, 20.0),
-                      height: 1.1,
-                      fontWeight: FontWeight.w600,
+                  RotatedBox(
+                    quarterTurns: turned && vertical && index % 10 != 0 ? 3 : 0,
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: turned ? (unit * 0.5).clamp(12.0, 20.0) : (unit * 0.38).clamp(10.0, 20.0),
+                        height: 1.1,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -670,16 +685,10 @@ class _SpaceTile extends StatelessWidget {
               tween: Tween(begin: _still(context) ? 1 : 0, end: 1),
               duration: const Duration(milliseconds: 450),
               curve: Curves.easeOutBack,
-              builder: (context, g, child) => FractionallySizedBox(
-                widthFactor: vertical ? 0.7 * g : 0.12,
-                heightFactor: vertical ? 0.1 : 0.7 * g,
-                child: child,
-              ),
+              builder: (context, g, child) =>
+                  FractionallySizedBox(widthFactor: vertical ? 0.7 * g : 0.12, heightFactor: vertical ? 0.1 : 0.7 * g, child: child),
               child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: landlordTokenColor(context, owner),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                decoration: BoxDecoration(color: landlordTokenColor(context, owner), borderRadius: BorderRadius.circular(2)),
               ),
             ),
           ),
@@ -792,9 +801,7 @@ class _Plate extends StatelessWidget {
       width: 112,
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 7),
       decoration: BoxDecoration(
-        color: active
-            ? Color.alphaBlend(c.withValues(alpha: 0.14), theme.colorScheme.surfaceContainerHigh)
-            : theme.colorScheme.surfaceContainer,
+        color: active ? Color.alphaBlend(c.withValues(alpha: 0.14), theme.colorScheme.surfaceContainerHigh) : theme.colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: active ? c : theme.colorScheme.outlineVariant, width: active ? 2 : 1),
       ),
@@ -826,10 +833,7 @@ class _Plate extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: _Cash(
               cash: cash,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()]),
             ),
           ),
         ],
@@ -854,9 +858,7 @@ class _Die extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.inverseSurface,
           borderRadius: BorderRadius.circular(9),
-          boxShadow: [
-            BoxShadow(color: theme.shadowColor.withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2)),
-          ],
+          boxShadow: [BoxShadow(color: theme.shadowColor.withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: CustomPaint(painter: _PipPainter(value, theme.colorScheme.onInverseSurface)),
       ),

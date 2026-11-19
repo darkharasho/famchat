@@ -45,9 +45,8 @@ double _tokenSize(double u) => u * 0.4;
 
 /// Where token [k] of [count] on space [i] sits, in board pixels: under the
 /// name on corners and side spaces, on the outer half of top and bottom ones.
-Offset _tokenCentre(int i, int k, int count, double u) {
-  final c = _cell(i);
-  var r = Rect.fromLTWH(c.left * u, c.top * u, c.width * u, c.height * u);
+Offset _tokenCentre(int i, int k, int count, _Ring ring) {
+  var r = ring.rect(i);
   final two = count == 2;
   if (i % 10 == 0) return Alignment(two ? (k == 0 ? -0.35 : 0.35) : 0, 0.7).withinRect(r);
   final s = landlordSpaces[i];
@@ -63,23 +62,14 @@ Offset _tokenCentre(int i, int k, int count, double u) {
   }
   final outer = _outerOf(dir);
   final vertical = dir == AxisDirection.up || dir == AxisDirection.down;
-  final a = vertical
-      ? Alignment(two ? (k == 0 ? -0.5 : 0.5) : 0, 0.55 * outer.y)
-      : Alignment(-0.6 * outer.x + (two ? (k == 0 ? -0.3 : 0.3) : 0), 0.55);
+  final a = vertical ? Alignment(two ? (k == 0 ? -0.5 : 0.5) : 0, 0.55 * outer.y) : Alignment(-0.6 * outer.x + (two ? (k == 0 ? -0.3 : 0.3) : 0), 0.55);
   return a.withinRect(r);
 }
 
 /// A player's token, walking to [target] when it changes: [delay], then a
 /// hop per space with a little arc, or one high glide for a long jump.
 class _Walker extends StatefulWidget {
-  const _Walker({
-    super.key,
-    required this.side,
-    required this.target,
-    required this.centreOf,
-    required this.size,
-    required this.delay,
-  });
+  const _Walker({super.key, required this.side, required this.target, required this.centreOf, required this.size, required this.delay});
 
   final Side side;
   final int target;
@@ -144,9 +134,7 @@ class _WalkerState extends State<_Walker> with SingleTickerProviderStateMixin {
         color: landlordTokenColor(context, widget.side),
         shape: BoxShape.circle,
         border: Border.all(color: _Palette.paper, width: d * 0.1),
-        boxShadow: [
-          BoxShadow(color: const Color(0x66000000), blurRadius: 2 + lift * 0.35, offset: Offset(0, 1 + lift * 0.45)),
-        ],
+        boxShadow: [BoxShadow(color: const Color(0x66000000), blurRadius: 2 + lift * 0.35, offset: Offset(0, 1 + lift * 0.45))],
       ),
     );
   }
@@ -262,10 +250,7 @@ class _DiceState extends State<_Dice> with SingleTickerProviderStateMixin {
             child: Transform.scale(
               scale: 1 - min(height, 50) / 80,
               child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Color.fromRGBO(0, 0, 0, 0.35 - min(height, 50) / 250),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                decoration: BoxDecoration(color: Color.fromRGBO(0, 0, 0, 0.35 - min(height, 50) / 250), borderRadius: BorderRadius.circular(8)),
               ),
             ),
           ),
@@ -273,12 +258,7 @@ class _DiceState extends State<_Dice> with SingleTickerProviderStateMixin {
             offset: Offset(x, y),
             child: Transform.rotate(
               angle: angle,
-              child: Transform.scale(
-                scaleX: 2 - squash,
-                scaleY: squash,
-                alignment: Alignment.bottomCenter,
-                child: _Die(face),
-              ),
+              child: Transform.scale(scaleX: 2 - squash, scaleY: squash, alignment: Alignment.bottomCenter, child: _Die(face)),
             ),
           ),
         ],
@@ -300,10 +280,7 @@ class _DiceState extends State<_Dice> with SingleTickerProviderStateMixin {
       label: 'Dice: $a and $b',
       child: AnimatedBuilder(
         animation: _c,
-        builder: (context, _) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [_die(a, 1, -80, 0), const SizedBox(width: 10), _die(b, 3, 80, 0.08)],
-        ),
+        builder: (context, _) => Row(mainAxisSize: MainAxisSize.min, children: [_die(a, 1, -80, 0), const SizedBox(width: 10), _die(b, 3, 80, 0.08)]),
       ),
     );
   }
@@ -366,10 +343,7 @@ class _CashState extends State<_Cash> with SingleTickerProviderStateMixin {
                   opacity: (1 - Curves.easeIn.transform(t)).clamp(0.0, 1.0),
                   child: Text(
                     '${up ? '+' : '−'}${money(_delta.abs())}',
-                    style: widget.style?.copyWith(
-                      fontSize: 13,
-                      color: up ? const Color(0xFF8BE3A7) : const Color(0xFFFF9C8F),
-                    ),
+                    style: widget.style?.copyWith(fontSize: 13, color: up ? const Color(0xFF8BE3A7) : const Color(0xFFFF9C8F)),
                   ),
                 ),
               ),
