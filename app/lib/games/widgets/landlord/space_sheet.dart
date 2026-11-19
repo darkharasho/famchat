@@ -125,59 +125,95 @@ class SpaceCard extends StatelessWidget {
   }
 }
 
-/// Both players' properties and jail-free cards; tap one for its card.
+/// Both players' properties and cash. Each of mine shows what it can raise
+/// (a building's sale, or its mortgage value) with a button to do it there,
+/// when [canAct]; the list keeps up as cash comes in.
 Future<void> showPropertiesSheet(
   BuildContext context,
   LandlordBoard b,
   Side me,
   (String, String) names,
   bool Function(Map<String, Object?> move) legal,
-  void Function(Map<String, Object?> move) onPlay,
-) {
+  void Function(Map<String, Object?> move) onPlay, {
+  bool canAct = false,
+}) {
+  var cur = b;
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (context) {
-      final theme = Theme.of(context);
-      return SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.7,
-          child: ListView(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            children: [
-              for (final p in [me, me.other]) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    '${_owner(names, p)} · ${money(b.cash(p))}'
-                    '${b.heldCards(p).isEmpty ? '' : ' · ${b.heldCards(p).length} jail-free card${b.heldCards(p).length == 1 ? '' : 's'}'}',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ),
-                for (var i = 0; i < 40; i++)
-                  if (b.owner(i) == p)
-                    ListTile(
-                      dense: true,
-                      leading: Container(width: 12, height: 24, color: landlordSpaces[i].group!.color),
-                      title: Text(landlordSpaces[i].name),
-                      subtitle: Text(
-                        [
-                          if (b.level(i) == 5) 'Hotel' else if (b.level(i) > 0) '${b.level(i)} houses',
-                          if (b.isMortgaged(i)) 'Mortgaged',
-                        ].join(' · '),
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        showSpaceSheet(context, b, i, me, names, legal, onPlay);
-                      },
+    builder: (context) => StatefulBuilder(
+      builder: (context, setSheet) {
+        final theme = Theme.of(context);
+        final small = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+
+        /// The quickest way space [i] raises cash now, if any: sell a
+        /// building, else mortgage it.
+        (String, Map<String, Object?>)? raise(int i) {
+          if (cur.owner(i) != me) return null;
+          final sell = {'a': 'sell', 'space': i};
+          final mortgage = {'a': 'mortgage', 'space': i};
+          final next = cur.play(sell) as LandlordBoard?;
+          if (next != null) return ('Sell +${money(next.cash(me) - cur.cash(me))}', sell);
+          if (!cur.isMortgaged(i)) return ('Mortgage +${money(landlordSpaces[i].mortgageValue)}', mortgage);
+          return null;
+        }
+
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.7,
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                for (final p in [me, me.other]) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Text(
+                      '${_owner(names, p)} · ${money(cur.cash(p))}'
+                      '${cur.heldCards(p).isEmpty ? '' : ' · ${cur.heldCards(p).length} jail-free card${cur.heldCards(p).length == 1 ? '' : 's'}'}',
+                      style: theme.textTheme.titleSmall,
                     ),
-                if (!Iterable.generate(40).any((i) => b.owner(i) == p))
-                  const ListTile(dense: true, title: Text('No properties yet')),
+                  ),
+                  for (var i = 0; i < 40; i++)
+                    if (cur.owner(i) == p)
+                      ListTile(
+                        key: ValueKey('owned-$i'),
+                        dense: true,
+                        leading: Container(width: 12, height: 24, color: landlordSpaces[i].group!.color),
+                        title: Text(landlordSpaces[i].name),
+                        subtitle: Text(
+                          [
+                            if (cur.level(i) == 5) 'Hotel' else if (cur.level(i) > 0) '${cur.level(i)} houses',
+                            if (cur.isMortgaged(i))
+                              'Mortgaged'
+                            else
+                              'Mortgage value ${money(landlordSpaces[i].mortgageValue)}',
+                          ].join(' · '),
+                          style: small,
+                        ),
+                        trailing: switch (canAct && p == me ? raise(i) : null) {
+                          (final label, final move) when cur.play(move) != null => TextButton(
+                            key: ValueKey('raise-$i'),
+                            onPressed: () {
+                              onPlay(move);
+                              setSheet(() => cur = cur.play(move)! as LandlordBoard);
+                            },
+                            child: Text(label),
+                          ),
+                          _ => null,
+                        },
+                        onTap: () {
+                          Navigator.pop(context);
+                          showSpaceSheet(context, cur, i, me, names, legal, onPlay);
+                        },
+                      ),
+                  if (!Iterable.generate(40).any((i) => cur.owner(i) == p))
+                    const ListTile(dense: true, title: Text('No properties yet')),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }
