@@ -21,6 +21,7 @@ String gameGlyph(GameType t) => switch (t) {
   GameType.dotsandboxes => '\u2B1A\uFE0E',
   GameType.tictactoe => '\u2715',
   GameType.gofish => '\u{1F0A0}',
+  GameType.war => '\u{1F0A1}',
   GameType.landlord => '\u{1F3E0}\uFE0E',
 };
 
