@@ -424,15 +424,59 @@ void main() {
       expect(jsonDecode(sent.body!), {'kind': 'game', 'game': 'chess', 'first': alice.userId});
     });
 
-    chatTestWidgets('a long and a quick game show two bars, long first', (tester) async {
+    List<MessageRow> twoGames() => [
+          plain('g1', 1, alice.userId, GameBody(GameType.tictactoe, alice.userId)),
+          plain('g2', 2, bob.userId, GameBody(GameType.landlord, bob.userId, seed: 1)),
+        ];
+
+    chatTestWidgets('a long and a quick game share one split bar, long first', (tester) async {
+      await open(tester, messages: twoGames());
+      expect(find.byKey(const Key('game-bar')), findsOneWidget);
+      final left = find.byKey(const Key('game-bar-g2')), right = find.byKey(const Key('game-bar-g1'));
+      expect(tester.getCenter(left).dx, lessThan(tester.getCenter(right).dx));
+      expect(find.descendant(of: left, matching: find.text('\u{1F3E0}\uFE0E Landlord', findRichText: true)), findsOneWidget);
+      expect(find.descendant(of: right, matching: find.text('\u2715 Tic-tac-toe', findRichText: true)), findsOneWidget);
+      expect(find.textContaining(' with Bob', findRichText: true), findsNothing);
+      expect(find.byIcon(Icons.chevron_right_rounded), findsNothing);
+      // Bob is to move in Landlord (he started it); Alice started tic-tac-toe, so it's her turn there.
+      expect(find.descendant(of: left, matching: find.byKey(const Key('poke'))), findsOneWidget);
+      expect(find.descendant(of: left, matching: find.byType(IconButton)), findsOneWidget);
+      expect(tester.widget<IconButton>(find.byKey(const Key('poke'))).tooltip, 'Poke');
+      expect(find.descendant(of: right, matching: find.byKey(const Key('poke'))), findsNothing);
+    });
+
+    chatTestWidgets('each half of the split bar opens its own game', (tester) async {
+      await open(tester, messages: twoGames());
+      for (final id in ['g2', 'g1']) {
+        await tester.tap(find.byKey(Key('game-bar-$id')), warnIfMissed: false);
+        await settle(tester);
+        expect(tester.widget<GameScreen>(find.byType(GameScreen)).gameId, id);
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(find.byType(GameScreen), findsNothing);
+      }
+    });
+
+    chatTestWidgets('the split bar fits a 380px window', (tester) async {
+      await open(tester, messages: twoGames());
+      setWindow(tester, const Size(380, 800));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('game-bar-g2')), findsOneWidget);
+    });
+
+    chatTestWidgets('when the quick game ends, Landlord gets the full bar back', (tester) async {
+      final cells = [0, 3, 1, 4, 2];
       await open(tester, messages: [
-        plain('g1', 1, alice.userId, GameBody(GameType.tictactoe, alice.userId)),
-        plain('g2', 2, bob.userId, GameBody(GameType.landlord, bob.userId, seed: 1)),
+        ...twoGames(),
+        for (var i = 0; i < cells.length; i++)
+          plain('m$i', 3 + i, i.isEven ? alice.userId : bob.userId,
+              MoveBody('g1', GameType.tictactoe, i, {'type': 'play', 'cell': cells[i]})),
       ]);
-      final bars = find.byKey(const Key('game-bar'));
-      expect(bars, findsNWidgets(2));
-      expect(find.descendant(of: bars.first, matching: find.textContaining('Landlord with Bob')), findsOneWidget);
-      expect(find.descendant(of: bars.last, matching: find.textContaining('Tic-tac-toe with Bob')), findsOneWidget);
+      expect(find.byKey(const Key('game-bar')), findsOneWidget);
+      expect(find.textContaining('Landlord with Bob', findRichText: true), findsOneWidget);
+      expect(find.byKey(const Key('game-bar-g1')), findsNothing);
+      expect(find.byType(VerticalDivider), findsNothing);
     });
 
     chatTestWidgets('on a phone, + opens a sheet with the library, the camera and Game', (tester) async {
