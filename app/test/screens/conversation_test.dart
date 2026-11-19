@@ -465,6 +465,20 @@ void main() {
       expect(find.byKey(const Key('game-bar-g2')), findsOneWidget);
     });
 
+    chatTestWidgets('when the quick game ends, Landlord gets the full bar back', (tester) async {
+      final cells = [0, 3, 1, 4, 2];
+      await open(tester, messages: [
+        ...twoGames(),
+        for (var i = 0; i < cells.length; i++)
+          plain('m$i', 3 + i, i.isEven ? alice.userId : bob.userId,
+              MoveBody('g1', GameType.tictactoe, i, {'type': 'play', 'cell': cells[i]})),
+      ]);
+      expect(find.byKey(const Key('game-bar')), findsOneWidget);
+      expect(find.textContaining('Landlord with Bob', findRichText: true), findsOneWidget);
+      expect(find.byKey(const Key('game-bar-g1')), findsNothing);
+      expect(find.byType(VerticalDivider), findsNothing);
+    });
+
     chatTestWidgets('on a phone, + opens a sheet with the library, the camera and Game', (tester) async {
       await open(tester);
       await tester.tap(find.byTooltip('Attach'));
