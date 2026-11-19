@@ -10,6 +10,7 @@ import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../chess_board.dart';
 import '../game_state.dart';
+import '../go_fish.dart';
 import '../landlord/landlord.dart';
 import '../providers.dart';
 import '../rules.dart';
@@ -474,9 +475,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           ),
         ),
         // The board takes the panel's width, or less when the window is short.
-        // Landlord's ring stretches to any shape, so it fills the panel instead.
+        // Landlord's ring and the Go Fish table stretch to any shape, so they
+        // fill the panel instead.
         _boardSlot(
-          fill: g.board is LandlordBoard,
+          fill: g.board is LandlordBoard || g.board is GoFishBoard,
           phone: MediaQuery.sizeOf(context).width < 600,
           child: BoardView(
             board: g.board,

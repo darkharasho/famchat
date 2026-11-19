@@ -116,7 +116,7 @@ void main() {
       for (final c in [...board.hand(mom), _c(3, 0), _c(4, 0)]) {
         expect(find.byKey(Key('card-$c')), findsNothing);
       }
-      expect(find.text('2 in the stock'), findsOneWidget);
+      expect(find.text('2 in the pond'), findsOneWidget);
       expect(find.text('3 cards'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
@@ -153,6 +153,89 @@ void main() {
       expect(find.text('You asked for 9s — Go fish. You drew a 3'), findsOneWidget);
       await tester.pumpWidget(view(asked, mySide: mom, names: ('Dad', 'You')));
       expect(find.text('Dad asked for 9s — Go fish'), findsOneWidget);
+    });
+
+    testWidgets('an ask plays out: bubble, Go fish, then the card lands', (tester) async {
+      final asked = board.play({'rank': 9})! as GoFishBoard;
+      final drawn = asked.events.last.drawn!;
+      await tester.pumpWidget(view(board, names: names));
+      await tester.pumpWidget(view(asked, names: names));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Got any 9s?'), findsOneWidget);
+      expect(find.byKey(Key('card-$drawn')), findsNothing, reason: 'not drawn yet');
+      expect(find.text('2 in the pond'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('rank-2')));
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(find.text('Go fish!'), findsNWidgets(2), reason: 'the reply and the splash');
+      await tester.pumpAndSettle();
+      expect(find.text('Got any 9s?'), findsNothing);
+      expect(find.text('Go fish!'), findsNothing);
+      expect(find.byKey(Key('card-$drawn')), findsOneWidget);
+      expect(find.text('1 in the pond'), findsOneWidget);
+      expect(played, isEmpty, reason: 'ranks are off while an ask plays out');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets("the opponent's ask: they ask, I hand cards over", (tester) async {
+      final mine = GoFishBoard.custom(
+        firstHand: [_c(2, 0), _c(9, 3)],
+        secondHand: [_c(9, 1), _c(4, 0)],
+        stock: [_c(3, 0)],
+        turn: mom,
+      );
+      final taken = mine.play({'rank': 9})! as GoFishBoard;
+      await tester.pumpWidget(view(mine, names: names));
+      await tester.pumpWidget(view(taken, names: names));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Got any 9s?'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1000));
+      expect(find.text('Here you go'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('card-${_c(9, 3)}')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a book pops in with a splash', (tester) async {
+      final near = GoFishBoard.custom(
+        firstHand: [_c(5, 0), _c(5, 1), _c(5, 2), _c(2, 0)],
+        secondHand: [_c(5, 3), _c(4, 0)],
+        stock: [_c(3, 0)],
+      );
+      final booked = near.play({'rank': 5})! as GoFishBoard;
+      await tester.pumpWidget(view(near, names: names));
+      await tester.pumpWidget(view(booked, names: names));
+      await tester.pump(const Duration(milliseconds: 2400));
+      expect(find.text('Book of 5s!'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('book-5')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the move strip shows the last two; tap it for every move', (tester) async {
+      var b = board;
+      for (final r in [9, 2]) {
+        b = b.play({'rank': r})! as GoFishBoard;
+        if (b.toMove == mom) b = b.play({'rank': GoFishBoard.rankOf(b.hand(mom).first)})! as GoFishBoard;
+      }
+      await tester.pumpWidget(view(b, names: names));
+      final lines = [for (final e in b.events) goFishLog(e, you, names)];
+      expect(find.text(lines.last), findsOneWidget);
+      expect(find.text(lines.first), lines.length > 2 ? findsNothing : findsOneWidget);
+      await tester.tap(find.byKey(const Key('gofish-log')));
+      await tester.pumpAndSettle();
+      expect(find.text('Moves'), findsOneWidget);
+      for (final l in lines) {
+        expect(find.descendant(of: find.byKey(const Key('gofish-log-list')), matching: find.text(l)), findsOneWidget);
+      }
+    });
+
+    test('new events: a few asks on from the same game', () {
+      final one = board.play({'rank': 9})! as GoFishBoard;
+      expect(goFishNewEvents(board, one), one.events);
+      expect(goFishNewEvents(one, one), isEmpty);
+      final two = one.play({'rank': GoFishBoard.rankOf(one.hand(one.toMove).first)})! as GoFishBoard;
+      expect(goFishNewEvents(one, two), [two.events.last]);
+      expect(goFishNewEvents(two, board), isEmpty, reason: 'a new deal');
     });
 
     test('score and aspect', () {
