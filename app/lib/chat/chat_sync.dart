@@ -783,12 +783,17 @@ class ChatSync {
       _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
 
   /// Starts [game] in [chatId]; the returned id (the message's) is the game's id. [first] moves first.
-  /// A [GameType.seeded] game gets [seed], or a fresh [newSeed].
-  Future<String> startGame(String chatId, GameType game, {required String first, int? seed}) =>
-      _enqueueMessage(
-        chatId,
-        GameBody(game, first, seed: game.seeded ? seed ?? newSeed() : null),
-      );
+  /// A [GameType.seeded] game gets [seed], or a fresh [newSeed]. [optionalJumps] is checkers' house rule.
+  Future<String> startGame(
+    String chatId,
+    GameType game, {
+    required String first,
+    int? seed,
+    bool optionalJumps = false,
+  }) => _enqueueMessage(
+    chatId,
+    GameBody(game, first, seed: game.seeded ? seed ?? newSeed() : null, optionalJumps: optionalJumps),
+  );
 
   /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].
   Future<String> sendMove(String chatId, String gameId, GameType game, int ply, Map<String, Object?> action) =>

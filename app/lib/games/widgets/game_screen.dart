@@ -8,6 +8,7 @@ import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
+import '../checkers.dart';
 import '../chess_board.dart';
 import '../game_state.dart';
 import '../go_fish.dart';
@@ -39,7 +40,8 @@ class GameViewer {
     return name.isEmpty ? '' : name.characters.first.toUpperCase();
   }
 
-  /// `Your turn`, `Mom's turn`, `You won`, `Mom won`, `Draw`,
+  /// `Your turn` (in checkers with a capture due, `Your turn: you have to
+  /// jump`), `Mom's turn`, `You won`, `Mom won`, `Draw`,
   /// `Game not started`, or `Game paused` for an unfinished game in a
   /// read-only chat.
   String status(GameState g) {
@@ -52,7 +54,11 @@ class GameViewer {
     }
     if (readOnly) return 'Game paused';
     final next = g.toMoveUserId!;
-    return next == me ? 'Your turn' : "${nameOf(next)}'s turn";
+    if (next != me) return "${nameOf(next)}'s turn";
+    final b = g.board;
+    return b is CheckersBoard && b.mustJump
+        ? 'Your turn: you have to jump'
+        : 'Your turn';
   }
 }
 
@@ -191,7 +197,20 @@ Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
   if (sync == null) return null;
   final active = activeGame(ref.read(gamesProvider(chatId)), long: g.type.long);
   if (active != null) return active.id;
-  return sync.startGame(chatId, g.type, first: g.secondUserId);
+  final b = g.board;
+  return sync.startGame(
+    chatId,
+    g.type,
+    first: g.secondUserId,
+    optionalJumps: b is CheckersBoard && b.optionalJumps,
+  );
+}
+
+/// The panel's subtitle: who it's with, and a house rule in play.
+String? _subtitle(String? who, Board b) {
+  final rule = b is CheckersBoard && b.optionalJumps ? 'jumps optional' : null;
+  if (rule == null) return who;
+  return who == null ? 'Jumps optional' : '$who · $rule';
 }
 
 const _reasons = {
@@ -405,7 +424,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
     return _Panel(
       title: g.type.title,
-      subtitle: mySide == null ? null : 'with ${viewer.nameOf(opponent)}',
+      subtitle: _subtitle(
+        mySide == null ? null : 'with ${viewer.nameOf(opponent)}',
+        g.board,
+      ),
       actions: [
         if (live)
           PopupMenuButton<String>(

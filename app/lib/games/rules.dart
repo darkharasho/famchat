@@ -82,13 +82,14 @@ abstract class Board {
 
 /// The starting position of [t]. [seed] is the `game` message's seed, used
 /// by [GameType.seeded] games (a missing one deals from 0; such games are
-/// inert anyway).
-Board initialBoard(GameType t, [int? seed]) {
+/// inert anyway). [optionalJumps] is checkers' house rule (ignored by other
+/// games).
+Board initialBoard(GameType t, [int? seed, bool optionalJumps = false]) {
   switch (t) {
     case GameType.tictactoe:
       return TicTacToeBoard.initial();
     case GameType.checkers:
-      return CheckersBoard.initial();
+      return CheckersBoard.initial(optionalJumps: optionalJumps);
     case GameType.chess:
       return ChessBoard.initial();
     case GameType.fourinarow:

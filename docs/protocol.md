@@ -133,6 +133,11 @@ non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `
 Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
+Checkers captures are mandatory. A `checkers` game may carry `"jumps":"optional"` (a house rule picked when starting
+it, kept by a rematch): then a player may make a plain step even when a capture is available. A jump sequence, once
+begun, still continues while it can. Other games, and other values, ignore the field. Versions before the field
+existed treat such a game as mandatory-capture and refuse its steps, so both players need a version that knows it.
+
 Games with luck (`gofish`, `landlord`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
 generator when starting a game or a rematch. A `gofish` or `landlord` game without a valid seed (missing, out of range, not an
 integer) is inert like a game started while another was running. Other games never send a seed and ignore one.
