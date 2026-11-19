@@ -10,6 +10,7 @@ import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/envelope.dart';
+import 'package:famchat/games/rules.dart';
 import 'package:famchat/push/preview.dart';
 import 'package:famchat/push/preview_keyring.dart';
 import 'package:flutter/foundation.dart';
@@ -168,6 +169,23 @@ Future<String> buildFixture() async {
     await add('env-not-json', text('hi'), rawEnv: 'not json');
     await add('no-preview-flag', text('hi'), flag: false);
     await add('data-epoch-ignored', text('the text'), dataEpoch: '9');
+    List<int> raw(Map<String, Object?> j) => utf8.encode(jsonEncode(j));
+    await add('game-start', GameBody(GameType.landlord, 'bob', seed: 1).encode());
+    await add('game-start-group', const GameBody(GameType.tictactoe, 'bob').encode(), chat: 'G1');
+    await add('game-unknown-type', raw({'kind': 'game', 'game': 'mahjong', 'first': 'bob'}));
+    await add('game-bad-first', raw({'kind': 'game', 'game': 'chess', 'first': ''}));
+    MoveBody move(String type) => MoveBody('G0', GameType.chess, 3, {'type': type});
+    for (final t in ['play', 'resign', 'draw_offer', 'draw_accept', 'draw_decline', 'poke', 'undo']) {
+      await add('move-$t', move(t).encode());
+    }
+    await add('move-dots', MoveBody('G0', GameType.dotsandboxes, 0, {'type': 'poke'}).encode());
+    await add('move-unknown-type', raw({'kind': 'move', 'target': 'G0', 'game': 'mahjong', 'ply': 1, 'action': {'type': 'play'}}));
+    await add('move-ply-float', raw({'kind': 'move', 'target': 'G0', 'game': 'chess', 'ply': 1.5, 'action': {'type': 'play'}}));
+    await add('move-ply-integral-float', raw({'kind': 'move', 'target': 'G0', 'game': 'chess', 'ply': 2.0, 'action': {'type': 'resign'}}));
+    await add('move-ply-negative', raw({'kind': 'move', 'target': 'G0', 'game': 'chess', 'ply': -1, 'action': {'type': 'play'}}));
+    await add('move-ply-bool', raw({'kind': 'move', 'target': 'G0', 'game': 'chess', 'ply': true, 'action': {'type': 'play'}}));
+    await add('move-no-target', raw({'kind': 'move', 'target': '', 'game': 'chess', 'ply': 1, 'action': {'type': 'play'}}));
+    await add('move-action-no-type', raw({'kind': 'move', 'target': 'G0', 'game': 'chess', 'ply': 1, 'action': {'x': 1}}));
 
     return '${const JsonEncoder.withIndent('  ').convert({'keyring': keyring, 'cases': cases})}\n';
   } finally {
@@ -219,9 +237,21 @@ void main() {
     expect(cases['video'], '🎥 Video');
     expect(cases['gif'], 'GIF');
     expect(cases['data-epoch-ignored'], 'the text');
+    expect(cases['game-start'], '🎲 Started a game of Landlord');
+    expect(cases['game-start-group'], 'Bob: 🎲 Started a game of Tic-tac-toe');
+    expect(cases['move-play'], '♟ Moved in Chess');
+    expect(cases['move-resign'], '🏳 Resigned at Chess');
+    expect(cases['move-draw_offer'], '🤝 Offered a draw in Chess');
+    expect(cases['move-draw_accept'], '🤝 Draw in Chess');
+    expect(cases['move-draw_decline'], 'Declined a draw in Chess');
+    expect(cases['move-poke'], '👉 Poked you · your turn in Chess');
+    expect(cases['move-dots'], '👉 Poked you · your turn in Dots and Boxes');
+    expect(cases['move-ply-integral-float'], '🏳 Resigned at Chess');
     for (final n in [
       'reaction', 'untrusted-device', 'revoked-device', 'wrong-user', 'missing-epoch', 'bad-signature',
       'tampered-ct-resigned', 'v-bool', 'epoch-float', 'padded-b64', 'env-not-json', 'no-preview-flag',
+      'game-unknown-type', 'game-bad-first', 'move-undo', 'move-unknown-type', 'move-ply-float',
+      'move-ply-negative', 'move-ply-bool', 'move-no-target', 'move-action-no-type',
     ]) {
       expect(cases[n], isNull, reason: n);
     }

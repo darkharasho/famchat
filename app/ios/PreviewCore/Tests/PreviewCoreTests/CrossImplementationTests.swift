@@ -22,7 +22,7 @@ struct Fixture: Decodable {
 final class CrossImplementationTests: XCTestCase {
     func testEveryFixtureCase() throws {
         let fixture = try Fixture.load()
-        XCTAssertGreaterThanOrEqual(fixture.cases.count, 22)
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 41)
         let keyring = try XCTUnwrap(Keyring.parse(Data(fixture.keyring.utf8)))
         for c in fixture.cases {
             let got = Preview.notificationBody(userInfo: c.userInfo, keyring: keyring)
