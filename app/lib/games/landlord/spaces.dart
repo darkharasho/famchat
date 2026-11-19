@@ -111,7 +111,7 @@ final List<LandlordSpace> landlordSpaces = List.unmodifiable([
   _p(29, 'Quarry Hill', _ye, 280, 150, const [24, 120, 360, 850, 1025, 1200]),
   const LandlordSpace(30, 'Go to Jail', SpaceKind.goToJail),
   _p(31, 'Rowan Park', _gr, 300, 200, const [26, 130, 390, 900, 1100, 1275]),
-  _p(32, 'Sycamore Drive', _gr, 300, 200, const [26, 130, 390, 900, 1100, 1275]),
+  _p(32, 'Spruce Drive', _gr, 300, 200, const [26, 130, 390, 900, 1100, 1275]),
   _fund(33),
   _p(34, 'Thistle Way', _gr, 320, 200, const [28, 150, 450, 1000, 1200, 1400]),
   _st(35, 'East Station'),

@@ -81,26 +81,29 @@ Color landlordTokenColor(BuildContext context, Side s) => DotsAndBoxesView.sideC
 /// The board's ring of spaces in pixels. Start is bottom right; play runs
 /// clockwise (left along the bottom).
 ///
-/// On a wide screen it's square: 13 units across, corners 2×2, edges 1×2.
-/// On a tall phone it stretches to fill the height: deeper top and bottom
-/// rows (their names turned to run along them) and wider, taller sides.
+/// Square when the space is about square: 13 units each way, corners 2×2,
+/// edges 1×2. Otherwise it stretches (up to 1.75:1) to fill the space: on a
+/// tall phone the top and bottom rows get deeper (their names turned to run
+/// along them) and the sides wider and taller; on a wide screen the top and
+/// bottom spaces get wider and the sides wider.
 class _Ring {
-  const _Ring._(this.width, this.height, this.unit, this.side, this.depth, this.tall);
+  const _Ring._(this.width, this.height, this.side, this.depth, this.tall);
 
   factory _Ring(Size box) {
     final w = box.width, h = box.height;
     if (h > w * 1.15) {
-      final unit = w / 14;
-      return _Ring._(w, min(h, w * 1.75), unit, unit * 2.5, unit * 2.8, true);
+      final u = w / 14;
+      return _Ring._(w, min(h, w * 1.75), u * 2.5, u * 2.8, true);
     }
-    final unit = box.shortestSide / 13;
-    return _Ring._(box.shortestSide, box.shortestSide, unit, unit * 2, unit * 2, false);
+    if (w > h * 1.15) {
+      final u = h / 13;
+      return _Ring._(min(w, h * 1.75), h, u * 2.5, u * 2, false);
+    }
+    final u = box.shortestSide / 13;
+    return _Ring._(box.shortestSide, box.shortestSide, u * 2, u * 2, false);
   }
 
   final double width, height;
-
-  /// A top or bottom space's width; icons and labels scale with it.
-  final double unit;
 
   /// The width of the left and right columns (and the corners).
   final double side;
@@ -111,8 +114,14 @@ class _Ring {
   /// Stretched for a tall screen.
   final bool tall;
 
+  /// A top or bottom space's width.
+  double get unit => (width - 2 * side) / 9;
+
   /// A left or right space's height.
   double get step => (height - 2 * depth) / 9;
+
+  /// The size icons, labels and tokens scale with: a space's short side.
+  double get scale => min(unit, step);
 
   Rect get centre => Rect.fromLTWH(side, depth, width - 2 * side, height - 2 * depth);
 
@@ -282,7 +291,7 @@ class _LandlordViewState extends State<LandlordView> {
     return LayoutBuilder(
       builder: (context, box) {
         final ring = _Ring(box.biggest);
-        final u = ring.unit;
+        final u = ring.scale;
         final paper = _paperTheme(theme);
         return Center(
           child: SizedBox(
@@ -605,6 +614,8 @@ class _SpaceTile extends StatelessWidget {
     final band = s.group != null && s.group!.buildable ? s.group!.color : null;
     final dir = _inward(index);
     final vertical = dir == AxisDirection.up || dir == AxisDirection.down;
+    // A tall phone's top and bottom names (and icons) run up the space.
+    final turn = turned && vertical && index % 10 != 0;
     final label = switch (s.kind) {
       SpaceKind.card => s.deck == LandlordDeck.luck ? 'Luck' : 'Fund',
       SpaceKind.tax => 'Tax',
@@ -651,17 +662,17 @@ class _SpaceTile extends StatelessWidget {
               fit: BoxFit.scaleDown,
               // Corners and top/bottom spaces: icon over the name; side
               // spaces (wide and short): icon before it.
-              child: Flex(
-                direction: index % 10 == 0 || vertical ? Axis.vertical : Axis.horizontal,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: unit * (index % 10 == 0 ? 0.7 : 0.5), color: theme.colorScheme.onSurfaceVariant),
-                    if (!(index % 10 == 0 || vertical)) SizedBox(width: unit * 0.08),
-                  ],
-                  RotatedBox(
-                    quarterTurns: turned && vertical && index % 10 != 0 ? 3 : 0,
-                    child: Text(
+              child: RotatedBox(
+                quarterTurns: turn ? 3 : 0,
+                child: Flex(
+                  direction: index % 10 == 0 || (vertical && !turn) ? Axis.vertical : Axis.horizontal,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: unit * (index % 10 == 0 ? 0.7 : 0.5), color: theme.colorScheme.onSurfaceVariant),
+                      if (!(index % 10 == 0 || (vertical && !turn))) SizedBox(width: unit * 0.08),
+                    ],
+                    Text(
                       label,
                       textAlign: TextAlign.center,
                       style: theme.textTheme.labelSmall?.copyWith(
@@ -670,8 +681,8 @@ class _SpaceTile extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
