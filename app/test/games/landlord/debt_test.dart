@@ -37,6 +37,8 @@ void main() {
     expect(b.debts.single.amount, 200);
     expect(b.debts.single.creditor, second);
     expect(b.events.last.kind, LandlordEventKind.owes);
+    expect(b.events.last.space, 39);
+    expect(b.events.where((e) => e.kind == LandlordEventKind.rent), isEmpty, reason: 'not paid yet');
     for (final a in ['roll', 'end_turn', 'buy']) {
       expect(legal(b, a), isFalse, reason: a);
     }
@@ -58,6 +60,8 @@ void main() {
     final b = birthday(cash: (1500, 5), owners: {6: second});
     expect(b.phase, LandlordPhase.debt);
     expect(b.toMove, second);
+    expect(b.events.where((e) => e.kind == LandlordEventKind.collected), isEmpty, reason: 'not paid yet');
+    expect((b.events.last.kind, b.events.last.actor, b.events.last.other), (LandlordEventKind.owes, second, first));
     final p = act(b, 'mortgage', {'space': 6});
     expect((p.cash(first), p.cash(second)), (1510, 45));
     expect(p.toMove, first);

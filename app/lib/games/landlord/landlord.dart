@@ -51,11 +51,25 @@ class LandlordOffer {
 /// [debtor] owes [amount] to [creditor] (null: the bank).
 @immutable
 class LandlordDebt {
-  const LandlordDebt(this.debtor, this.creditor, this.amount, {this.announced = false});
+  const LandlordDebt(
+    this.debtor,
+    this.creditor,
+    this.amount, {
+    this.space,
+    this.event,
+    this.announced = false,
+  });
 
   final Side debtor;
   final Side? creditor;
   final int amount;
+
+  /// The space it's for (rent, tax, interest), if any.
+  final int? space;
+
+  /// Logged if it is paid at once (rent, tax, a card…); a debt that waits is
+  /// logged as `owes`, then `debtPaid`.
+  final LandlordEvent? event;
 
   /// Whether it couldn't be paid at once (an `owes` event was logged).
   final bool announced;
@@ -417,8 +431,16 @@ class _State {
         if (au == null || debts.isNotEmpty || amount == null) return false;
         final who = au.toBid;
         if (amount <= au.high || amount > cash[_i(who)]) return false;
-        auction = LandlordAuction(au.space, amount, who, who.other, au.noBidPass);
         log(LandlordEvent(who, LandlordEventKind.bid, space: au.space, amount: amount));
+        if (au.noBidPass) {
+          // The other player dropped out: the first bid wins.
+          auction = null;
+          cash[_i(who)] -= amount;
+          owner[au.space] = who;
+          log(LandlordEvent(who, LandlordEventKind.auctionWon, space: au.space, amount: amount));
+        } else {
+          auction = LandlordAuction(au.space, amount, who, who.other, false);
+        }
       case 'pass':
         final au = auction;
         if (au == null || debts.isNotEmpty) return false;
@@ -764,8 +786,13 @@ class _State {
       case LandlordCard.luckPayOther50:
         _charge(s, s.other, 50, LandlordEventKind.paid);
       case LandlordCard.fundFromOther:
-        log(LandlordEvent(s, LandlordEventKind.collected, amount: 10, other: s.other));
-        _charge(s.other, s, 10, null);
+        _charge(
+          s.other,
+          s,
+          10,
+          null,
+          event: LandlordEvent(s, LandlordEventKind.collected, amount: 10, other: s.other),
+        );
       case LandlordCard.luckCollect50 || LandlordCard.fundCollect50:
         collect(50);
       case LandlordCard.luckCollect150:
@@ -810,11 +837,26 @@ class _State {
   }
 
   /// [from] pays [amount] to [to] (null: the bank) now, or owes it.
-  /// [kind] null logs nothing (the caller already did).
-  void _charge(Side from, Side? to, int amount, LandlordEventKind? kind, {int? space}) {
+  /// [from] owes [amount] to [to] (null: the bank). [settle] pays it at once
+  /// if it can, logging [event] (default: [kind] by [from]).
+  void _charge(
+    Side from,
+    Side? to,
+    int amount,
+    LandlordEventKind? kind, {
+    int? space,
+    LandlordEvent? event,
+  }) {
     if (amount <= 0) return;
-    debts.add(LandlordDebt(from, to, amount));
-    if (kind != null) log(LandlordEvent(from, kind, amount: amount, space: space, other: to));
+    debts.add(
+      LandlordDebt(
+        from,
+        to,
+        amount,
+        space: space,
+        event: event ?? LandlordEvent(from, kind!, amount: amount, space: space, other: to),
+      ),
+    );
   }
 
   void _bankrupt(Side s) {
@@ -832,8 +874,23 @@ class _State {
           if (liquidation(d.debtor) < d.amount) {
             _bankrupt(d.debtor);
           } else if (!d.announced) {
-            debts[0] = LandlordDebt(d.debtor, d.creditor, d.amount, announced: true);
-            log(LandlordEvent(d.debtor, LandlordEventKind.owes, amount: d.amount, other: d.creditor));
+            debts[0] = LandlordDebt(
+              d.debtor,
+              d.creditor,
+              d.amount,
+              space: d.space,
+              event: d.event,
+              announced: true,
+            );
+            log(
+              LandlordEvent(
+                d.debtor,
+                LandlordEventKind.owes,
+                amount: d.amount,
+                space: d.space,
+                other: d.creditor,
+              ),
+            );
           }
           return;
         }
@@ -843,6 +900,8 @@ class _State {
         if (c != null) cash[_i(c)] += d.amount;
         if (d.announced) {
           log(LandlordEvent(d.debtor, LandlordEventKind.debtPaid, amount: d.amount, other: c));
+        } else if (d.event case final e?) {
+          log(e);
         }
         continue;
       }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../landlord/landlord.dart';
@@ -71,7 +73,7 @@ String landlordStatus(LandlordBoard b, Side viewer, (String, String) names) {
           : 'high bid ${money(a.high)} (${a.highBidder == viewer ? 'you' : _name(names, a.highBidder!)})';
       return '${landlordSpaces[a.space].name}: $high · ${me ? 'your bid' : '$n is bidding'}';
     case LandlordPhase.trade:
-      return me ? '$n offers a trade' : '$n is considering your offer';
+      return me ? '${_name(names, who.other)} offers a trade' : '$n is considering your offer';
     case LandlordPhase.buy:
       return me ? 'Buy ${landlordSpaces[b.position(who)].name}?' : '$n is deciding';
     case LandlordPhase.roll || LandlordPhase.end:
@@ -82,7 +84,7 @@ String landlordStatus(LandlordBoard b, Side viewer, (String, String) names) {
 /// Landlord: a square ring of 40 spaces with the dice, both balances, what's
 /// happening and my actions in the middle. Tap a space for its card; Log,
 /// Properties and Trade open sheets. Upcoming cards are never shown.
-class LandlordView extends StatelessWidget {
+class LandlordView extends StatefulWidget {
   const LandlordView({
     super.key,
     required this.board,
@@ -108,11 +110,41 @@ class LandlordView extends StatelessWidget {
 
   bool _legal(Map<String, Object?> m) => _canAct && board.play(m) != null;
 
+  /// How long action buttons ignore taps after the board changes, so a
+  /// double tap can't also hit the button that appears under the finger.
+  static const settleTime = Duration(milliseconds: 600);
+
+  @override
+  State<LandlordView> createState() => _LandlordViewState();
+}
+
+class _LandlordViewState extends State<LandlordView> {
+  Timer? _settle;
+
+  @override
+  void didUpdateWidget(LandlordView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.board, widget.board)) {
+      _settle?.cancel();
+      _settle = Timer(LandlordView.settleTime, () {
+        if (mounted) setState(() => _settle = null);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _settle?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final w = widget;
+    final board = w.board, mySide = w.mySide, thumbnail = w.thumbnail;
     final theme = Theme.of(context);
     final me = mySide ?? Side.first;
-    final names = _names;
+    final names = w._names;
     final balances = Text(
       '${_name(names, me)} ${money(board.cash(me))} · ${_name(names, me.other)} ${money(board.cash(me.other))}',
       style: theme.textTheme.titleSmall,
@@ -153,7 +185,7 @@ class LandlordView extends StatelessWidget {
                       key: ValueKey('space-$i'),
                       board: board,
                       index: i,
-                      onTap: () => showSpaceSheet(context, board, i, me, names, _legal, onPlay),
+                      onTap: () => showSpaceSheet(context, board, i, me, names, w._legal, w.onPlay),
                     ),
                   ),
                 Positioned.fromRect(
@@ -164,7 +196,7 @@ class LandlordView extends StatelessWidget {
                       fit: BoxFit.scaleDown,
                       child: SizedBox(
                         width: 320,
-                        child: _Centre(view: this, balances: balances),
+                        child: _Centre(view: w, armed: _settle == null, balances: balances),
                       ),
                     ),
                   ),
@@ -179,9 +211,12 @@ class LandlordView extends StatelessWidget {
 }
 
 class _Centre extends StatelessWidget {
-  const _Centre({required this.view, required this.balances});
+  const _Centre({required this.view, required this.armed, required this.balances});
 
   final LandlordView view;
+
+  /// False just after the board changed: action taps are ignored.
+  final bool armed;
   final Widget balances;
 
   @override
@@ -228,6 +263,12 @@ class _Centre extends StatelessWidget {
           Text('While you were away', style: theme.textTheme.labelMedium),
           for (final e in shown)
             Text(landlordLog(e, names), style: small, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+          if (away.length > shown.length)
+            TextButton(
+              key: const Key('away-more'),
+              onPressed: () => _showLog(context),
+              child: Text('+${away.length - shown.length} more'),
+            ),
         ],
         const SizedBox(height: 8),
         Wrap(
@@ -267,7 +308,9 @@ class _Centre extends StatelessWidget {
     void add(String key, String label, Map<String, Object?> move, {bool primary = true}) {
       if (!view._legal(move)) return;
       final child = Text(label);
-      void tap() => view.onPlay(move);
+      void tap() {
+        if (armed) view.onPlay(move);
+      }
       out.add(
         primary
             ? FilledButton(key: Key('act-$key'), onPressed: tap, child: child)
@@ -289,6 +332,15 @@ class _Centre extends StatelessWidget {
         for (final step in [1, 10, 50]) {
           add('bid-$step', '+${money(step)}', {'a': 'bid', 'amount': high + step});
         }
+        if (view._legal({'a': 'bid', 'amount': high + 1})) {
+          out.add(
+            OutlinedButton(
+              key: const Key('act-bid-custom'),
+              onPressed: () => _bidDialog(context, high),
+              child: const Text('Bid…'),
+            ),
+          );
+        }
         add('pass', 'Pass', {'a': 'pass'}, primary: false);
       case LandlordPhase.trade:
         add('accept', 'Accept', {'a': 'accept'});
@@ -296,6 +348,20 @@ class _Centre extends StatelessWidget {
       case LandlordPhase.end:
         add('end_turn', 'End turn', {'a': 'end_turn'});
       case LandlordPhase.debt:
+        out.add(
+          FilledButton(
+            key: const Key('act-raise'),
+            onPressed: () => showPropertiesSheet(
+              context,
+              b,
+              view.mySide ?? Side.first,
+              view._names,
+              view._legal,
+              view.onPlay,
+            ),
+            child: const Text('Raise cash'),
+          ),
+        );
         out.add(
           OutlinedButton(
             key: const Key('act-bankrupt'),
@@ -305,6 +371,17 @@ class _Centre extends StatelessWidget {
         );
     }
     return out;
+  }
+
+  Future<void> _bidDialog(BuildContext context, int high) async {
+    final amount = await showDialog<int>(
+      context: context,
+      builder: (context) => _BidDialog(
+        high: high,
+        legal: (n) => view._legal({'a': 'bid', 'amount': n}),
+      ),
+    );
+    if (amount != null) view.onPlay({'a': 'bid', 'amount': amount});
   }
 
   Future<void> _confirmBankrupt(BuildContext context) async {
@@ -529,6 +606,48 @@ class _Buildings extends StatelessWidget {
               );
         return Center(child: FittedBox(fit: BoxFit.scaleDown, child: piece));
       },
+    );
+  }
+}
+
+/// Asks for a bid of any amount above [high] that [legal] accepts.
+class _BidDialog extends StatefulWidget {
+  const _BidDialog({required this.high, required this.legal});
+
+  final int high;
+  final bool Function(int amount) legal;
+
+  @override
+  State<_BidDialog> createState() => _BidDialogState();
+}
+
+class _BidDialogState extends State<_BidDialog> {
+  int? _amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = _amount;
+    final ok = n != null && widget.legal(n);
+    return AlertDialog(
+      title: const Text('Your bid'),
+      content: TextField(
+        key: const Key('bid-amount'),
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(prefixText: '\$', helperText: 'More than ${money(widget.high)}'),
+        onChanged: (v) => setState(() => _amount = int.tryParse(v.trim())),
+        onSubmitted: (_) {
+          if (ok) Navigator.pop(context, n);
+        },
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('bid-confirm'),
+          onPressed: ok ? () => Navigator.pop(context, n) : null,
+          child: const Text('Bid'),
+        ),
+      ],
     );
   }
 }

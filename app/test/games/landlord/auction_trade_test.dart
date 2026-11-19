@@ -46,13 +46,13 @@ void main() {
     expect((b.events.last.actor, b.events.last.amount, b.events.last.space), (first, 10, 6));
   });
 
-  test('first passes with no bid, second bids, first passes: second wins', () {
+  test('first passes with no bid (drops out), second bids: second wins at once', () {
     var b = act(declined(), 'pass');
     expect(b.toMove, second);
     b = act(b, 'bid', {'amount': 40});
-    expect(b.toMove, first);
-    b = act(b, 'pass');
+    expect(b.auction, isNull);
     expect((b.owner(6), b.cash(second)), (second, 1460));
+    expect(b.events.last.kind, LandlordEventKind.auctionWon);
     expect(b.toMove, first);
     expect(b.phase, LandlordPhase.end);
   });

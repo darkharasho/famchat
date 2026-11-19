@@ -105,6 +105,7 @@ void main() {
     testWidgets('a trade offer to me: accept or reject', (tester) async {
       final b = act(LandlordBoard.custom(owners: {1: first, 6: second}), 'offer', {'give': {'spaces': [1]}, 'get': {'spaces': [6]}});
       await tester.pumpWidget(view(b, mySide: second));
+      expect(find.text('Mom offers a trade'), findsOneWidget);
       expect(find.textContaining('Acorn Lane'), findsWidgets);
       await tester.tap(find.byKey(const Key('act-accept')));
       expect(played, [{'a': 'accept'}]);
@@ -126,6 +127,46 @@ void main() {
       await tester.pumpWidget(view(debt));
       expect(find.textContaining('You owe Mom \$200'), findsWidgets);
       expect(find.byKey(const Key('act-bankrupt')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('act-raise')));
+      await tester.pumpAndSettle();
+      expect(find.text('Acorn Lane'), findsOneWidget, reason: 'the properties sheet');
+    });
+
+    testWidgets('any bid amount can be typed', (tester) async {
+      final b = act(LandlordBoard.custom(rng: rollsSeed([(2, 4)])), 'roll');
+      await tester.pumpWidget(view(act(b, 'decline')));
+      await tester.tap(find.byKey(const Key('act-bid-custom')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('bid-amount')), '300');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('bid-confirm')));
+      await tester.pumpAndSettle();
+      expect(played, [{'a': 'bid', 'amount': 300}]);
+    });
+
+    testWidgets('a tap right after the board changes is ignored', (tester) async {
+      final rolled = act(LandlordBoard.custom(rng: rollsSeed([(2, 4)])), 'roll');
+      await tester.pumpWidget(view(LandlordBoard.custom(rng: rollsSeed([(2, 4)]))));
+      await tester.pumpWidget(view(act(rolled, 'buy')));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byKey(const Key('act-end_turn')), warnIfMissed: false);
+      expect(played, isEmpty);
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.tap(find.byKey(const Key('act-end_turn')));
+      expect(played, [{'a': 'end_turn'}]);
+    });
+
+    testWidgets('while you were away: the last 3 and a link to the rest', (tester) async {
+      var b = LandlordBoard.custom(owners: {1: first, 3: first, 6: first, 8: first, 9: first});
+      for (final s in [1, 3, 6, 8, 9]) {
+        b = act(b, 'mortgage', {'space': s});
+      }
+      await tester.pumpWidget(view(b, mySide: second));
+      expect(find.text('While you were away'), findsOneWidget);
+      expect(find.textContaining('Mom mortgaged'), findsNWidgets(3));
+      await tester.tap(find.byKey(const Key('away-more')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Mom mortgaged Acorn Lane'), findsOneWidget);
     });
 
     testWidgets('a space sheet offers only legal actions', (tester) async {
@@ -147,6 +188,11 @@ void main() {
       await tester.tap(find.byKey(const Key('open-trade')));
       await tester.pumpAndSettle();
       final send = find.byKey(const Key('trade-send'));
+      await tester.enterText(find.byKey(const Key('give-cash')), '500');
+      await tester.pump();
+      expect(tester.widget<FilledButton>(send).onPressed, isNotNull, reason: 'cash alone is an offer');
+      await tester.enterText(find.byKey(const Key('give-cash')), '0');
+      await tester.pump();
       expect(tester.widget<FilledButton>(send).onPressed, isNull);
       await tester.tap(find.byKey(const Key('give-1')));
       await tester.tap(find.byKey(const Key('get-6')));

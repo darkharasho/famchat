@@ -82,12 +82,18 @@ class _TradeComposerState extends State<TradeComposer> {
             ],
           ),
           const SizedBox(height: 8),
-          _Stepper(
+          TextField(
             key: Key('$prefix-cash'),
-            label: 'Cash ${money(cash)}',
-            onMinus: cash > 0 ? () => setState(() => setCash(cash >= 10 ? cash - 10 : 0)) : null,
-            onPlus: cash + 10 <= b.cash(owner) ? () => setState(() => setCash(cash + 10)) : null,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Cash',
+              prefixText: '\$',
+              helperText: 'Up to ${money(b.cash(owner))}',
+              isDense: true,
+            ),
+            onChanged: (v) => setState(() => setCash(int.tryParse(v.trim()) ?? 0)),
           ),
+          const SizedBox(height: 4),
           if (b.heldCards(owner).isNotEmpty)
             _Stepper(
               key: Key('$prefix-cards'),
