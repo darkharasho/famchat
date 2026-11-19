@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:famchat/chat/chat_sync.dart' show CaughtUp;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
@@ -237,6 +239,36 @@ void main() {
       expect(h.registered, isEmpty);
     });
 
+    test('a failed registration is retried when the app comes back, then not again', () async {
+      final h = Harness()..failRegister = true;
+      await h.controller.start();
+      await h.controller.resumed();
+      expect(h.registered, isEmpty);
+      h.failRegister = false;
+      await h.controller.resumed();
+      expect(h.registered, ['tok-1']);
+      await h.controller.resumed();
+      expect(h.registered, ['tok-1']);
+    });
+
+    test('a missing token at start is retried on resume', () async {
+      final h = Harness();
+      h.messaging.token = null;
+      await h.controller.start();
+      expect(h.registered, isEmpty);
+      h.messaging.token = 'tok-2';
+      await h.controller.resumed();
+      expect(h.registered, ['tok-2']);
+    });
+
+    test('resume never asks for permission where it was not given', () async {
+      final h = Harness(askNow: false);
+      await h.controller.start();
+      await h.controller.resumed();
+      expect(h.messaging.requests, 0);
+      expect(h.registered, isEmpty);
+    });
+
     test('the tap that launched the app opens its chat', () async {
       final h = Harness()..messaging.initial = const PushMessage(chatId: chatA);
       await h.controller.start();
@@ -387,6 +419,82 @@ void main() {
       expect(notifier.shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad mentioned you')]);
       await n.stop();
       await events.close();
+    });
+
+    group('caught up after a reconnect', () {
+      MessageRow row(String chatId, int seq, String sender, {String text = 'hi', List<String> mentions = const [], String kind = 'text'}) =>
+          MessageRow(
+            id: 'm$seq',
+            chatId: chatId,
+            seq: seq,
+            senderUserId: sender,
+            senderDeviceId: 'd-$sender',
+            kind: kind,
+            body: kind == 'text' ? jsonEncode(TextBody(text, mentions: mentions).toJson()) : null,
+            targetId: null,
+            envelope: null,
+            createdAt: seq,
+            state: 'sent',
+          );
+
+      Future<List<(int, String, String, String)>> run(List<CaughtUp> batches, {bool front = false, bool previews = false}) async {
+        final caught = StreamController<CaughtUp>.broadcast();
+        final notifier = FakeNotifier();
+        final n = MessageNotifier(
+          events: const Stream.empty(),
+          caughtUp: caught.stream,
+          myUserId: 'me',
+          db: db,
+          notifier: notifier,
+          previewsOn: () async => previews,
+          inFront: () => front,
+        )..start();
+        batches.forEach(caught.add);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await n.stop();
+        await caught.close();
+        return notifier.shown;
+      }
+
+      test('one message shows like a live one, several are counted', () async {
+        final shown = await run([
+          CaughtUp(chatA, [row(chatA, 1, 'mom')]),
+          CaughtUp(chatB, [row(chatB, 1, 'mom'), row(chatB, 2, 'dad'), row(chatB, 3, 'dad')]),
+        ]);
+        expect(shown, [
+          (chatA.hashCode & 0x7fffffff, 'Mom', 'New message', '/chats/$chatA'),
+          (chatB.hashCode & 0x7fffffff, 'Parents', '3 new messages', '/chats/$chatB'),
+        ]);
+      });
+
+      test('previews on: a single message shows its text', () async {
+        final shown = await run([CaughtUp(chatB, [row(chatB, 1, 'dad', text: 'dinner?')])], previews: true);
+        expect(shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad: dinner?')]);
+      });
+
+      test('messages already read elsewhere do not notify', () async {
+        await db.setMyLastRead(chatB, 2);
+        final shown = await run([
+          CaughtUp(chatB, [row(chatB, 1, 'mom'), row(chatB, 2, 'dad'), row(chatB, 3, 'dad')]),
+          CaughtUp(chatA, [row(chatA, 1, 'mom')]),
+        ]);
+        expect(shown.map((s) => (s.$2, s.$3)), [('Parents', 'New message from Dad'), ('Mom', 'New message')]);
+        await db.setMyLastRead(chatA, 1);
+        expect(await run([CaughtUp(chatA, [row(chatA, 1, 'mom')])]), isEmpty);
+      });
+
+      test('nothing while the app is in front', () async {
+        expect(await run([CaughtUp(chatA, [row(chatA, 1, 'mom')])], front: true), isEmpty);
+      });
+
+      test('a muted chat stays quiet unless I was mentioned', () async {
+        await db.setMutedUntil(chatB, DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch);
+        expect(await run([CaughtUp(chatB, [row(chatB, 1, 'dad')])]), isEmpty);
+        final shown = await run([
+          CaughtUp(chatB, [row(chatB, 1, 'dad', text: '@me look', mentions: ['me']), row(chatB, 2, 'mom')]),
+        ]);
+        expect(shown.map((s) => (s.$2, s.$3)), [('Parents', 'Dad mentioned you · 2 new messages')]);
+      });
     });
 
     group('previews', () {

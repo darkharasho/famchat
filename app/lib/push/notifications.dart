@@ -3,9 +3,12 @@
 // background web tabs. Text follows the server's rule: who and where, never what.
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
+import '../chat/chat_sync.dart' show CaughtUp;
 import '../chat/db/chat_db.dart';
+import '../chat/message_changes.dart' show mentionsOf;
 import 'chat_route.dart';
 import 'local_notifier.dart';
 import 'preview.dart';
@@ -59,6 +62,9 @@ class PushController {
   final _subs = <StreamSubscription<Object?>>[];
   bool _stopped = false;
 
+  /// Whether the server has this device's current token (the last registration went through).
+  bool _registered = false;
+
   Future<void> start() async {
     _subs.add(messaging.onMessageOpenedApp.listen(_open));
     _subs.add(messaging.onMessage.listen((m) => unawaited(_foreground(m))));
@@ -69,6 +75,17 @@ class PushController {
       if (askNow || await messaging.permissionGranted()) await enable();
     } catch (_) {
       // Push is a convenience: a failure here must never affect the app.
+    }
+  }
+
+  /// The app came back to the front: if this device's registration hasn't gone through yet
+  /// (offline at start, no token yet, a server error), try again. Never asks for permission.
+  Future<void> resumed() async {
+    if (_stopped || _registered) return;
+    try {
+      if (await messaging.permissionGranted()) await enable();
+    } catch (_) {
+      // Next resume.
     }
   }
 
@@ -92,8 +109,10 @@ class PushController {
     if (_stopped) return;
     try {
       await register(token, previews ?? await previewsOn());
+      _registered = true;
     } catch (_) {
-      // Offline: the next start registers again.
+      // Offline: retried when the app next comes to the front ([resumed]).
+      _registered = false;
     }
   }
 
@@ -144,10 +163,12 @@ class PushController {
 bool isMuted(ChatRow? chat, DateTime now) => (chat?.mutedUntil ?? 0) > now.millisecondsSinceEpoch;
 
 /// Desktop apps and web tabs: a notification for every `msg` from someone else that arrives over
-/// the socket while the app isn't in front (unless silent, or the chat is muted and I wasn't mentioned).
+/// the socket while the app isn't in front (unless silent, or the chat is muted and I wasn't mentioned),
+/// and one per chat for unread messages a reconnect caught up on (asleep, offline, closed).
 class MessageNotifier {
   MessageNotifier({
     required this.events,
+    this.caughtUp = const Stream.empty(),
     required this.myUserId,
     required this.db,
     required this.notifier,
@@ -156,6 +177,9 @@ class MessageNotifier {
   });
 
   final Stream<Map<String, Object?>> events;
+
+  /// Messages that came in while this device was offline ([ChatSync.caughtUp]).
+  final Stream<CaughtUp> caughtUp;
   final String myUserId;
   final ChatDb db;
   final LocalNotifier notifier;
@@ -164,10 +188,52 @@ class MessageNotifier {
   final Future<bool> Function() previewsOn;
   final bool Function() inFront;
 
-  StreamSubscription<Object?>? _sub;
+  final _subs = <StreamSubscription<Object?>>[];
 
   void start() {
-    _sub = events.listen((e) => unawaited(_onEvent(e)));
+    _subs
+      ..add(events.listen((e) => unawaited(_onEvent(e))))
+      ..add(caughtUp.listen((c) => unawaited(_onCaughtUp(c))));
+  }
+
+  Future<void> _onCaughtUp(CaughtUp c) async {
+    if (inFront()) return;
+    final route = chatRoute(c.chatId);
+    if (route == null) return;
+    try {
+      final chat = await db.chatById(c.chatId);
+      if (chat == null) return;
+      // Read on another device meanwhile: nothing to tell.
+      final unread = [for (final r in c.messages) if ((r.seq ?? 0) > chat.myLastReadSeq) r];
+      if (unread.isEmpty) return;
+      final mention = unread.lastWhereOrNull((r) => mentionsOf(r).contains(myUserId));
+      final mentioned = mention != null;
+      if (!mentioned && isMuted(chat, DateTime.now())) return;
+      final last = unread.last;
+      // A mention names who mentioned me, not whoever wrote last.
+      final (title, generic) = await notificationText(db, c.chatId, (mention ?? last).senderUserId, mention: mentioned);
+      final String body;
+      if (unread.length > 1) {
+        body = mentioned ? '$generic · ${unread.length} new messages' : '${unread.length} new messages';
+      } else {
+        body = await _rowPreviewBody(last) ?? generic;
+      }
+      await notifier.show(id: c.chatId.hashCode & 0x7fffffff, title: title, body: body, route: route);
+    } catch (_) {
+      // The database closed (signed out) meanwhile.
+    }
+  }
+
+  Future<String?> _rowPreviewBody(MessageRow row) async {
+    try {
+      if (!await previewsOn()) return null;
+      final preview = await rowPreviewText(db, row);
+      return preview == null
+          ? null
+          : await previewBody(db: db, chatId: row.chatId, senderUserId: row.senderUserId, preview: preview);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _onEvent(Map<String, Object?> e) async {
@@ -213,7 +279,9 @@ class MessageNotifier {
   }
 
   Future<void> stop() async {
-    await _sub?.cancel();
-    _sub = null;
+    for (final s in _subs) {
+      await s.cancel();
+    }
+    _subs.clear();
   }
 }

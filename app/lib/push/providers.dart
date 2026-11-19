@@ -57,7 +57,12 @@ final pushControllerProvider = Provider<PushController?>((ref) {
   // Android draws preview notifications itself, so FCM's tap streams miss their taps.
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) unawaited(routeAndroidNotificationTaps(router.go));
   unawaited(c.start());
-  ref.onDispose(() => unawaited(c.stop()));
+  // A registration that failed (offline, no token yet) is retried each time the app comes back.
+  final lifecycle = AppLifecycleListener(onResume: () => unawaited(c.resumed()));
+  ref.onDispose(() {
+    lifecycle.dispose();
+    unawaited(c.stop());
+  });
   return c;
 });
 
@@ -77,6 +82,7 @@ final messageNotifierProvider = Provider<MessageNotifier?>((ref) {
   final router = ref.read(routerProvider);
   final n = MessageNotifier(
     events: ref.watch(hubLinkProvider).events,
+    caughtUp: ref.watch(chatSyncProvider)?.caughtUp ?? const Stream.empty(),
     myUserId: me,
     db: ref.watch(chatDbProvider),
     notifier: notifier,
