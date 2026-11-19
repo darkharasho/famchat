@@ -20,6 +20,7 @@ String gameGlyph(GameType t) => switch (t) {
   GameType.reversi => '\u25D0\uFE0E',
   GameType.dotsandboxes => '\u2B1A\uFE0E',
   GameType.tictactoe => '\u2715',
+  GameType.gofish => '\u{1F0A0}',
 };
 
 /// How long after my poke in a game I can poke again.

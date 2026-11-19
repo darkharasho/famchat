@@ -16,6 +16,29 @@ void main() {
     expect(back.first, 'U1');
   });
 
+  test('a gofish game carries its seed', () {
+    const g = GameBody(GameType.gofish, 'U1', seed: 3735928559);
+    expect(g.toJson(), {'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': 3735928559});
+    expect((Plaintext.decode(g.encode()) as GameBody).seed, 3735928559);
+    final fromDouble = decode({'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': 3735928559.0});
+    expect((fromDouble as GameBody).seed, 3735928559);
+    expect((decode({'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': 0}) as GameBody).seed, 0);
+    expect((decode({'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': 4294967295}) as GameBody).seed, 4294967295);
+  });
+
+  test('a bad or missing seed decodes as null, still a game', () {
+    for (final bad in [null, -1, 4294967296, 1.5, '7']) {
+      final b = decode({'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': bad});
+      expect(b, isA<GameBody>(), reason: '$bad');
+      expect((b as GameBody).seed, isNull, reason: '$bad');
+    }
+    expect((decode({'kind': 'game', 'game': 'gofish', 'first': 'U1'}) as GameBody).seed, isNull);
+  });
+
+  test('games without a seed send none', () {
+    expect(const GameBody(GameType.chess, 'U1').toJson().containsKey('seed'), isFalse);
+  });
+
   test('move round-trips', () {
     const m = MoveBody('G1', GameType.checkers, 3, {
       'type': 'play',

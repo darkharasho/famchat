@@ -92,7 +92,9 @@ sealed class Plaintext {
         if (first is! String || first.isEmpty) throw const FormatException('bad first');
         if (game is! String) throw const FormatException('bad game');
         final type = GameType.fromWire(game);
-        return type == null ? UnknownBody(kind, j) : GameBody(type, first);
+        final seed = wireInt(j['seed']);
+        final validSeed = seed != null && seed >= 0 && seed <= 0xFFFFFFFF ? seed : null;
+        return type == null ? UnknownBody(kind, j) : GameBody(type, first, seed: validSeed);
       case 'move':
         final target = j['target'], game = j['game'], ply = wireInt(j['ply']), action = j['action'];
         if (target is! String || target.isEmpty) throw const FormatException('bad move target');
@@ -494,13 +496,16 @@ String _mime(Map<String, Object?> j) {
 /// Starts a game in a direct chat; the message's id is the game's id (docs/protocol.md "Games").
 /// [first] is the user who moves first (X, dark, white).
 class GameBody extends Plaintext {
-  const GameBody(this.game, this.first);
+  const GameBody(this.game, this.first, {this.seed});
   final GameType game;
   final String first;
+
+  /// `0..4294967295`, for games with luck (docs/protocol.md "Games"); null when absent or invalid.
+  final int? seed;
   @override
   String get kind => 'game';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'game': game.wire, 'first': first};
+  Map<String, Object?> toJson() => {'kind': kind, 'game': game.wire, 'first': first, 'seed': ?seed};
 }
 
 /// One action in the game [target] (a `game` message id) at move number [ply]. [action] has a string

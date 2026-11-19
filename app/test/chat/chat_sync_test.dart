@@ -890,6 +890,22 @@ void main() {
     expect((await bob.d.db.messageById(gameId))!.kind, 'game');
   });
 
+  test('startGame gives seeded games a seed and others none', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    Future<Map<String, Object?>> sent(String id) async =>
+        jsonDecode((await alice.d.db.messageById(id))!.body!) as Map<String, Object?>;
+    final fish = await sent(await alice.sync.startGame(chatId, GameType.gofish, first: alice.d.userId));
+    final seed = fish['seed'];
+    expect(seed, isA<int>());
+    expect(seed as int, inInclusiveRange(0, 0xFFFFFFFF));
+    final pinned = await sent(await alice.sync.startGame(chatId, GameType.gofish, first: alice.d.userId, seed: 9));
+    expect(pinned['seed'], 9);
+    final chess = await sent(await alice.sync.startGame(chatId, GameType.chess, first: alice.d.userId, seed: 9));
+    expect(chess.containsKey('seed'), isFalse);
+  });
+
   test('incoming game and move rows are classified as game/move', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

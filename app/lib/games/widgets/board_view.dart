@@ -4,6 +4,7 @@ import '../checkers.dart';
 import '../chess_board.dart';
 import '../dots_and_boxes.dart';
 import '../four_in_a_row.dart';
+import '../go_fish.dart';
 import '../reversi.dart';
 import '../rules.dart';
 import '../tictactoe.dart';
@@ -11,6 +12,7 @@ import 'checkers_view.dart';
 import 'chess_view.dart';
 import 'dots_and_boxes_view.dart';
 import 'four_in_a_row_view.dart';
+import 'go_fish_view.dart';
 import 'reversi_view.dart';
 import 'tictactoe_view.dart';
 
@@ -106,6 +108,14 @@ class _BoardViewState extends State<BoardView> {
         initials: widget.initials,
         names: widget.names,
       ),
+      GoFishBoard() => GoFishView(
+        board: b,
+        mySide: widget.mySide,
+        onPlay: widget.onPlay,
+        interactive: interactive,
+        thumbnail: widget.thumbnail,
+        names: widget.names,
+      ),
       _ => const SizedBox.shrink(),
     };
     if (!widget.thumbnail) return view;
@@ -114,9 +124,12 @@ class _BoardViewState extends State<BoardView> {
 }
 
 /// The display aspect ratio (width / height) of [b]'s board: square, except
-/// Four in a Row.
-double boardAspectRatio(Board b) =>
-    b is FourInARowBoard ? FourInARowBoard.columns / FourInARowBoard.rows : 1;
+/// Four in a Row and Go Fish (whose card picture is counts only).
+double boardAspectRatio(Board b) => switch (b) {
+  FourInARowBoard() => FourInARowBoard.columns / FourInARowBoard.rows,
+  GoFishBoard() => 3 / 2,
+  _ => 1,
+};
 
 /// [side]'s colour on [b]'s board, as spoken ("white", "red", "X").
 String sideColourName(Board b, Side side) {
@@ -135,6 +148,7 @@ String sideColourName(Board b, Side side) {
 (int, int)? boardScore(Board b) => switch (b) {
   ReversiBoard() => b.counts,
   DotsAndBoxesBoard() => b.scores,
+  GoFishBoard() => b.scores,
   _ => null,
 };
 

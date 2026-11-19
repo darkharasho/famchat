@@ -4,13 +4,32 @@ import 'package:famchat/games/checkers.dart';
 import 'package:famchat/games/chess_board.dart';
 import 'package:famchat/games/dots_and_boxes.dart';
 import 'package:famchat/games/four_in_a_row.dart';
+import 'package:famchat/games/go_fish.dart';
 import 'package:famchat/games/reversi.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/widgets/board_view.dart';
+import 'package:famchat/games/widgets/go_fish_view.dart';
 import 'package:famchat/games/widgets/reversi_view.dart';
 import 'package:famchat/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+
+/// The Go Fish card of [rank] (1..13) and [suit] (0..3).
+int _c(int rank, int suit) => (rank - 1) * 4 + suit;
+
+GoFishEvent _ev({
+  required Side asker,
+  required int rank,
+  int given = 0,
+  int? drawn,
+  bool again = false,
+  List<(Side, int)> booked = const [],
+}) => GoFishEvent(asker, rank, given, drawn, again, booked);
+
+/// Any Go Fish card face (`card-<n>` key).
+final _anyCardFace = find.byWidgetPredicate(
+  (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('card-'),
+);
 
 const _fm = CheckersSquare(Side.first, CheckersPiece.man);
 const _sm = CheckersSquare(Side.second, CheckersPiece.man);
@@ -44,6 +63,103 @@ void main() {
       names: names,
     ),
   );
+
+  group('Go Fish', () {
+    const you = Side.first, mom = Side.second;
+    const names = ('You', 'Mom');
+
+    test('rank names', () {
+      expect(rankName(1), 'Ace');
+      expect(rankName(7), '7');
+      expect(rankName(13), 'King');
+      expect(rankName(1, plural: true), 'Aces');
+      expect(rankName(10, plural: true), '10s');
+      expect(rankName(11, plural: true), 'Jacks');
+      expect(rankName(12, plural: true), 'Queens');
+    });
+
+    test('log lines', () {
+      expect(goFishLog(_ev(asker: mom, rank: 7, given: 2), you, names), 'Mom asked for 7s — you gave 2');
+      expect(goFishLog(_ev(asker: you, rank: 7, given: 1, again: true), you, names), 'You asked for 7s — Mom gave 1');
+      expect(
+        goFishLog(_ev(asker: you, rank: 13, drawn: _c(4, 0)), you, names),
+        'You asked for Kings — Go fish. You drew a 4',
+      );
+      expect(goFishLog(_ev(asker: mom, rank: 13, drawn: _c(4, 0)), you, names), 'Mom asked for Kings — Go fish');
+      expect(
+        goFishLog(_ev(asker: mom, rank: 13, drawn: _c(13, 1), again: true), you, names),
+        'Mom asked for Kings — Go fish. Mom drew a King and goes again',
+      );
+      expect(
+        goFishLog(_ev(asker: you, rank: 1, drawn: _c(1, 1), again: true), you, names),
+        'You asked for Aces — Go fish. You drew an Ace and go again',
+      );
+      expect(goFishLog(_ev(asker: you, rank: 5), you, names), 'You asked for 5s — Go fish');
+      expect(
+        goFishLog(_ev(asker: mom, rank: 5, given: 3, again: true, booked: [(mom, 5)]), you, names),
+        'Mom asked for 5s — you gave 3. Mom made a book of 5s',
+      );
+    });
+
+    final board = GoFishBoard.custom(
+      firstHand: [_c(2, 0), _c(2, 1), _c(9, 3)],
+      secondHand: [_c(5, 0), _c(12, 2), _c(13, 1)],
+      stock: [_c(3, 0), _c(4, 0)],
+      firstBooks: [7],
+    );
+
+    testWidgets('my hand shows; opponent cards never render', (tester) async {
+      await tester.pumpWidget(view(board, names: names));
+      for (final c in board.hand(you)) {
+        expect(find.byKey(Key('card-$c')), findsOneWidget);
+      }
+      for (final c in [...board.hand(mom), _c(3, 0), _c(4, 0)]) {
+        expect(find.byKey(Key('card-$c')), findsNothing);
+      }
+      expect(find.text('2 in the stock'), findsOneWidget);
+      expect(find.text('3 cards'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a thumbnail and a spectator show no card faces', (tester) async {
+      await tester.pumpWidget(view(board, thumbnail: true));
+      expect(_anyCardFace, findsNothing);
+      await tester.pumpWidget(view(board, mySide: null));
+      expect(_anyCardFace, findsNothing);
+    });
+
+    testWidgets('tapping a rank I hold asks for it', (tester) async {
+      await tester.pumpWidget(view(board, names: names));
+      expect(find.byKey(const Key('rank-5')), findsNothing);
+      await tester.tap(find.byKey(const Key('rank-2')));
+      await tester.tap(find.byKey(const Key('rank-9')));
+      expect(played, [
+        {'rank': 2},
+        {'rank': 9},
+      ]);
+    });
+
+    testWidgets("ranks don't play when disabled or on the other player's turn", (tester) async {
+      await tester.pumpWidget(view(board, enabled: false));
+      await tester.tap(find.byKey(const Key('rank-2')));
+      await tester.pumpWidget(view(board, mySide: mom));
+      await tester.tap(find.byKey(const Key('rank-5')));
+      expect(played, isEmpty);
+    });
+
+    testWidgets('the log shows the last asks in plain words', (tester) async {
+      final asked = board.play({'rank': 9})! as GoFishBoard;
+      await tester.pumpWidget(view(asked, names: names));
+      expect(find.text('You asked for 9s — Go fish. You drew a 3'), findsOneWidget);
+      await tester.pumpWidget(view(asked, mySide: mom, names: ('Dad', 'You')));
+      expect(find.text('Dad asked for 9s — Go fish'), findsOneWidget);
+    });
+
+    test('score and aspect', () {
+      expect(boardScore(board), (1, 0));
+      expect(boardAspectRatio(board), 3 / 2);
+    });
+  });
 
   testWidgets('tapping an empty tic-tac-toe cell calls onPlay {cell: n}', (
     tester,
