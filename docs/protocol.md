@@ -182,7 +182,8 @@ Move fields of `play`:
   top and go to the bottom before they take effect; a get out of jail free card is held until used. Whoever must
   act sends the next `play`: a player in debt, else the bidder whose turn it is, else the receiver of a trade
   offer, else the turn player. Actions: `roll`, `pay_bail`, `use_card`, `buy`, `decline` (starts an auction, the
-  decliner bids first), `bid {amount}`, `pass`, `end_turn`, `build {space}`, `sell {space}`, `mortgage {space}`,
+  decliner bids first; bids alternate and must rise; a pass while a bid stands, or a first bid after the other
+  player passed with no bid, ends it; two passes with no bid leave the property unsold), `bid {amount}`, `pass`, `end_turn`, `build {space}`, `sell {space}`, `mortgage {space}`,
   `unmortgage {space}`, `offer {give: {cash, spaces, cards}, get: {cash, spaces, cards}}`, `accept`, `reject` and
   `bankrupt`. A payment that can't be made becomes a debt the debtor clears by selling or mortgaging (it is paid
   as soon as the cash covers it); a debtor who can't raise enough even by selling everything is bankrupt and the
