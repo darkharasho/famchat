@@ -121,7 +121,7 @@ void main() {
     expect(draw(7, 10).cash(first), 1500, reason: 'nothing built, nothing paid');
   });
 
-  test('advance to North Station and Vista Heights', () {
+  test('advance to South Station and Vista Heights', () {
     var b = draw(7, 12);
     expect((b.position(first), b.cash(first)), (5, 1700));
     b = draw(7, 13);

@@ -24,7 +24,7 @@ enum LandlordCard {
   luckToJail(LandlordDeck.luck, "Off to jail! You don't collect \$200"),
   luckRepairs(LandlordDeck.luck, 'The boiler broke: pay \$25 per house and \$100 per hotel'),
   luckPay15(LandlordDeck.luck, 'Library fine: pay \$15'),
-  luckToNorthStation(LandlordDeck.luck, 'Catch the train: advance to North Station'),
+  luckToSouthStation(LandlordDeck.luck, 'Catch the train: advance to South Station'),
   luckToVista(LandlordDeck.luck, 'Advance to Vista Heights'),
   luckPayOther50(LandlordDeck.luck, 'You lost a bet: pay the other player \$50'),
   luckCollect150(LandlordDeck.luck, 'Your crossword win pays out: collect \$150'),

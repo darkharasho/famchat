@@ -711,7 +711,7 @@ class _State {
         _moveTo(s, 24);
       case LandlordCard.luckToFern:
         _moveTo(s, 11);
-      case LandlordCard.luckToNorthStation:
+      case LandlordCard.luckToSouthStation:
         _moveTo(s, 5);
       case LandlordCard.luckToVista:
         _moveTo(s, 39);
