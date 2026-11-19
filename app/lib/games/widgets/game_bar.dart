@@ -168,6 +168,17 @@ class _GameBarSegmentState extends ConsumerState<GameBarSegment> {
     final opponentName = viewer.nameOf(opponent).split(' ').first;
     final style = theme.textTheme.bodyMedium?.copyWith(color: s.onSurface);
     final compact = widget.compact;
+    final glyph = TextSpan(
+      text: gameGlyph(g.type),
+      style: TextStyle(
+        fontFamily: g.type == GameType.tictactoe ? null : 'NotoSansSymbols2',
+        color: s.tertiary,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    final statusStyle = myTurn
+        ? TextStyle(color: s.tertiary, fontWeight: FontWeight.w600)
+        : null;
     final pokeLabel = minutesLeft > 0 ? 'Poked · ${minutesLeft}m' : null;
     final onPoke = minutesLeft > 0 || _sending
         ? null
@@ -181,39 +192,45 @@ class _GameBarSegmentState extends ConsumerState<GameBarSegment> {
         child: Row(
           children: [
             Expanded(
-              child: Text.rich(
-                TextSpan(
-                  style: style,
-                  children: [
-                    TextSpan(
-                      text: gameGlyph(g.type),
-                      style: TextStyle(
-                        fontFamily: g.type == GameType.tictactoe
-                            ? null
-                            : 'NotoSansSymbols2',
-                        color: s.tertiary,
-                        fontWeight: FontWeight.w700,
+              child: compact
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text.rich(
+                          TextSpan(
+                            style: style,
+                            children: [
+                              glyph,
+                              TextSpan(text: ' ${g.type.title}'),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          viewer.status(g),
+                          style: theme.textTheme.bodySmall?.merge(statusStyle),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    )
+                  : Text.rich(
+                      TextSpan(
+                        style: style,
+                        children: [
+                          glyph,
+                          TextSpan(
+                            text:
+                                ' ${g.type.title} with ${viewer.nameOf(opponent)} · ',
+                          ),
+                          TextSpan(text: viewer.status(g), style: statusStyle),
+                        ],
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    TextSpan(
-                      text: compact
-                          ? ' ${g.type.title} · '
-                          : ' ${g.type.title} with ${viewer.nameOf(opponent)} · ',
-                    ),
-                    TextSpan(
-                      text: viewer.status(g),
-                      style: myTurn
-                          ? TextStyle(
-                              color: s.tertiary,
-                              fontWeight: FontWeight.w600,
-                            )
-                          : null,
-                    ),
-                  ],
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
             ),
             if (canPoke && compact)
               IconButton(

@@ -434,8 +434,8 @@ void main() {
       expect(find.byKey(const Key('game-bar')), findsOneWidget);
       final left = find.byKey(const Key('game-bar-g2')), right = find.byKey(const Key('game-bar-g1'));
       expect(tester.getCenter(left).dx, lessThan(tester.getCenter(right).dx));
-      expect(find.descendant(of: left, matching: find.textContaining('Landlord · ', findRichText: true)), findsOneWidget);
-      expect(find.descendant(of: right, matching: find.textContaining('Tic-tac-toe · ', findRichText: true)), findsOneWidget);
+      expect(find.descendant(of: left, matching: find.text('\u{1F3E0}\uFE0E Landlord', findRichText: true)), findsOneWidget);
+      expect(find.descendant(of: right, matching: find.text('\u2715 Tic-tac-toe', findRichText: true)), findsOneWidget);
       expect(find.textContaining(' with Bob', findRichText: true), findsNothing);
       expect(find.byIcon(Icons.chevron_right_rounded), findsNothing);
       // Bob is to move in Landlord (he started it); Alice started tic-tac-toe, so it's her turn there.
