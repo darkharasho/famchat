@@ -115,7 +115,7 @@ void main() {
     expect(g.sideOf('A'), Side.first);
     expect(g.sideOf('B'), Side.second);
     expect(g.sideOf('C'), isNull);
-    expect(activeGame(games), same(g));
+    expect(activeGame(games, long: false), same(g));
   });
 
   test('a finished game reports its winner and has no one to move', () {
@@ -134,7 +134,7 @@ void main() {
     expect(g.winnerUserId, 'B');
     expect(g.toMoveUserId, isNull);
     expect(g.ply, 5);
-    expect(activeGame(games), isNull);
+    expect(activeGame(games, long: false), isNull);
   });
 
   test('move from the wrong player is ignored', () {
@@ -282,7 +282,7 @@ void main() {
       expect(games[1].inert, isTrue);
       expect(games[1].ply, 0);
       expect(games[1].toMoveUserId, isNull);
-      expect(activeGame(games)!.id, 'g1');
+      expect(activeGame(games, long: false)!.id, 'g1');
     },
   );
 
@@ -296,7 +296,7 @@ void main() {
     expect(games[0].over, isTrue);
     expect(games[1].inert, isFalse);
     expect(games[1].ply, 1);
-    expect(activeGame(games)!.id, 'g2');
+    expect(activeGame(games, long: false)!.id, 'g2');
   });
 
   test('games in a chat without exactly two members are inert', () {
@@ -311,7 +311,7 @@ void main() {
       expect(g.ply, 0);
       expect(g.toMoveUserId, isNull);
     }
-    expect(activeGame(deriveGames(rows, ['A'])), isNull);
+    expect(activeGame(deriveGames(rows, ['A']), long: false), isNull);
   });
 
   test('pending local move applies optimistically after sent moves', () {
@@ -408,7 +408,7 @@ void main() {
     );
     expect(games.single.inert, isTrue);
     expect(games.single.ply, 0);
-    expect(activeGame(games), isNull);
+    expect(activeGame(games, long: false), isNull);
   });
 
   test('resign by a non-player is ignored', () {
@@ -492,5 +492,46 @@ void main() {
   test('playResults skips plays of inert games', () {
     final rows = [game('g', GameType.tictactoe, 'A'), ttt('A', 'g', 0, 0)];
     expect(playResults(rows, members, direct: false), isEmpty);
+  });
+
+  group('one long game alongside one quick game', () {
+    test('landlord without a seed is inert', () {
+      expect(deriveGames([game('g', GameType.landlord, 'A')], members).single.inert, isTrue);
+    });
+
+    test('a long and a quick game run together', () {
+      final games = deriveGames([game('l', GameType.landlord, 'A', seed: 3), game('c', GameType.chess, 'B')], members);
+      expect(games.map((g) => g.inert), [false, false]);
+      expect(activeGames(games).map((g) => g.id), ['l', 'c']);
+      expect(activeGame(games, long: true)?.id, 'l');
+      expect(activeGame(games, long: false)?.id, 'c');
+    });
+
+    test('the quick game is listed after the long one even if it started first', () {
+      final games = deriveGames([game('c', GameType.chess, 'B'), game('l', GameType.landlord, 'A', seed: 3)], members);
+      expect(activeGames(games).map((g) => g.id), ['l', 'c']);
+    });
+
+    test('a second game of the same kind is inert', () {
+      final games = deriveGames([
+        game('l', GameType.landlord, 'A', seed: 3),
+        game('c', GameType.chess, 'B'),
+        game('k', GameType.checkers, 'A'),
+        game('l2', GameType.landlord, 'B', seed: 4),
+      ], members);
+      expect(games.map((g) => g.inert), [false, false, true, true]);
+    });
+
+    test('a finished quick game frees only its kind', () {
+      final games = deriveGames([
+        game('l', GameType.landlord, 'A', seed: 3),
+        game('c', GameType.chess, 'B'),
+        chess('A', 'c', 0, {'type': 'resign'}),
+        game('k', GameType.checkers, 'A'),
+      ], members);
+      expect(games.map((g) => g.inert), [false, false, false]);
+      expect(activeGame(games, long: false)?.id, 'k');
+      expect(activeGame(games, long: true)?.id, 'l');
+    });
   });
 }

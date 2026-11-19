@@ -387,11 +387,52 @@ void main() {
       await tester.tap(find.text('Game'));
       await settle(tester);
       expect(find.text('Finish your current game first'), findsOneWidget);
-      expect(find.text('Chess'), findsNothing);
+      // Quick games are listed but can't start; Landlord can.
+      await tester.tap(find.text('Chess'));
+      await settle(tester);
+      expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
+      expect(find.text('Landlord'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, 'Open'));
       await settle(tester);
       expect(find.byType(GameScreen), findsOneWidget);
       expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
+    });
+
+    chatTestWidgets('Landlord starts alongside a running quick game', (tester) async {
+      await open(tester, messages: [plain('g1', 1, bob.userId, GameBody(GameType.checkers, bob.userId))]);
+      await tester.tap(find.byTooltip('Attach'));
+      await settle(tester);
+      await tester.tap(find.text('Game'));
+      await settle(tester);
+      await tester.tap(find.text('Landlord'));
+      await settle(tester);
+      final sent = jsonDecode((await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single.body!) as Map;
+      expect((sent['game'], sent['first']), ('landlord', alice.userId));
+      expect(sent['seed'], isA<int>());
+    });
+
+    chatTestWidgets('with Landlord running, quick games start and Landlord offers Open', (tester) async {
+      await open(tester, messages: [plain('g1', 1, bob.userId, GameBody(GameType.landlord, bob.userId, seed: 1))]);
+      await tester.tap(find.byTooltip('Attach'));
+      await settle(tester);
+      await tester.tap(find.text('Game'));
+      await settle(tester);
+      expect(find.text('Finish your current game first'), findsOneWidget);
+      await tester.tap(find.text('Chess'));
+      await settle(tester);
+      final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+      expect(jsonDecode(sent.body!), {'kind': 'game', 'game': 'chess', 'first': alice.userId});
+    });
+
+    chatTestWidgets('a long and a quick game show two bars, long first', (tester) async {
+      await open(tester, messages: [
+        plain('g1', 1, alice.userId, GameBody(GameType.tictactoe, alice.userId)),
+        plain('g2', 2, bob.userId, GameBody(GameType.landlord, bob.userId, seed: 1)),
+      ]);
+      final bars = find.byKey(const Key('game-bar'));
+      expect(bars, findsNWidgets(2));
+      expect(find.descendant(of: bars.first, matching: find.textContaining('Landlord with Bob')), findsOneWidget);
+      expect(find.descendant(of: bars.last, matching: find.textContaining('Tic-tac-toe with Bob')), findsOneWidget);
     });
 
     chatTestWidgets('on a phone, + opens a sheet with the library, the camera and Game', (tester) async {

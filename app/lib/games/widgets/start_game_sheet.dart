@@ -33,8 +33,10 @@ Future<void> showStartGameSheet(BuildContext context, String chatId) async {
   if (context.mounted) unawaited(openGame(context, chatId, id));
 }
 
-/// The sheet's body. Pops with a [GameType] to start, or the id of the
-/// unfinished game to open.
+/// The sheet's body: every game, quick ones first, then long ones. Pops with
+/// a [GameType] to start, or the id of an unfinished game to open. While a
+/// game of one kind is unfinished, that kind's games can't start: a line
+/// offers to open the running one instead.
 class StartGameSheet extends ConsumerWidget {
   const StartGameSheet({super.key, required this.chatId});
 
@@ -43,7 +45,61 @@ class StartGameSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final active = activeGame(ref.watch(gamesProvider(chatId)));
+    final games = ref.watch(gamesProvider(chatId));
+
+    Widget busy(GameState active) => Padding(
+      padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.xl, Space.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Finish your current game first',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.md),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, active.id),
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+
+    Widget tile(GameType t, bool enabled) => ListTile(
+      enabled: enabled,
+      leading: SizedBox.square(
+        dimension: 24,
+        child: Center(
+          child: Text(
+            gameGlyph(t),
+            style: TextStyle(
+              fontSize: 20,
+              height: 1,
+              fontFamily: t == GameType.tictactoe ? null : 'NotoSansSymbols2',
+              color: enabled
+                  ? theme.colorScheme.onSurfaceVariant
+                  : theme.disabledColor,
+            ),
+          ),
+        ),
+      ),
+      title: Text(t.title),
+      subtitle: t.long ? const Text('A long game, played over days') : null,
+      onTap: enabled ? () => Navigator.pop(context, t) : null,
+    );
+
+    List<Widget> section(bool long) {
+      final active = activeGame(games, long: long);
+      return [
+        if (active != null) busy(active),
+        for (final t in GameType.values)
+          if (t.long == long) tile(t, active == null),
+      ];
+    }
+
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -58,64 +114,19 @@ class StartGameSheet extends ConsumerWidget {
             ),
             child: Text('Play a game', style: theme.textTheme.titleMedium),
           ),
-          if (active != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.xl,
-                0,
-                Space.xl,
-                Space.lg,
-              ),
-              child: Row(
+          // Scrolls when the games don't fit (short or landscape screens).
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Finish your current game first',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: Space.md),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, active.id),
-                    child: const Text('Open'),
-                  ),
+                  ...section(false),
+                  const Divider(),
+                  ...section(true),
                 ],
               ),
-            )
-          else
-            // Scrolls when the games don't fit (short or landscape screens).
-            Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final t in GameType.values)
-                      ListTile(
-                        leading: SizedBox.square(
-                          dimension: 24,
-                          child: Center(
-                            child: Text(
-                              gameGlyph(t),
-                              style: TextStyle(
-                                fontSize: 20,
-                                height: 1,
-                                fontFamily: t == GameType.tictactoe
-                                    ? null
-                                    : 'NotoSansSymbols2',
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                        title: Text(t.title),
-                        onTap: () => Navigator.pop(context, t),
-                      ),
-                  ],
-                ),
-              ),
             ),
+          ),
           const SizedBox(height: Space.sm),
         ],
       ),

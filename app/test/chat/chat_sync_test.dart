@@ -904,6 +904,8 @@ void main() {
     expect(pinned['seed'], 9);
     final chess = await sent(await alice.sync.startGame(chatId, GameType.chess, first: alice.d.userId, seed: 9));
     expect(chess.containsKey('seed'), isFalse);
+    final landlord = await sent(await alice.sync.startGame(chatId, GameType.landlord, first: alice.d.userId));
+    expect(landlord['seed'], isA<int>());
   });
 
   test('incoming game and move rows are classified as game/move', () async {

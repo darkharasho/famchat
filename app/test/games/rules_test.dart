@@ -1,4 +1,5 @@
 import 'package:famchat/games/go_fish.dart';
+import 'package:famchat/games/landlord/landlord.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,5 +25,17 @@ void main() {
     expect(GameType.chess.seeded, isFalse);
     expect(GameType.fromWire('gofish'), GameType.gofish);
     expect(GameType.gofish.title, 'Go Fish');
+  });
+
+  test('Landlord: seeded, long, set up from the seed', () {
+    expect(GameType.fromWire('landlord'), GameType.landlord);
+    expect(GameType.landlord.title, 'Landlord');
+    expect(GameType.landlord.seeded, isTrue);
+    expect([for (final t in GameType.values) if (t.long) t], [GameType.landlord]);
+    final b = initialBoard(GameType.landlord, 7) as LandlordBoard;
+    final s = LandlordBoard.setup(7);
+    for (final d in LandlordDeck.values) {
+      expect(b.deck(d), s.deck(d));
+    }
   });
 }

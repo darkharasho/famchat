@@ -432,6 +432,21 @@ void main() {
     });
   });
 
+  chatTestWidgets('rematch works while a Landlord game runs', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('l1', GameType.landlord, bob.userId, seed: 1),
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0, 3, 1, 4, 2]),
+      ],
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Rematch'));
+    await settle(tester);
+    final sent = await outbox(tester);
+    expect(sent.single, {'kind': 'game', 'game': 'tictactoe', 'first': bob.userId});
+  });
+
   chatTestWidgets('a double-tapped rematch starts one game', (tester) async {
     await open(
       tester,
