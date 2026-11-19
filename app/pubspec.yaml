@@ -119,6 +119,7 @@ flutter:
     - assets/fonts/OFL-AtkinsonHyperlegibleNext.txt
     - assets/fonts/OFL-NotoSansSymbols2.txt
     - assets/spelling/
+    - shorebird.yaml
 
   # Bundled, never fetched at runtime. All are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
   fonts:
