@@ -128,7 +128,7 @@ void main() {
   chatTestWidgets('a Go Fish game opens and asks send a rank', (tester) async {
     await open(tester, messages: [game('g1', GameType.gofish, alice.userId, seed: 1)]);
     await openBoard(tester);
-    expect(find.text('38 in the stock'), findsOneWidget);
+    expect(find.text('38 in the pond'), findsOneWidget);
     expect(find.text('7 cards'), findsOneWidget);
     final rank = GoFishBoard.rankOf(GoFishBoard.deal(1).hand(Side.first).first);
     await tester.tap(find.byKey(Key('rank-$rank')).last);
@@ -973,6 +973,26 @@ void main() {
     );
     expect(board.width, greaterThanOrEqualTo(370));
     expect(board.height, greaterThan(board.width));
+  });
+
+  chatTestWidgets('on a phone the Go Fish table fills the panel, tall', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      size: const Size(390, 844),
+      messages: [game('g1', GameType.gofish, alice.userId, seed: 1)],
+    );
+    await openBoard(tester);
+    final board = tester.getSize(
+      find.descendant(
+        of: find.byType(GameScreen),
+        matching: find.byType(BoardView),
+      ),
+    );
+    expect(board.width, greaterThanOrEqualTo(370));
+    expect(board.height, greaterThan(board.width));
+    expect(tester.takeException(), isNull);
   });
 
   chatTestWidgets('opening the board marks the chat read', (tester) async {
