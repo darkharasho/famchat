@@ -53,13 +53,17 @@ jobs:
       - name: Which release
         id: release
         run: ../scripts/shorebird-release-version.sh ios "$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+      # Build exactly as release.yml does (same build name, number and team): Shorebird compares the
+      # compiled app against the release and refuses a patch whose native code differs.
       - name: Shorebird patch
         env:
           VERSION: ${{ steps.release.outputs.version }}
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           shorebird patch ios --no-codesign --release-version="$VERSION" -- \
+            --build-name "$NAME" --build-number "$NUMBER" \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched iOS release $VERSION" >> "$GITHUB_STEP_SUMMARY"
 
@@ -88,5 +92,6 @@ jobs:
           NUMBER: ${{ steps.release.outputs.number }}
         run: |
           shorebird patch android --release-version="$VERSION" -- \
+            --build-name "$NAME" --build-number "$NUMBER" \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched Android release $VERSION" >> "$GITHUB_STEP_SUMMARY"
