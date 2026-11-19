@@ -31,7 +31,8 @@ concurrency:
 permissions:
   contents: read
 
-# Must match the Flutter the release was built with (release.yml).
+# flutter-action needs a Flutter on PATH; shorebird patch itself always builds with the Flutter its
+# release used (it has no --flutter-version).
 env:
   FLUTTER_VERSION: "3.47.9"
   SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
@@ -58,7 +59,7 @@ jobs:
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
         run: |
-          shorebird patch ios --no-codesign --release-version="$VERSION" --flutter-version="$FLUTTER_VERSION" -- \
+          shorebird patch ios --no-codesign --release-version="$VERSION" -- \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched iOS release $VERSION" >> "$GITHUB_STEP_SUMMARY"
 
@@ -86,6 +87,6 @@ jobs:
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
         run: |
-          shorebird patch android --release-version="$VERSION" --flutter-version="$FLUTTER_VERSION" -- \
+          shorebird patch android --release-version="$VERSION" -- \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched Android release $VERSION" >> "$GITHUB_STEP_SUMMARY"
