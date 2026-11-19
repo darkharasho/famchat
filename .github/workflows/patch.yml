@@ -4,6 +4,7 @@ name: patch
 # build or review. Phones download a patch in the background and apply it on the next launch.
 # Patches can't change native code, plugins, permissions or the Flutter version: Shorebird stops
 # on a native change (no --allow-native-diffs here), and those need a release tag instead.
+# Releases after 1.0.20 carry the whole icon font, so their patches can use new icons too.
 #
 # Run by hand (gh workflow run patch.yml [-f platforms=ios] [-f release_version=1.0.17+29380123]
 # [-f track=staging]) or push a `patch-*` tag. Each platform patches its newest release that
@@ -69,10 +70,11 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
+          ICONS: ${{ steps.release.outputs.icons }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           shorebird patch ios --no-codesign --release-version="$VERSION" --track="$TRACK" -- \
-            --build-name "$NAME" --build-number "$NUMBER" \
+            --build-name "$NAME" --build-number "$NUMBER" $ICONS \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched iOS release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
 
@@ -99,8 +101,9 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
+          ICONS: ${{ steps.release.outputs.icons }}
         run: |
           shorebird patch android --release-version="$VERSION" --track="$TRACK" -- \
-            --build-name "$NAME" --build-number "$NUMBER" \
+            --build-name "$NAME" --build-number "$NUMBER" $ICONS \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched Android release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
