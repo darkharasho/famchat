@@ -360,7 +360,7 @@ void main() {
       await inApp(tester, () => alice.db.upsertChat(groupOf([alice.userId, bob.userId, carol.userId])));
       ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
       await settle(tester);
-      await tester.tap(find.byTooltip('Attach photo or video'));
+      await tester.tap(find.byTooltip('Attach'));
       await settle(tester);
       expect(find.text('Photos and videos'), findsOneWidget);
       expect(find.text('Game'), findsNothing);
@@ -369,7 +369,7 @@ void main() {
 
     chatTestWidgets('picking a game starts it, me first, and opens the board', (tester) async {
       await open(tester);
-      await tester.tap(find.byTooltip('Attach photo or video'));
+      await tester.tap(find.byTooltip('Attach'));
       await settle(tester);
       await tester.tap(find.text('Game'));
       await settle(tester);
@@ -382,7 +382,7 @@ void main() {
 
     chatTestWidgets('starting a game while one is unfinished offers Open instead', (tester) async {
       await open(tester, messages: [plain('g1', 1, bob.userId, GameBody(GameType.checkers, bob.userId))]);
-      await tester.tap(find.byTooltip('Attach photo or video'));
+      await tester.tap(find.byTooltip('Attach'));
       await settle(tester);
       await tester.tap(find.text('Game'));
       await settle(tester);
@@ -394,17 +394,63 @@ void main() {
       expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
     });
 
-    chatTestWidgets('without a camera sheet, the composer has a Game button in direct chats only', (tester) async {
+    chatTestWidgets('on a phone, + opens a sheet with the library, the camera and Game', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Attach'));
+      await settle(tester);
+      for (final item in ['Photos and videos', 'Take a photo', 'Record a video', 'Game']) {
+        expect(find.text(item), findsOneWidget, reason: item);
+      }
+      expect(find.byTooltip('GIF'), findsNothing, reason: 'GIFs live in the emoji picker');
+    });
+
+    chatTestWidgets('on desktop, + opens a menu without the camera; Game starts one', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         await open(tester);
-        expect(find.byKey(const Key('start-game')), findsOneWidget);
-        await tester.tap(find.byKey(const Key('start-game')));
+        expect(find.byKey(const Key('start-game')), findsNothing);
+        await tester.tap(find.byTooltip('Attach'));
+        await settle(tester);
+        expect(find.byType(BottomSheet), findsNothing, reason: 'a menu by the button, not a sheet');
+        expect(find.byType(PopupMenuItem<Object>), findsNWidgets(2));
+        expect(find.text('Photos and videos'), findsOneWidget);
+        expect(find.text('Take a photo'), findsNothing);
+        expect(find.text('Record a video'), findsNothing);
+        await tester.tap(find.text('Game'));
         await settle(tester);
         expect(find.text('Tic-tac-toe'), findsOneWidget);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
+    });
+
+    chatTestWidgets('on desktop, the + menu has no Game in groups', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        final carol = await backend.addUser('Carol');
+        setWindow(tester, const Size(400, 800));
+        await pumpChatApp(tester, alice);
+        await inApp(tester, () => alice.db.upsertChat(groupOf([alice.userId, bob.userId, carol.userId])));
+        ProviderScope.containerOf(tester.element(find.byType(FamChatApp))).read(routerProvider).go('/chats/$chatId');
+        await settle(tester);
+        await tester.tap(find.byTooltip('Attach'));
+        await settle(tester);
+        expect(find.text('Photos and videos'), findsOneWidget);
+        expect(find.text('Game'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    chatTestWidgets('+ is hidden while editing', (tester) async {
+      await open(tester, messages: [row('m1', 1, alice.userId, 'see you at 5')]);
+      expect(find.byTooltip('Attach'), findsOneWidget);
+      await tester.longPress(find.text('see you at 5'));
+      await settle(tester);
+      await tester.tap(find.text('Edit'));
+      await settle(tester);
+      expect(find.text('Editing message'), findsOneWidget);
+      expect(find.byTooltip('Attach'), findsNothing);
     });
   });
 }

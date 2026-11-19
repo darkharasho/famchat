@@ -13,7 +13,8 @@ FamChat is a private, invite-only messaging app for one family. It supports text
 ## Push notifications
 
 Push (FCM for Android, iOS and the web) is off until Firebase is set up; everything builds and runs
-without it. Desktop apps (and a web tab in the background) notify from their socket while running.
+without it. Desktop apps (and a web tab in the background) notify from their socket while running,
+and after a reconnect (sleep, network loss) they notify once per chat for unread messages missed meanwhile.
 To turn push on, once:
 
 1. `scripts/setup-firebase.sh` (needs Node, Python 3 and a browser for `firebase login`; wrangler

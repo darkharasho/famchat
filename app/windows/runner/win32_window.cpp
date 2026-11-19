@@ -3,6 +3,9 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <algorithm>
+#include <cstdint>
+
 #include "resource.h"
 
 namespace {
@@ -39,6 +42,93 @@ constexpr int kMinHeight = 500;
 // scale factor
 int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
+}
+
+// Where the window's size and position are kept across launches: its normal
+// (not maximized) rect in screen coordinates and physical pixels, the DPI of
+// the monitor it was on, and whether it was maximized.
+constexpr const wchar_t kWindowPlacementRegKey[] = L"Software\\FamChat\\Window";
+
+bool ReadRegDword(const wchar_t* name, DWORD* value) {
+  DWORD size = sizeof(*value);
+  return RegGetValueW(HKEY_CURRENT_USER, kWindowPlacementRegKey, name,
+                      RRF_RT_REG_DWORD, nullptr, value,
+                      &size) == ERROR_SUCCESS;
+}
+
+void WriteRegDword(HKEY key, const wchar_t* name, DWORD value) {
+  RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value),
+                 sizeof(value));
+}
+
+// The saved window rect, fitted to today's monitors: the same place if that is
+// still on a monitor (rescaled if the monitor's DPI changed), else centred on
+// the primary monitor; never larger than the monitor's work area. False when
+// nothing usable is saved.
+bool LoadSavedPlacement(RECT* rect, bool* maximized) {
+  DWORD left, top, right, bottom, saved_dpi, saved_maximized;
+  if (!ReadRegDword(L"Left", &left) || !ReadRegDword(L"Top", &top) ||
+      !ReadRegDword(L"Right", &right) || !ReadRegDword(L"Bottom", &bottom) ||
+      !ReadRegDword(L"Dpi", &saved_dpi)) {
+    return false;
+  }
+  if (!ReadRegDword(L"Maximized", &saved_maximized)) {
+    saved_maximized = 0;
+  }
+  // Signed: monitors left of or above the primary one have negative
+  // coordinates.
+  RECT saved = {static_cast<LONG>(static_cast<int32_t>(left)),
+                static_cast<LONG>(static_cast<int32_t>(top)),
+                static_cast<LONG>(static_cast<int32_t>(right)),
+                static_cast<LONG>(static_cast<int32_t>(bottom))};
+  LONG width = saved.right - saved.left;
+  LONG height = saved.bottom - saved.top;
+  if (saved_dpi < 48 || saved_dpi > 960 || width <= 0 || height <= 0 ||
+      width > 32768 || height > 32768) {
+    return false;
+  }
+
+  bool on_screen = true;
+  HMONITOR monitor = MonitorFromRect(&saved, MONITOR_DEFAULTTONULL);
+  if (monitor == nullptr) {
+    on_screen = false;
+    const POINT origin = {0, 0};
+    monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+  }
+  MONITORINFO info = {};
+  info.cbSize = sizeof(info);
+  if (monitor == nullptr || !GetMonitorInfo(monitor, &info)) {
+    return false;
+  }
+  const RECT& work = info.rcWork;
+  const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  if (dpi != 0 && dpi != saved_dpi) {
+    const int new_dpi = static_cast<int>(dpi);
+    const int old_dpi = static_cast<int>(saved_dpi);
+    width = MulDiv(width, new_dpi, old_dpi);
+    height = MulDiv(height, new_dpi, old_dpi);
+  }
+  const double scale_factor = (dpi != 0 ? dpi : 96) / 96.0;
+  const LONG work_width = work.right - work.left;
+  const LONG work_height = work.bottom - work.top;
+  width = (std::max)(static_cast<LONG>(Scale(kMinWidth, scale_factor)),
+                     (std::min)(width, work_width));
+  height = (std::max)(static_cast<LONG>(Scale(kMinHeight, scale_factor)),
+                      (std::min)(height, work_height));
+
+  LONG x = saved.left;
+  LONG y = saved.top;
+  if (!on_screen) {
+    x = work.left + (work_width - width) / 2;
+    y = work.top + (work_height - height) / 2;
+  } else {
+    // Wholly on the monitor it is (mostly) on.
+    x = (std::max)(work.left, (std::min)(x, work.right - width));
+    y = (std::max)(work.top, (std::min)(y, work.bottom - height));
+  }
+  *rect = {x, y, x + width, y + height};
+  *maximized = saved_maximized != 0;
+  return true;
 }
 
 // The height of the resize border above a window's title bar, which a
@@ -140,21 +230,39 @@ bool Win32Window::Create(const std::wstring& title,
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
 
-  const POINT target_point = {static_cast<LONG>(origin.x),
-                              static_cast<LONG>(origin.y)};
-  HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
-  UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
-  double scale_factor = dpi / 96.0;
+  // Where and how large it was last time, else |origin| and |size| scaled for
+  // the monitor there. Created there directly, already the right size for that
+  // monitor's DPI, so it never moves or resizes once shown.
+  int x, y, width, height;
+  RECT saved_rect;
+  bool saved_maximized = false;
+  if (LoadSavedPlacement(&saved_rect, &saved_maximized)) {
+    x = saved_rect.left;
+    y = saved_rect.top;
+    width = saved_rect.right - saved_rect.left;
+    height = saved_rect.bottom - saved_rect.top;
+    start_maximized_ = saved_maximized;
+  } else {
+    const POINT target_point = {static_cast<LONG>(origin.x),
+                                static_cast<LONG>(origin.y)};
+    HMONITOR monitor =
+        MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
+    UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+    double scale_factor = dpi / 96.0;
+    x = Scale(origin.x, scale_factor);
+    y = Scale(origin.y, scale_factor);
+    width = Scale(size.width, scale_factor);
+    height = Scale(size.height, scale_factor);
+  }
 
-  HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
-      nullptr, nullptr, GetModuleHandle(nullptr), this);
+  HWND window = CreateWindow(window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+                             x, y, width, height, nullptr, nullptr,
+                             GetModuleHandle(nullptr), this);
 
   if (!window) {
     return false;
   }
+  RememberNormalRect(window);
 
   UpdateTheme(window);
   // Recalculate the frame now that WM_NCCALCSIZE drops the title bar.
@@ -166,7 +274,48 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  const int command = start_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+  start_maximized_ = false;
+  return ShowWindow(window_handle_, command);
+}
+
+void Win32Window::RememberNormalRect(HWND hwnd) {
+  if (IsZoomed(hwnd) || IsIconic(hwnd)) {
+    return;
+  }
+  RECT rect;
+  if (GetWindowRect(hwnd, &rect) && rect.right > rect.left &&
+      rect.bottom > rect.top) {
+    normal_rect_ = rect;
+    normal_dpi_ = GetDpiForWindow(hwnd);
+  }
+}
+
+void Win32Window::SavePlacement(HWND hwnd) {
+  RememberNormalRect(hwnd);
+  if (normal_dpi_ == 0) {
+    return;
+  }
+  WINDOWPLACEMENT placement = {};
+  placement.length = sizeof(placement);
+  // Minimized (or hidden to the tray) from maximized still counts as maximized.
+  bool maximized = IsZoomed(hwnd) != FALSE;
+  if (!maximized && IsIconic(hwnd) && GetWindowPlacement(hwnd, &placement)) {
+    maximized = (placement.flags & WPF_RESTORETOMAXIMIZED) != 0;
+  }
+  HKEY key;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, kWindowPlacementRegKey, 0, nullptr, 0,
+                      KEY_SET_VALUE, nullptr, &key,
+                      nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  WriteRegDword(key, L"Left", static_cast<DWORD>(normal_rect_.left));
+  WriteRegDword(key, L"Top", static_cast<DWORD>(normal_rect_.top));
+  WriteRegDword(key, L"Right", static_cast<DWORD>(normal_rect_.right));
+  WriteRegDword(key, L"Bottom", static_cast<DWORD>(normal_rect_.bottom));
+  WriteRegDword(key, L"Dpi", normal_dpi_);
+  WriteRegDword(key, L"Maximized", maximized ? 1 : 0);
+  RegCloseKey(key);
 }
 
 // static
@@ -225,6 +374,7 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_DESTROY:
+      SavePlacement(hwnd);
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
@@ -242,7 +392,19 @@ Win32Window::MessageHandler(HWND hwnd,
 
       return 0;
     }
+    case WM_MOVE:
+      RememberNormalRect(hwnd);
+      break;
+
+    // Signing out or shutting down may end the process without WM_DESTROY.
+    case WM_ENDSESSION:
+      if (wparam) {
+        SavePlacement(hwnd);
+      }
+      break;
+
     case WM_SIZE: {
+      RememberNormalRect(hwnd);
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
         // Size and position the child window.

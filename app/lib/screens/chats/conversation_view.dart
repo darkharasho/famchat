@@ -26,9 +26,9 @@ import '../../games/providers.dart';
 import '../../games/widgets/game_bar.dart';
 import '../../games/widgets/game_card.dart';
 import '../../games/widgets/game_event_line.dart';
-import '../../games/labels.dart' show gameEventOf;
+import '../../games/labels.dart' show gameEventsOf;
 import '../../games/widgets/start_game_sheet.dart';
-import '../../gifs/gif_picker.dart';
+import '../../gifs/klipy.dart' show GifResult;
 import '../../gifs/providers.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
@@ -687,16 +687,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _snack("That message isn't available.");
   }
 
-  Future<void> _pickGif() async {
+  /// Sends a GIF picked in the emoji picker's GIFs tab (the picker closes itself on desktop and web).
+  Future<void> _sendGif(GifResult picked) async {
+    _closePicker();
     final client = ref.read(gifClientProvider).value;
     final sync = ref.read(chatSyncProvider);
-    if (client == null || sync == null) return;
-    _closePicker();
-    if (_emojiPopover.isShowing) _emojiPopover.hide();
-    final picked = await showGifPicker(context, client);
-    if (picked == null) return;
+    if (sync == null) return;
     await sync.enqueueMessage(widget.chatId, picked.body);
-    unawaited(client.share(picked.slug));
+    if (client != null) unawaited(client.share(picked.slug));
   }
 
   /// Photos and videos being compressed and encrypted (before they appear in the list).
@@ -749,46 +747,58 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _startGame() => showStartGameSheet(context, widget.chatId);
 
-  Future<void> _attach() async {
-    var source = PickSource.library;
-    if (cameraAvailable) {
-      final canGame = _canStartGame;
-      // A PickSource, or [_gameChoice].
-      final choice = await showModalBottomSheet<Object>(
+  /// The "+" menu: the library, the camera where there is one, and Game where one can start. Phones
+  /// show it as a sheet; desktop and web as a menu by the button ([anchor]'s context).
+  Future<void> _attach(BuildContext anchor) async {
+    final items = <(IconData, String, Object)>[
+      (Icons.photo_library_outlined, 'Photos and videos', PickSource.library),
+      if (cameraAvailable) ...[
+        (Icons.photo_camera_outlined, 'Take a photo', PickSource.camera),
+        (Icons.videocam_outlined, 'Record a video', PickSource.cameraVideo),
+      ],
+      if (_canStartGame) (Icons.casino_outlined, 'Game', _gameChoice),
+    ];
+    // A PickSource, or [_gameChoice].
+    final Object? choice;
+    if (emojiPopover) {
+      final button = anchor.findRenderObject()! as RenderBox;
+      final overlay = Overlay.of(anchor).context.findRenderObject()! as RenderBox;
+      final rect = Rect.fromPoints(
+        button.localToGlobal(Offset.zero, ancestor: overlay),
+        button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+      );
+      choice = await showMenu<Object>(
+        context: anchor,
+        position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+        items: [
+          for (final (icon, label, value) in items)
+            PopupMenuItem(
+              value: value,
+              child: ListTile(leading: Icon(icon), title: Text(label)),
+            ),
+        ],
+      );
+    } else {
+      choice = await showModalBottomSheet<Object>(
         context: context,
         builder: (context) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Photos and videos'),
-              onTap: () => Navigator.pop(context, PickSource.library),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(context, PickSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam_outlined),
-              title: const Text('Record a video'),
-              onTap: () => Navigator.pop(context, PickSource.cameraVideo),
-            ),
-            if (canGame)
+            for (final (icon, label, value) in items)
               ListTile(
-                leading: const Icon(Icons.casino_outlined),
-                title: const Text('Game'),
-                onTap: () => Navigator.pop(context, _gameChoice),
+                leading: Icon(icon),
+                title: Text(label),
+                onTap: () => Navigator.pop(context, value),
               ),
           ]),
         ),
       );
-      if (choice == _gameChoice) {
-        if (mounted) await _startGame();
-        return;
-      }
-      if (choice is! PickSource) return;
-      source = choice;
     }
+    if (choice == _gameChoice) {
+      if (mounted) await _startGame();
+      return;
+    }
+    if (choice is! PickSource || !mounted) return;
+    final source = choice;
     final List<PickedMedia> picked;
     try {
       picked = await ref.read(photoPickerProvider)(source);
@@ -825,33 +835,23 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   bool get _enterSends =>
       kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
 
-  /// Attach, the text field, and Send (or the mic while the field is empty and recording works here).
+  /// "+" (the attach menu), the text field, and Send (or the mic while the field is empty and recording
+  /// works here).
   Widget _composer(bool canRecord) {
     final scheme = Theme.of(context).colorScheme;
     final t = FamTokens.of(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      IconButton(
-        tooltip: 'Attach photo or video',
-        icon: const Icon(Icons.add_photo_alternate_outlined),
-        style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-        onPressed: _attach,
-      ),
-      if (ref.watch(gifClientProvider).value != null && _editing == null)
-        IconButton(
-          tooltip: 'GIF',
-          icon: const Icon(Icons.gif_box_outlined),
-          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-          onPressed: _pickGif,
-        ),
-      // Where the attach button has no sheet to hold it, Game gets its own button.
-      if (!cameraAvailable && _canStartGame && _editing == null)
-        IconButton(
-          key: const Key('start-game'),
-          tooltip: 'Game',
-          icon: const Icon(Icons.casino_outlined),
-          style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-          onPressed: _startGame,
-        ),
+      if (_editing == null)
+        Builder(
+          builder: (context) => IconButton(
+            tooltip: 'Attach',
+            icon: const Icon(Icons.add_rounded),
+            style: IconButton.styleFrom(fixedSize: const Size.square(48)),
+            onPressed: () => _attach(context),
+          ),
+        )
+      else
+        const SizedBox(width: Space.sm),
       Expanded(
         child: CallbackShortcuts(
           bindings: _suggesting
@@ -970,6 +970,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final theme = Theme.of(context);
     final tokens = FamTokens.of(context);
     final canRecord = ref.watch(voiceRecordingSupportedProvider).value ?? false;
+    final gifs = ref.watch(gifClientProvider).value;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     if (keyboard > 150) _keyboardHeight = keyboard;
 
@@ -1007,12 +1008,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final changes = _changes = messageChanges(messages);
     final reactions = aggregateReactions(messages);
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
-    // Resigns and draw offers show as a line in the timeline; plays only move the card's board.
+    // Plays, pokes, resigns and draw offers show as lines in the timeline.
     String firstNameOf(String userId) => nameOf(userId).split(' ').first;
-    final gameEvents = {
-      for (final m in messages)
-        if (m.kind == 'move') m.id: ?gameEventOf(m, firstNameOf(m.senderUserId)),
-    };
+    final gameEvents = gameEventsOf(
+      messages,
+      plays: ref.watch(gamePlaysProvider(chatId)),
+      games: ref.watch(gamesProvider(chatId)),
+      me: me,
+      nameOf: firstNameOf,
+      shown: (m) => !timelineHiddenKinds.contains(m.kind),
+      readOnly: readOnly,
+    );
     final visible =
         messages.where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id)).toList();
     final byId = {for (final m in visible) m.id: m};
@@ -1048,7 +1054,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
               child: KeyedSubtree(
                 key: _keyFor(m.id),
-                child: GameEventLine(chatId: chatId, gameId: gameEvents[m.id]!.gameId, text: gameEvents[m.id]!.text),
+                child: GameEventLine(
+                  chatId: chatId,
+                  gameId: gameEvents[m.id]!.gameId,
+                  text: gameEvents[m.id]!.text,
+                  suffix: gameEvents[m.id]!.suffix,
+                  poke: gameEvents[m.id]!.poke,
+                ),
               ),
             ),
           MessageEntry(message: final m) when m.kind == 'game' => AppearIn(
@@ -1304,6 +1316,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                             ? EmojiPopover(
                                 handle: _emojiPopover,
                                 onSelected: _insertEmoji,
+                                gifs: _editing == null ? gifs : null,
+                                onGif: _sendGif,
                                 onClosed: () {
                                   if (mounted) _focus.requestFocus();
                                 },
@@ -1316,6 +1330,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       height: _keyboardHeight.clamp(240.0, 360.0),
                       onSelected: _insertEmoji,
                       onBackspace: () => _text.value = deleteBackward(_text.value),
+                      gifs: _editing == null ? gifs : null,
+                      onGif: _sendGif,
                     ),
                 ]),
               ),
@@ -1327,7 +1343,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-/// The attach sheet's Game entry.
+/// The attach menu's Game entry.
 const _gameChoice = #game;
 
 bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);

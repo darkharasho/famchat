@@ -37,6 +37,7 @@ class Win32Window {
   bool Create(const std::wstring& title, const Point& origin, const Size& size);
 
   // Show the current window. Returns true if the window was successfully shown.
+  // The first time, it opens maximized if it was maximized when it last closed.
   bool Show();
 
   // Release OS resources associated with window.
@@ -90,7 +91,22 @@ class Win32Window {
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
 
+  // Notes the window's rect while it is neither maximized nor minimized.
+  void RememberNormalRect(HWND hwnd);
+
+  // Writes the window's normal rect and maximized state to the registry, for
+  // Create to restore on the next launch.
+  void SavePlacement(HWND hwnd);
+
   bool quit_on_close_ = false;
+
+  // Whether the first Show maximizes: the window was maximized last time.
+  bool start_maximized_ = false;
+
+  // The window's last rect (screen coordinates, physical pixels) and its DPI,
+  // while neither maximized nor minimized.
+  RECT normal_rect_ = {0, 0, 0, 0};
+  UINT normal_dpi_ = 0;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

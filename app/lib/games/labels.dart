@@ -27,6 +27,7 @@ String? gameListLabel(MessageRow m) {
       'draw_offer' => '🤝 Offered a draw in ${game.title}',
       'draw_accept' => '🤝 Accepted a draw in ${game.title}',
       'draw_decline' => 'Declined a draw in ${game.title}',
+      'poke' => '👉 Poked in ${game.title}',
       _ => null,
     },
     _ => null,
@@ -48,6 +49,8 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
       return '🤝 Draw in $title';
     case 'draw_decline':
       return 'Declined a draw in $title';
+    case 'poke':
+      return '👉 Poked you · your turn in $title';
     case 'play':
       break;
     default:
@@ -87,7 +90,7 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
 }
 
 /// The game a timeline event [m] belongs to and what it says, with [who] as the actor ("You" or a name):
-/// resigns and draw offers, accepts and declines. Null for plays (the card shows those) and anything else.
+/// resigns and draw offers, accepts and declines. Null for plays and pokes (see [gameEventsOf]) and anything else.
 ({String gameId, String text})? gameEventOf(MessageRow m, String who) {
   if (m.kind != 'move') return null;
   final p = _decode(m);
@@ -101,4 +104,117 @@ Future<String?> gamePushLabel(ChatDb db, String chatId, MessageRow m) async {
     _ => null,
   };
   return text == null ? null : (gameId: p.target, text: text);
+}
+
+/// A game line in the timeline: [text], then [suffix] in bold (" · Your turn"), drawn tinted when [poke].
+typedef GameEvent = ({String gameId, String text, String? suffix, bool poke});
+
+/// The game lines for a chat's [messages] (oldest first), by message id: resigns and draw offers
+/// ([gameEventOf]), pokes, and plays the rules applied ([plays], from [playResults]). [games] are the
+/// chat's games now, [nameOf] gives "You" for [me] or a first name, and [shown] says whether a row
+/// that isn't a game line is drawn in the timeline.
+///
+/// A run of play lines for one game with nothing else drawn between them keeps only its newest. The
+/// newest play line of an unfinished game where it's [me]'s turn says " · Your turn", unless the chat
+/// is [readOnly].
+Map<String, GameEvent> gameEventsOf(
+  List<MessageRow> messages, {
+  required Map<String, GameState> plays,
+  required List<GameState> games,
+  required String? me,
+  required String Function(String userId) nameOf,
+  required bool Function(MessageRow m) shown,
+  bool readOnly = false,
+}) {
+  final byGame = {for (final g in games) g.id: g};
+  final out = <String, GameEvent>{};
+  final playIds = <String>{};
+  // The drawn rows in order: (id, game id of a play line or null).
+  final drawn = <(String, String?)>[];
+  for (final m in messages) {
+    if (m.kind != 'move') {
+      if (shown(m)) drawn.add((m.id, null));
+      continue;
+    }
+    final p = _decode(m);
+    if (p is! MoveBody) continue;
+    final title = p.game.title;
+    GameEvent? e;
+    switch (p.action['type']) {
+      case 'play':
+        final after = plays[m.id];
+        if (after == null) break;
+        final String text;
+        if (!after.over) {
+          text = '♟ ${nameOf(m.senderUserId)} moved in $title';
+        } else {
+          final winner = after.winnerUserId;
+          text = winner == null
+              ? '🤝 Draw in $title'
+              : '🏆 ${nameOf(winner)} won $title';
+        }
+        e = (gameId: p.target, text: text, suffix: null, poke: false);
+        playIds.add(m.id);
+      case 'poke':
+        final g = byGame[p.target];
+        if (g == null) break;
+        final sender = m.senderUserId;
+        final other = sender == g.firstUserId ? g.secondUserId : g.firstUserId;
+        final text = sender == me
+            ? '👉 You poked ${nameOf(other)} · $title'
+            : other == me
+            ? '👉 ${nameOf(sender)} poked you · Your turn in $title'
+            : '👉 ${nameOf(sender)} poked ${nameOf(other)} · $title';
+        e = (gameId: p.target, text: text, suffix: null, poke: true);
+      default:
+        final r = gameEventOf(m, nameOf(m.senderUserId));
+        if (r != null) {
+          e = (gameId: r.gameId, text: r.text, suffix: null, poke: false);
+        }
+    }
+    if (e == null) continue;
+    out[m.id] = e;
+    drawn.add((m.id, playIds.contains(m.id) ? e.gameId : null));
+  }
+  // Collapse: a play line followed directly by a play line of the same game goes.
+  for (var i = 0; i + 1 < drawn.length; i++) {
+    final game = drawn[i].$2;
+    if (game != null && drawn[i + 1].$2 == game) out.remove(drawn[i].$1);
+  }
+  if (me != null && !readOnly) {
+    final waiting = {
+      for (final g in games)
+        if (g.toMoveUserId == me) g.id,
+    };
+    for (final (id, game) in drawn.reversed) {
+      if (game == null || !waiting.remove(game)) continue;
+      final e = out[id]!;
+      out[id] = (
+        gameId: e.gameId,
+        text: e.text,
+        suffix: ' · Your turn',
+        poke: false,
+      );
+    }
+  }
+  return out;
+}
+
+/// When [me] last poked in game [gameId] (Unix ms, from the message rows so every device agrees), or null.
+int? lastPokeAt(List<MessageRow> rows, String gameId, String me) {
+  int? last;
+  for (final m in rows) {
+    if (m.kind != 'move' ||
+        m.senderUserId != me ||
+        m.targetId != gameId ||
+        m.state == 'failed') {
+      continue;
+    }
+    final p = _decode(m);
+    if (p is! MoveBody || p.target != gameId || p.action['type'] != 'poke') {
+      continue;
+    }
+    if (last == null || m.createdAt > last) last = m.createdAt;
+  }
+  return last;
 }

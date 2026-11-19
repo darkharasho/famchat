@@ -22,6 +22,17 @@ import 'plaintext.dart';
 import 'ulid.dart';
 import 'wire.dart';
 
+/// New messages from others that a reconnect's catch-up fetched for one chat this device already
+/// knew: what arrived while it was offline. Silent changes (reactions, edits, deletes) and messages
+/// failing verification are left out; read state isn't checked here.
+class CaughtUp {
+  const CaughtUp(this.chatId, this.messages);
+  final String chatId;
+
+  /// Oldest first.
+  final List<MessageRow> messages;
+}
+
 class ChatSync {
   ChatSync({
     required this.db,
@@ -89,6 +100,12 @@ class ChatSync {
   /// Users with at least one connected device.
   Stream<Set<String>> get online => _onlineCtl.stream;
   Set<String> get onlineNow => Set.unmodifiable(_online);
+
+  final _caughtUpCtl = StreamController<CaughtUp>.broadcast();
+
+  /// After each (re)connect's sync: a chat's messages that came in while this device was offline.
+  /// Desktop notifications use it, since the socket brought none of them as live events.
+  Stream<CaughtUp> get caughtUp => _caughtUpCtl.stream;
 
   /// chat id → users typing there now.
   Stream<Map<String, Set<String>>> get typingUsers => _typingCtl.stream;
@@ -193,7 +210,10 @@ class ChatSync {
     onFamiliesChanged?.call();
     final chats = await api.chats();
     final ids = {for (final c in chats) c.id};
-    for (final local in await db.allChats()) {
+    final locals = await db.allChats();
+    // A chat new to this device downloads its history: that's not news to notify about.
+    final known = {for (final c in locals) c.id};
+    for (final local in locals) {
       if (!ids.contains(local.id)) await db.deleteChat(local.id);
     }
     for (final c in chats) {
@@ -212,7 +232,13 @@ class ChatSync {
       }
     }
     for (final c in chats) {
-      await _catchUp(c.id);
+      final fresh = <MessageRow>[];
+      await _catchUp(c.id, fresh: fresh);
+      final news = [
+        for (final r in fresh)
+          if (r.senderUserId != me.userId && !changeKinds.contains(r.kind) && r.kind != 'invalid') r,
+      ];
+      if (known.contains(c.id) && news.isNotEmpty) _caughtUpCtl.add(CaughtUp(c.id, news));
     }
     await _retryUndecryptable();
     try {
@@ -223,29 +249,38 @@ class ChatSync {
     await _flushOutbox();
   }
 
-  /// Fetches every message after the chat's synced seq.
-  Future<void> _catchUp(String chatId) async {
+  /// Fetches every message after the chat's synced seq; rows stored for the first time are added
+  /// to [fresh].
+  Future<void> _catchUp(String chatId, {List<MessageRow>? fresh}) async {
     for (;;) {
       final chat = await db.chatById(chatId);
       if (chat == null) return;
       final page = await api.messages(chatId, after: chat.syncedSeq, limit: pageSize);
       for (final m in page) {
-        await _apply(m, catchingUp: true);
+        final row = await _apply(m, catchingUp: true);
+        if (row != null) fresh?.add(row);
       }
       if (page.length < pageSize) return;
     }
   }
 
-  Future<void> _apply(MessageDto m, {bool catchingUp = false}) async {
+  /// Stores [m]; returns its row when this is the first time this device stores it (else null).
+  Future<MessageRow?> _apply(MessageDto m, {bool catchingUp = false}) async {
     var chat = await db.chatById(m.chatId);
     if (chat == null) {
       await _refreshChat(m.chatId);
       chat = await db.chatById(m.chatId);
-      if (chat == null) return;
-      if (!catchingUp) return _catchUp(m.chatId);
+      if (chat == null) return null;
+      if (!catchingUp) {
+        await _catchUp(m.chatId);
+        return null;
+      }
     }
-    if (m.seq <= chat.syncedSeq) return;
-    if (m.seq > chat.syncedSeq + 1 && !catchingUp) return _catchUp(m.chatId);
+    if (m.seq <= chat.syncedSeq) return null;
+    if (m.seq > chat.syncedSeq + 1 && !catchingUp) {
+      await _catchUp(m.chatId);
+      return null;
+    }
     final existing = await db.messageById(m.id);
     final MessageRow row;
     if (existing != null) {
@@ -259,6 +294,7 @@ class ChatSync {
     await db.setSyncedSeq(m.chatId, m.seq);
     // A change to another message isn't chat activity (0 leaves last_message_at as it is).
     await db.noteActivity(m.chatId, m.seq, changeKinds.contains(row.kind) ? 0 : m.createdAt);
+    return existing == null ? row : null;
   }
 
   /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, photo, voice, unknown,

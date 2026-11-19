@@ -50,33 +50,46 @@ Future<String?> previewText({
       senderSignPub: b64urlDecode(device.signPub),
     );
     final p = Plaintext.decode(raw);
-    if (p is TextBody) {
-      final chars = p.text.characters;
-      return chars.length <= maxPreviewChars ? p.text : '${chars.take(maxPreviewChars)}…';
-    }
-    if (p is GameBody || p is MoveBody) {
-      return await gamePushLabel(
-        db,
-        chatId,
-        MessageRow(
-          id: messageId,
-          chatId: chatId,
-          seq: null,
-          senderUserId: senderUserId,
-          senderDeviceId: senderDeviceId,
-          kind: p.kind,
-          body: utf8.decode(raw),
-          targetId: p is MoveBody ? p.target : null,
-          envelope: null,
-          createdAt: 0,
-          state: 'sent',
-        ),
-      );
-    }
-    return mediaLabel(p.kind);
+    return await _previewOf(
+      db,
+      p,
+      MessageRow(
+        id: messageId,
+        chatId: chatId,
+        seq: null,
+        senderUserId: senderUserId,
+        senderDeviceId: senderDeviceId,
+        kind: p.kind,
+        body: utf8.decode(raw),
+        targetId: p is MoveBody ? p.target : null,
+        envelope: null,
+        createdAt: 0,
+        state: 'sent',
+      ),
+    );
   } catch (_) {
     return null;
   }
+}
+
+/// [previewText] for a message ChatSync already verified, decrypted and stored. Never throws.
+Future<String?> rowPreviewText(ChatDb db, MessageRow row) async {
+  final body = row.body;
+  if (body == null) return null;
+  try {
+    return await _previewOf(db, Plaintext.decode(utf8.encode(body)), row);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<String?> _previewOf(ChatDb db, Plaintext p, MessageRow row) async {
+  if (p is TextBody) {
+    final chars = p.text.characters;
+    return chars.length <= maxPreviewChars ? p.text : '${chars.take(maxPreviewChars)}…';
+  }
+  if (p is GameBody || p is MoveBody) return gamePushLabel(db, row.chatId, row);
+  return mediaLabel(p.kind);
 }
 
 /// The notification body: [preview] in a direct chat (or an unknown one or any non-group kind), `Name: preview` in a group.
