@@ -1,0 +1,3 @@
+# Runner labels newer than actionlint knows: xcode-27 is GitHub's Xcode 27 image (public preview).
+self-hosted-runner:
+  labels: [xcode-27]
