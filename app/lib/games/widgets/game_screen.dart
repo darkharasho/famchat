@@ -10,6 +10,7 @@ import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../chess_board.dart';
 import '../game_state.dart';
+import '../landlord/landlord.dart';
 import '../providers.dart';
 import '../rules.dart';
 import 'board_view.dart';
@@ -155,8 +156,8 @@ class _GameOverlay extends StatelessWidget {
       child: Center(
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: phone ? Space.md : Space.xl,
-            vertical: Space.xl,
+            horizontal: phone ? Space.xs : Space.xl,
+            vertical: phone ? Space.md : Space.xl,
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560, maxHeight: 760),
@@ -208,6 +209,32 @@ String? _finalScore(Board b, Outcome o) {
   if (s == null) return null;
   final (a, c) = o.winner == Side.second ? (s.$2, s.$1) : s;
   return '$a–$c';
+}
+
+/// Where the board sits in the panel: a square as wide as the panel (or less
+/// when the window is short), or, with [fill], all the room the panel has.
+Widget _boardSlot({
+  required bool fill,
+  required bool phone,
+  required Widget child,
+}) {
+  if (fill) {
+    return Expanded(
+      child: Padding(
+        padding: EdgeInsets.all(phone ? Space.xs : Space.lg),
+        child: child,
+      ),
+    );
+  }
+  return Flexible(
+    child: Padding(
+      padding: const EdgeInsets.all(Space.lg),
+      child: Align(
+        heightFactor: 1,
+        child: AspectRatio(aspectRatio: 1, child: child),
+      ),
+    ),
+  );
 }
 
 /// A game's board panel, live: plays, resignation, draw offers and Rematch.
@@ -447,29 +474,23 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           ),
         ),
         // The board takes the panel's width, or less when the window is short.
-        Flexible(
-          child: Padding(
-            padding: const EdgeInsets.all(Space.lg),
-            child: Align(
-              heightFactor: 1,
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: BoardView(
-                  board: g.board,
-                  mySide: mySide,
-                  enabled: myTurn,
-                  initials: (
-                    viewer.initialOf(g.firstUserId),
-                    viewer.initialOf(g.secondUserId),
-                  ),
-                  names: (
-                    viewer.nameOf(g.firstUserId),
-                    viewer.nameOf(g.secondUserId),
-                  ),
-                  onPlay: (m) => _send(g, {'type': 'play', ...m}),
-                ),
-              ),
+        // Landlord's ring stretches to any shape, so it fills the panel instead.
+        _boardSlot(
+          fill: g.board is LandlordBoard,
+          phone: MediaQuery.sizeOf(context).width < 600,
+          child: BoardView(
+            board: g.board,
+            mySide: mySide,
+            enabled: myTurn,
+            initials: (
+              viewer.initialOf(g.firstUserId),
+              viewer.initialOf(g.secondUserId),
             ),
+            names: (
+              viewer.nameOf(g.firstUserId),
+              viewer.nameOf(g.secondUserId),
+            ),
+            onPlay: (m) => _send(g, {'type': 'play', ...m}),
           ),
         ),
         if (canRematch(games, g, viewer))

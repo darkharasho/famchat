@@ -956,6 +956,25 @@ void main() {
     expect(board.width, closeTo(board.height, 0.5));
   });
 
+  chatTestWidgets('on a phone the Landlord board fills the panel, tall', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      size: const Size(390, 844),
+      messages: [game('l1', GameType.landlord, alice.userId, seed: 1)],
+    );
+    await openBoard(tester);
+    final board = tester.getSize(
+      find.descendant(
+        of: find.byType(GameScreen),
+        matching: find.byType(BoardView),
+      ),
+    );
+    expect(board.width, greaterThanOrEqualTo(370));
+    expect(board.height, greaterThan(board.width));
+  });
+
   chatTestWidgets('opening the board marks the chat read', (tester) async {
     await open(tester, messages: [game('g1', GameType.chess, bob.userId)]);
     await inApp(tester, () => alice.db.setMyLastRead(chatId, 0));

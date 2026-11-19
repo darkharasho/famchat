@@ -224,23 +224,15 @@ class LandlordView extends StatefulWidget {
 class _LandlordViewState extends State<LandlordView> {
   Timer? _settle;
 
-  /// After a roll, tokens wait for the dice to land before walking.
-  Duration _walkDelay = Duration.zero;
-
-  /// When the last move's token walk ends; the deed is dealt then.
-  Duration _arrival = Duration.zero;
+  /// How the last change plays out: token legs, when a card is dealt, and
+  /// when it has all arrived (money changes, a deed is dealt).
+  _Motion _motion = _Motion.none;
 
   @override
   void didUpdateWidget(LandlordView old) {
     super.didUpdateWidget(old);
     if (!identical(old.board, widget.board)) {
-      final roll = _lastRoll(widget.board);
-      _walkDelay = roll != null && !identical(roll, _lastRoll(old.board)) ? _tumble : Duration.zero;
-      _arrival = Duration.zero;
-      for (final p in Side.values) {
-        final t = _walkTime(old.board.position(p), widget.board.position(p), _walkDelay);
-        if (t > _arrival) _arrival = t;
-      }
+      _motion = _plan(old.board, widget.board);
       _settle?.cancel();
       _settle = Timer(LandlordView.settleTime, () {
         if (mounted) setState(() => _settle = null);
@@ -265,9 +257,15 @@ class _LandlordViewState extends State<LandlordView> {
     final balances = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Plate(name: _name(names, me), cash: board.cash(me), side: me, active: acting == me),
+        _Plate(name: _name(names, me), cash: board.cash(me), side: me, active: acting == me, changes: _motion.money[me] ?? const []),
         const SizedBox(width: 8),
-        _Plate(name: _name(names, me.other), cash: board.cash(me.other), side: me.other, active: acting == me.other),
+        _Plate(
+          name: _name(names, me.other),
+          cash: board.cash(me.other),
+          side: me.other,
+          active: acting == me.other,
+          changes: _motion.money[me.other] ?? const [],
+        ),
       ],
     );
     if (thumbnail) {
@@ -333,7 +331,7 @@ class _LandlordViewState extends State<LandlordView> {
                             width: 250,
                             child: Theme(
                               data: _feltTheme(theme),
-                              child: _Centre(view: w, armed: _settle == null, balances: balances, host: context, arrival: _arrival),
+                              child: _Centre(view: w, armed: _settle == null, balances: balances, host: context, motion: _motion),
                             ),
                           ),
                         ),
@@ -350,7 +348,7 @@ class _LandlordViewState extends State<LandlordView> {
                       side: p,
                       target: board.position(p),
                       size: _tokenSize(u),
-                      delay: _walkDelay,
+                      legs: _motion.legs[p] ?? const [],
                       centreOf: (i) {
                         final here = [
                           for (final q in Side.values)
@@ -371,10 +369,11 @@ class _LandlordViewState extends State<LandlordView> {
 }
 
 class _Centre extends StatelessWidget {
-  const _Centre({required this.view, required this.armed, required this.balances, required this.host, required this.arrival});
+  const _Centre({required this.view, required this.armed, required this.balances, required this.host, required this.motion});
 
-  /// How long until the moving token lands; the deed is dealt then.
-  final Duration arrival;
+  /// How the last change plays out: a card is dealt when the token reaches
+  /// its space, a deed once the token has arrived.
+  final _Motion motion;
 
   final LandlordView view;
 
@@ -406,7 +405,7 @@ class _Centre extends StatelessWidget {
         if (_drawnThisTurn(b) case final draw?) ...[
           _Dealt(
             key: ObjectKey(draw),
-            delay: arrival,
+            delay: motion.card,
             child: _CardFace(card: draw.card!),
           ),
           const SizedBox(height: 10),
@@ -414,7 +413,7 @@ class _Centre extends StatelessWidget {
         if (b.phase == LandlordPhase.buy) ...[
           _Dealt(
             key: ObjectKey(_lastRoll(b)),
-            delay: arrival,
+            delay: motion.arrival,
             child: _Deed(index: b.position(b.turn)),
           ),
           const SizedBox(height: 10),
@@ -471,7 +470,7 @@ class _Centre extends StatelessWidget {
             TextButton(key: const Key('open-log'), onPressed: () => _showLog(host), child: const Text('Log')),
             TextButton(
               key: const Key('open-properties'),
-              onPressed: () => showPropertiesSheet(host, b, me, names, view._legal, view.onPlay),
+              onPressed: () => showPropertiesSheet(host, b, me, names, view._legal, view.onPlay, canAct: view._canAct),
               child: const Text('Properties'),
             ),
             if (view.mySide != null)
@@ -520,7 +519,7 @@ class _Centre extends StatelessWidget {
         out.add(
           FilledButton(
             key: const Key('act-raise'),
-            onPressed: () => showPropertiesSheet(host, b, view.mySide ?? Side.first, view._names, view._legal, view.onPlay),
+            onPressed: () => showPropertiesSheet(host, b, view.mySide ?? Side.first, view._names, view._legal, view.onPlay, canAct: view._canAct),
             child: const Text('Raise cash'),
           ),
         );
@@ -796,10 +795,13 @@ class _Buildings extends StatelessWidget {
 /// A player's name and cash. [active] (whoever must act) is outlined in
 /// their token colour.
 class _Plate extends StatelessWidget {
-  const _Plate({required this.name, required this.cash, required this.side, required this.active});
+  const _Plate({required this.name, required this.cash, required this.side, required this.active, required this.changes});
 
   final String name;
   final int cash;
+
+  /// This move's changes to the balance and when each shows.
+  final List<(Duration, int)> changes;
   final Side side;
   final bool active;
 
@@ -844,6 +846,7 @@ class _Plate extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: _Cash(
               cash: cash,
+              changes: changes,
               style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()]),
             ),
           ),
@@ -965,4 +968,23 @@ class _Deed extends StatelessWidget {
       ),
     );
   }
+}
+
+/// For tests: how the change from [before] to [now] is shown. Each token's
+/// stops in order (the space and whether it glides there), each balance's
+/// changes (ms after the change, amount), when a drawn card is dealt and when
+/// the tokens have all arrived.
+@visibleForTesting
+({Map<Side, List<(int, bool)>> stops, Map<Side, List<(int, int)>> money, int cardMs, int arrivalMs}) landlordMotion(LandlordBoard before, LandlordBoard now) {
+  final m = _plan(before, now);
+  return (
+    stops: {
+      for (final e in m.legs.entries) e.key: [for (final l in e.value) (l.to, l.glide)],
+    },
+    money: {
+      for (final e in m.money.entries) e.key: [for (final (at, n) in e.value) (at.inMilliseconds, n)],
+    },
+    cardMs: m.card.inMilliseconds,
+    arrivalMs: m.arrival.inMilliseconds,
+  );
 }

@@ -119,6 +119,32 @@ void main() {
       await tester.tap(find.byKey(const Key('act-raise')));
       await tester.pumpAndSettle();
       expect(find.text('Acorn Lane'), findsOneWidget, reason: 'the properties sheet');
+      // Each property shows what it raises, and raises it from the list.
+      final acorn = find.byKey(const ValueKey('owned-1'));
+      expect(find.descendant(of: acorn, matching: find.text('Mortgage value \$30')), findsOneWidget);
+      expect(find.descendant(of: acorn, matching: find.text('Mortgage +\$30')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('raise-1')));
+      await tester.pump();
+      expect(played.last, {'a': 'mortgage', 'space': 1});
+      expect(find.byKey(const ValueKey('raise-1')), findsNothing, reason: 'mortgaged now');
+      expect(find.descendant(of: acorn, matching: find.text('Mortgaged')), findsOneWidget);
+      expect(find.textContaining('You · \$130'), findsOneWidget, reason: 'the cash keeps up');
+    });
+
+    testWidgets('passing Start then tax: +\$200, then −\$200, after the token moves', (tester) async {
+      final before = LandlordBoard.custom(rng: rollsSeed([(3, 5)]), positions: (36, 0));
+      await tester.pumpWidget(view(before));
+      await tester.pumpWidget(view(act(before, 'roll')));
+      final m = landlordMotion(before, act(before, 'roll'));
+      final (gain, loss) = (m.money[first]![0].$1, m.money[first]![1].$1);
+      await tester.pump(Duration(milliseconds: gain - 50));
+      expect(find.text('+\$200'), findsNothing, reason: 'not before the token passes Start');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('+\$200'), findsOneWidget);
+      await tester.pump(Duration(milliseconds: loss - gain));
+      expect(find.text('−\$200'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text('\$1,500'), findsWidgets);
     });
 
     testWidgets('a tap right after the board changes is ignored', (tester) async {
