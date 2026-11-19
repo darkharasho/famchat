@@ -50,7 +50,9 @@ concurrency:
 permissions:
   contents: read
 
+# Shorebird supports this Flutter; move it only to versions Shorebird lists (shorebird flutter versions list).
 env:
+  FLUTTER_VERSION: "3.47.9"
   BUNDLE_ID: dev.famchat.app
 
 jobs:
@@ -92,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: stable, cache: true }
 
       - name: Write the App Store Connect key
         env:
@@ -228,7 +230,7 @@ jobs:
       - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: "21" }
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: stable, cache: true }
 
       - name: Build the signed app bundle
         env:
@@ -306,7 +308,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: stable, cache: true }
 
       - name: Build
         run: flutter build macos --release --build-name "$NAME" --build-number "$NUMBER" --dart-define=FAMCHAT_VERSION="$NAME"
@@ -406,7 +408,7 @@ jobs:
 
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: stable, cache: true }
 
       # No --build-number: Windows puts it in the file version, whose parts stop at 65535.
       - name: Build
@@ -490,7 +492,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: stable, cache: true }
       - name: Install Linux build deps
         run: |
           sudo apt-get update

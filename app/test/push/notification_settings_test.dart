@@ -41,12 +41,7 @@ class FakePushController extends PushController {
 
 const switchKey = Key('settings-previews');
 
-Future<FakePreviews> pump(
-  WidgetTester t, {
-  PushMessaging? push,
-  bool local = true,
-  PushController? controller,
-}) async {
+Future<FakePreviews> pump(WidgetTester t, {PushMessaging? push, bool local = true, PushController? controller}) async {
   final previews = FakePreviews();
   final List<Override> overrides = [
     pushMessagingProvider.overrideWithValue(push),
@@ -58,54 +53,54 @@ Future<FakePreviews> pump(
     ProviderScope(
       overrides: overrides,
       child: const MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(child: NotificationSettingsGroup()),
-        ),
+        home: Scaffold(body: SingleChildScrollView(child: NotificationSettingsGroup())),
       ),
     ),
   );
   await t.pump();
-  // Reset before the test ends: the framework checks debug variables ahead of tearDown.
-  addTearDown(() => debugDefaultTargetPlatformOverride = null);
   return previews;
 }
 
-void main() {
-  testWidgets(
-    'shows the switch (off) with its copy when local notifications are available',
-    (t) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-      await pump(t);
-      expect(find.byKey(switchKey), findsOneWidget);
-      expect(find.text('Show message previews'), findsOneWidget);
-      expect(
-        find.text('Show what messages say. Only this device can read them.'),
-        findsOneWidget,
-      );
-      expect(t.widget<SwitchListTile>(find.byKey(switchKey)).value, isFalse);
-    },
-  );
+/// [testWidgets] on [platform]. The override is reset inside the test body: the framework checks
+/// debug variables before any tearDown runs.
+void testOn(String name, TargetPlatform platform, Future<void> Function(WidgetTester t) body) {
+  testWidgets(name, (t) async {
+    debugDefaultTargetPlatformOverride = platform;
+    try {
+      await body(t);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+}
 
-  testWidgets('shows the switch when push is available', (t) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+void main() {
+  testOn('shows the switch (off) with its copy when local notifications are available', TargetPlatform.linux, (
+    t,
+  ) async {
+    await pump(t);
+    expect(find.byKey(switchKey), findsOneWidget);
+    expect(find.text('Show message previews'), findsOneWidget);
+    expect(find.text('Show what messages say. Only this device can read them.'), findsOneWidget);
+    expect(t.widget<SwitchListTile>(find.byKey(switchKey)).value, isFalse);
+  });
+
+  testOn('shows the switch when push is available', TargetPlatform.android, (t) async {
     await pump(t, push: FakeMessaging(), local: false);
     expect(find.byKey(switchKey), findsOneWidget);
   });
 
-  testWidgets('is shown on iOS', (t) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+  testOn('is shown on iOS', TargetPlatform.iOS, (t) async {
     await pump(t, push: FakeMessaging());
     expect(find.byKey(switchKey), findsOneWidget);
   });
 
-  testWidgets('is absent when notifications are not available', (t) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+  testOn('is absent when notifications are not available', TargetPlatform.android, (t) async {
     await pump(t, local: false);
     expect(find.byKey(switchKey), findsNothing);
   });
 
-  testWidgets('toggling stores the new value', (t) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+  testOn('toggling stores the new value', TargetPlatform.linux, (t) async {
     final previews = await pump(t);
     await t.tap(find.byKey(switchKey));
     await t.pump();
@@ -113,28 +108,19 @@ void main() {
     expect(t.widget<SwitchListTile>(find.byKey(switchKey)).value, isTrue);
   });
 
-  testWidgets(
-    'on Android, toggling also tells the server through the push controller',
-    (t) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final controller = FakePushController();
-      final previews = await pump(
-        t,
-        push: FakeMessaging(),
-        local: false,
-        controller: controller,
-      );
-      await t.tap(find.byKey(switchKey));
-      await t.pump();
-      expect(previews.sets, [true]);
-      expect(controller.calls, [true]);
-    },
-  );
+  testOn('on Android, toggling also tells the server through the push controller', TargetPlatform.android, (t) async {
+    final controller = FakePushController();
+    final previews = await pump(t, push: FakeMessaging(), local: false, controller: controller);
+    await t.tap(find.byKey(switchKey));
+    await t.pump();
+    expect(previews.sets, [true]);
+    expect(controller.calls, [true]);
+  });
 
-  testWidgets(
+  testOn(
     'on Android without notification permission, toggling stores the value but registers nothing',
+    TargetPlatform.android,
     (t) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
       final messaging = FakeMessaging()..grantOnRequest = false;
       final registered = <(String, bool)>[];
       final controller = PushController(
