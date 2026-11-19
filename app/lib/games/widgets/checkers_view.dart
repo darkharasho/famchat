@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../checkers.dart';
 import '../rules.dart';
+import '../../theme/motion.dart';
 import 'board_parts.dart';
 
 /// Checkers. The viewer's back rank is at the bottom: row 0 for first (and
@@ -135,7 +136,24 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
 
   bool _isStart(int sq) => widget.board.legalPaths().any((p) => p[0] == sq);
 
+  /// Times a piece that can't move was tapped while a capture is due, and
+  /// the last such piece: it shakes and a hint shows.
+  int _nudges = 0;
+  int? _shakeSq;
+
   void _tap(int sq) {
+    final b = widget.board;
+    if (b.mustJump &&
+        b.at(sq)?.side == widget.mySide &&
+        !_isStart(sq) &&
+        !_targets.contains(sq)) {
+      setState(() {
+        _nudges++;
+        _shakeSq = sq;
+        _prefix = const [];
+      });
+      return;
+    }
     if (_prefix.isNotEmpty && _targets.contains(sq)) {
       final next = [..._prefix, sq];
       final complete = widget.board.legalPaths().any(
@@ -185,6 +203,24 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
   }
 
   Widget _build(BuildContext context) {
+    final board = _board(context);
+    if (_nudges == 0 || widget.thumbnail) return board;
+    return Stack(
+      children: [
+        board,
+        Positioned(
+          top: 10,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(child: _JumpHint(key: ValueKey(_nudges))),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _board(BuildContext context) {
     final colors = BoardColors.of(context);
     final flipped = widget.mySide == Side.second;
     final animating = moving && _mover != null;
@@ -209,6 +245,15 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
                 duration: const Duration(milliseconds: 140),
                 child: CheckersDisc(piece: piece),
               );
+        if (drawn != null && _nudges > 0 && sq == _shakeSq) {
+          drawn = _Shake(key: ValueKey(_nudges), child: drawn);
+        }
+        // With a capture due, the pieces that can make it are marked.
+        final jumper =
+            canPlay &&
+            widget.board.mustJump &&
+            selection.isEmpty &&
+            _isStart(sq);
         if (animating) {
           if (sq == _path.last) drawn = null;
           final jump = _jumped[sq];
@@ -231,7 +276,10 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
         }
         final tappable =
             canPlay &&
-            (_isStart(sq) || targets.contains(sq) || _prefix.isNotEmpty);
+            (_isStart(sq) ||
+                targets.contains(sq) ||
+                _prefix.isNotEmpty ||
+                widget.board.mustJump && piece?.side == widget.mySide);
         return BoardSquare(
           key: Key('sq-$sq'),
           color: colors.dark,
@@ -242,6 +290,8 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
               : null,
           outline: selection.isNotEmpty && sq == selection.last
               ? colors.selected
+              : jumper
+              ? colors.selected.withValues(alpha: 0.75)
               : null,
           piece: drawn,
           target: targets.contains(sq) ? TargetMark.dot : TargetMark.none,
@@ -305,6 +355,61 @@ class _CheckersViewState extends MoveMotionState<CheckersView> {
     final kind = p.piece == CheckersPiece.king ? 'king' : 'man';
     return 'square $sq, $side $kind';
   }
+}
+
+/// "You have to jump", shown over the board for a moment, fading in and
+/// out.
+class _JumpHint extends StatelessWidget {
+  const _JumpHint({super.key});
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    key: const Key('jump-hint'),
+    tween: Tween(begin: 0, end: 1),
+    duration: const Duration(milliseconds: 2400),
+    builder: (context, t, child) => Opacity(
+      opacity: t < 0.08
+          ? t / 0.08
+          : t > 0.8
+          ? (1 - t) / 0.2
+          : 1,
+      child: child,
+    ),
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xE6201C26),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        child: Text(
+          'You have to jump',
+          style: TextStyle(
+            color: Color(0xFFFFFFFF),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// [child] shaken side to side once, settling: "this one can't move".
+class _Shake extends StatelessWidget {
+  const _Shake({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween(begin: 0, end: 1),
+    duration: Duration(milliseconds: Motion.reduced(context) ? 0 : 420),
+    builder: (context, t, child) => Transform.translate(
+      offset: Offset(math.sin(t * math.pi * 6) * (1 - t) * 5, 0),
+      child: child,
+    ),
+    child: child,
+  );
 }
 
 /// A checkers disc with soft radial shading; kings carry a painted crown.

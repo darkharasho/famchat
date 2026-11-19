@@ -28,27 +28,56 @@ Future<void> showStartGameSheet(BuildContext context, String chatId) async {
   final container = ProviderScope.containerOf(context, listen: false);
   final sync = container.read(chatSyncProvider);
   final me = container.read(myUserIdProvider);
-  if (sync == null || me == null || choice is! GameType) return;
-  final id = await sync.startGame(chatId, choice, first: me);
+  if (sync == null || me == null || choice is! StartChoice) return;
+  final id = await sync.startGame(
+    chatId,
+    choice.type,
+    first: me,
+    optionalJumps: choice.optionalJumps,
+  );
   if (context.mounted) unawaited(openGame(context, chatId, id));
 }
 
+/// A game to start, with its house rules.
+class StartChoice {
+  const StartChoice(this.type, {this.optionalJumps = false});
+
+  final GameType type;
+
+  /// Checkers: captures may be skipped.
+  final bool optionalJumps;
+}
+
 /// The sheet's body: every game, quick ones first, then long ones. Pops with
-/// a [GameType] to start, or the id of an unfinished game to open. While a
-/// game of one kind is unfinished, that kind's games can't start: a line
-/// offers to open the running one instead.
-class StartGameSheet extends ConsumerWidget {
+/// a [StartChoice], or the id of an unfinished game to open. While a game of
+/// one kind is unfinished, that kind's games can't start: a line offers to
+/// open the running one instead. Checkers carries a chip to make jumps
+/// optional (by default a capture, when there is one, must be taken).
+class StartGameSheet extends ConsumerStatefulWidget {
   const StartGameSheet({super.key, required this.chatId});
 
   final String chatId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<StartGameSheet> createState() => _StartGameSheetState();
+}
+
+class _StartGameSheetState extends ConsumerState<StartGameSheet> {
+  bool _optionalJumps = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chatId = widget.chatId;
     final theme = Theme.of(context);
     final games = ref.watch(gamesProvider(chatId));
 
     Widget busy(GameState active) => Padding(
-      padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.xl, Space.sm),
+      padding: const EdgeInsets.fromLTRB(
+        Space.xl,
+        Space.sm,
+        Space.xl,
+        Space.sm,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -87,8 +116,32 @@ class StartGameSheet extends ConsumerWidget {
         ),
       ),
       title: Text(t.title),
-      subtitle: t.long ? const Text('A long game, played over days') : null,
-      onTap: enabled ? () => Navigator.pop(context, t) : null,
+      subtitle: t.long
+          ? const Text('A long game, played over days')
+          : t == GameType.checkers
+          ? Text(
+              _optionalJumps
+                  ? 'Jumps are optional'
+                  : 'If you can jump, you have to',
+            )
+          : null,
+      trailing: t == GameType.checkers && enabled
+          ? FilterChip(
+              key: const Key('optional-jumps'),
+              label: const Text('Optional jumps'),
+              selected: _optionalJumps,
+              onSelected: (v) => setState(() => _optionalJumps = v),
+            )
+          : null,
+      onTap: enabled
+          ? () => Navigator.pop(
+              context,
+              StartChoice(
+                t,
+                optionalJumps: t == GameType.checkers && _optionalJumps,
+              ),
+            )
+          : null,
     );
 
     List<Widget> section(bool long) {

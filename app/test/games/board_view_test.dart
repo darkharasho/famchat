@@ -907,4 +907,57 @@ void main() {
       ]);
     });
   });
+
+  group('checkers: a capture is due', () {
+    // First (me) can jump 9 over 13; 0 can't move this turn.
+    final due = CheckersBoard.custom({9: _fm, 13: _sm, 0: _fm}, Side.first);
+
+    Color? outlineOf(WidgetTester tester, int sq) {
+      for (final d in tester.widgetList<DecoratedBox>(
+        find.descendant(of: find.byKey(Key('sq-$sq')), matching: find.byType(DecoratedBox)),
+      )) {
+        final dec = d.decoration;
+        if (dec is BoxDecoration && dec.border != null && dec.shape == BoxShape.rectangle) {
+          return (dec.border! as Border).top.color;
+        }
+      }
+      return null;
+    }
+
+    testWidgets('the piece that can jump is marked; others are not', (tester) async {
+      await tester.pumpWidget(view(due));
+      expect(outlineOf(tester, 9), isNotNull);
+      expect(outlineOf(tester, 0), isNull);
+    });
+
+    testWidgets('tapping a piece that can\'t move says you have to jump', (tester) async {
+      await tester.pumpWidget(view(due));
+      expect(find.text('You have to jump'), findsNothing);
+      await tester.tap(find.byKey(const Key('sq-0')));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('You have to jump'), findsOneWidget);
+      expect(played, isEmpty);
+      await tester.pumpAndSettle();
+      // The jump still plays.
+      await tester.tap(find.byKey(const Key('sq-9')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('sq-18')));
+      expect(played, [
+        {'path': [9, 18]},
+      ]);
+    });
+
+    testWidgets('with optional jumps nothing is marked and steps play', (tester) async {
+      final free = CheckersBoard.custom({9: _fm, 13: _sm, 0: _fm}, Side.first, optionalJumps: true);
+      await tester.pumpWidget(view(free));
+      expect(outlineOf(tester, 9), isNull);
+      await tester.tap(find.byKey(const Key('sq-0')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('sq-4')));
+      expect(played, [
+        {'path': [0, 4]},
+      ]);
+      expect(find.text('You have to jump'), findsNothing);
+    });
+  });
 }

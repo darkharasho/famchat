@@ -94,7 +94,14 @@ sealed class Plaintext {
         final type = GameType.fromWire(game);
         final seed = wireInt(j['seed']);
         final validSeed = seed != null && seed >= 0 && seed <= 0xFFFFFFFF ? seed : null;
-        return type == null ? UnknownBody(kind, j) : GameBody(type, first, seed: validSeed);
+        return type == null
+            ? UnknownBody(kind, j)
+            : GameBody(
+                type,
+                first,
+                seed: validSeed,
+                optionalJumps: type == GameType.checkers && j['jumps'] == 'optional',
+              );
       case 'move':
         final target = j['target'], game = j['game'], ply = wireInt(j['ply']), action = j['action'];
         if (target is! String || target.isEmpty) throw const FormatException('bad move target');
@@ -496,16 +503,25 @@ String _mime(Map<String, Object?> j) {
 /// Starts a game in a direct chat; the message's id is the game's id (docs/protocol.md "Games").
 /// [first] is the user who moves first (X, dark, white).
 class GameBody extends Plaintext {
-  const GameBody(this.game, this.first, {this.seed});
+  const GameBody(this.game, this.first, {this.seed, this.optionalJumps = false});
   final GameType game;
   final String first;
 
   /// `0..4294967295`, for games with luck (docs/protocol.md "Games"); null when absent or invalid.
   final int? seed;
+
+  /// Checkers only: captures may be skipped (`"jumps": "optional"`; docs/protocol.md "Games").
+  final bool optionalJumps;
   @override
   String get kind => 'game';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'game': game.wire, 'first': first, 'seed': ?seed};
+  Map<String, Object?> toJson() => {
+    'kind': kind,
+    'game': game.wire,
+    'first': first,
+    'seed': ?seed,
+    if (optionalJumps && game == GameType.checkers) 'jumps': 'optional',
+  };
 }
 
 /// One action in the game [target] (a `game` message id) at move number [ply]. [action] has a string

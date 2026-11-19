@@ -98,4 +98,14 @@ void main() {
     expect(changeKinds, {'reaction', 'edit', 'delete'});
     expect(timelineHiddenKinds, {'reaction', 'edit', 'delete', 'move'});
   });
+
+  test('checkers can carry optional jumps; other games ignore it', () {
+    const g = GameBody(GameType.checkers, 'U1', optionalJumps: true);
+    expect(g.toJson(), {'kind': 'game', 'game': 'checkers', 'first': 'U1', 'jumps': 'optional'});
+    expect((Plaintext.decode(g.encode()) as GameBody).optionalJumps, isTrue);
+    expect(const GameBody(GameType.checkers, 'U1').toJson().containsKey('jumps'), isFalse);
+    expect(const GameBody(GameType.chess, 'U1', optionalJumps: true).toJson().containsKey('jumps'), isFalse);
+    expect((decode({'kind': 'game', 'game': 'chess', 'first': 'U1', 'jumps': 'optional'}) as GameBody).optionalJumps, isFalse);
+    expect((decode({'kind': 'game', 'game': 'checkers', 'first': 'U1', 'jumps': 'yes'}) as GameBody).optionalJumps, isFalse);
+  });
 }

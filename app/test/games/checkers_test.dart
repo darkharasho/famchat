@@ -279,4 +279,45 @@ void main() {
       isNull,
     );
   });
+
+  group('optional jumps', () {
+    // First can jump 9 over 13, or step elsewhere.
+    final pieces = {9: _fm, 13: _sm, 0: _fm};
+
+    test('by default a capture must be taken', () {
+      final b = CheckersBoard.custom(pieces, Side.first);
+      expect(b.mustJump, isTrue);
+      expect(b.legalPaths().every(CheckersBoard.isJump), isTrue);
+      expect(b.play({'path': [0, 4]}), isNull);
+    });
+
+    test('with optional jumps a plain step is legal too', () {
+      final b = CheckersBoard.custom(pieces, Side.first, optionalJumps: true);
+      expect(b.mustJump, isFalse);
+      expect(b.legalPaths().any(CheckersBoard.isJump), isTrue);
+      final stepped = b.play({'path': [0, 4]}) as CheckersBoard?;
+      expect(stepped, isNotNull);
+      expect(stepped!.optionalJumps, isTrue, reason: 'the rule carries on');
+    });
+
+    test('a jump, once begun, still has to continue', () {
+      // 9 over 13 to 18, then over 22 to 27.
+      final b = CheckersBoard.custom(
+        {9: _fm, 13: _sm, 22: _sm},
+        Side.first,
+        optionalJumps: true,
+      );
+      final jumps = b.legalPaths().where(CheckersBoard.isJump).toList();
+      expect(jumps, isNotEmpty);
+      expect(jumps.every((p) => p.length == 3), isTrue);
+    });
+
+    test('initialBoard takes the rule; no move left is still a loss', () {
+      final b = initialBoard(GameType.checkers, null, true) as CheckersBoard;
+      expect(b.optionalJumps, isTrue);
+      expect(start().optionalJumps, isFalse);
+      final stuck = CheckersBoard.custom({0: _sm}, Side.first, optionalJumps: true);
+      expect(stuck.outcome?.winner, Side.second);
+    });
+  });
 }

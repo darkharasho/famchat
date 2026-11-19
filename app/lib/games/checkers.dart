@@ -19,32 +19,47 @@ const _diagonals = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
 /// move toward higher rows; second's start on 20–31 and move toward lower
 /// rows. Move: `{"path": [from, landing1, landing2, ...]}`.
 ///
-/// Captures are mandatory and a jump sequence must continue while it can,
-/// except that a man reaching the far row is crowned and the move ends.
+/// Captures are mandatory, unless [optionalJumps] (a house rule chosen when
+/// the game starts): then a player may make a plain step instead. Either way
+/// a jump sequence, once begun, must continue while it can, except that a man
+/// reaching the far row is crowned and the move ends.
 class CheckersBoard implements Board {
-  CheckersBoard._(List<CheckersSquare?> squares, this.toMove, this.lastPath)
-    : _squares = List.unmodifiable(squares);
+  CheckersBoard._(
+    List<CheckersSquare?> squares,
+    this.toMove,
+    this.lastPath, {
+    this.optionalJumps = false,
+  }) : _squares = List.unmodifiable(squares);
 
-  factory CheckersBoard.initial() => CheckersBoard._(
-    [
-      for (var sq = 0; sq < 32; sq++)
-        sq < 12
-            ? const CheckersSquare(Side.first, CheckersPiece.man)
-            : sq >= 20
-            ? const CheckersSquare(Side.second, CheckersPiece.man)
-            : null,
-    ],
-    Side.first,
-    null,
-  );
+  factory CheckersBoard.initial({bool optionalJumps = false}) =>
+      CheckersBoard._(
+        [
+          for (var sq = 0; sq < 32; sq++)
+            sq < 12
+                ? const CheckersSquare(Side.first, CheckersPiece.man)
+                : sq >= 20
+                ? const CheckersSquare(Side.second, CheckersPiece.man)
+                : null,
+        ],
+        Side.first,
+        null,
+        optionalJumps: optionalJumps,
+      );
 
   @visibleForTesting
-  factory CheckersBoard.custom(Map<int, CheckersSquare> pieces, Side toMove) =>
-      CheckersBoard._(
-        [for (var sq = 0; sq < 32; sq++) pieces[sq]],
-        toMove,
-        null,
-      );
+  factory CheckersBoard.custom(
+    Map<int, CheckersSquare> pieces,
+    Side toMove, {
+    bool optionalJumps = false,
+  }) => CheckersBoard._(
+    [for (var sq = 0; sq < 32; sq++) pieces[sq]],
+    toMove,
+    null,
+    optionalJumps: optionalJumps,
+  );
+
+  /// Whether a player may step instead of capturing (a house rule).
+  final bool optionalJumps;
 
   final List<CheckersSquare?> _squares;
 
@@ -77,6 +92,15 @@ class CheckersBoard implements Board {
 
   late final List<List<int>> _legal = _computeLegal();
 
+  /// Whether [path] captures (its first leg crosses a piece).
+  static bool isJump(List<int> path) =>
+      path.length > 2 || (rowOf(path[0]) - rowOf(path[1])).abs() == 2;
+
+  /// Whether [toMove] has to capture this turn: a capture is available and
+  /// jumps aren't optional.
+  bool get mustJump =>
+      !optionalJumps && _legal.isNotEmpty && isJump(_legal.first);
+
   /// Every full legal move for [toMove], ordered by start square, then by
   /// direction (row-1/col-1, row-1/col+1, row+1/col-1, row+1/col+1), with
   /// jump sequences explored depth first.
@@ -102,7 +126,7 @@ class CheckersBoard implements Board {
       cells[sq] = null;
       _jumps(cells, sq, p.piece, [sq], jumps);
     }
-    if (jumps.isNotEmpty) return List.unmodifiable(jumps);
+    if (jumps.isNotEmpty && !optionalJumps) return List.unmodifiable(jumps);
 
     final steps = <List<int>>[];
     for (var sq = 0; sq < 32; sq++) {
@@ -115,7 +139,7 @@ class CheckersBoard implements Board {
         }
       }
     }
-    return List.unmodifiable(steps);
+    return List.unmodifiable([...jumps, ...steps]);
   }
 
   /// Extends [path] (ending at [from]) with every jump sequence. [cells] has
@@ -187,7 +211,12 @@ class CheckersBoard implements Board {
       piece = CheckersSquare(piece.side, CheckersPiece.king);
     }
     next[end] = piece;
-    return CheckersBoard._(next, toMove.other, match);
+    return CheckersBoard._(
+      next,
+      toMove.other,
+      match,
+      optionalJumps: optionalJumps,
+    );
   }
 }
 
