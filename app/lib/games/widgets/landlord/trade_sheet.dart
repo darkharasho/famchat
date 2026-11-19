@@ -23,13 +23,7 @@ Future<void> showTradeSheet(
 }
 
 class TradeComposer extends StatefulWidget {
-  const TradeComposer({
-    super.key,
-    required this.board,
-    required this.me,
-    required this.names,
-    required this.onPlay,
-  });
+  const TradeComposer({super.key, required this.board, required this.me, required this.names, required this.onPlay});
 
   final LandlordBoard board;
   final Side me;
@@ -58,9 +52,20 @@ class _TradeComposerState extends State<TradeComposer> {
     final other = them == Side.first ? widget.names.$1 : widget.names.$2;
     final valid = b.play(_offer) != null;
 
-    Widget column(String title, String prefix, Side owner, Set<int> picked, int cash, int cards,
-        void Function(int) setCash, void Function(int) setCards) {
-      final spaces = [for (var i = 0; i < 40; i++) if (b.owner(i) == owner) i];
+    Widget column(
+      String title,
+      String prefix,
+      Side owner,
+      Set<int> picked,
+      int cash,
+      int cards,
+      void Function(int) setCash,
+      void Function(int) setCards,
+    ) {
+      final spaces = [
+        for (var i = 0; i < 40; i++)
+          if (b.owner(i) == owner) i,
+      ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -112,7 +117,16 @@ class _TradeComposerState extends State<TradeComposer> {
         children: [
           Text('Offer a trade to $other', style: theme.textTheme.titleMedium),
           const SizedBox(height: 12),
-          column('You give', 'give', widget.me, _give, _giveCash, _giveCards, (v) => _giveCash = v, (v) => _giveCards = v),
+          column(
+            'You give',
+            'give',
+            widget.me,
+            _give,
+            _giveCash,
+            _giveCards,
+            (v) => _giveCash = v,
+            (v) => _giveCards = v,
+          ),
           const Divider(height: 24),
           column('You get', 'get', them, _get, _getCash, _getCards, (v) => _getCash = v, (v) => _getCards = v),
           const SizedBox(height: 16),

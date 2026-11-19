@@ -4,8 +4,7 @@ import '../../landlord/landlord.dart';
 import '../../rules.dart';
 import 'landlord_log.dart';
 
-String _owner((String, String) names, Side? s) =>
-    s == null ? 'The bank' : (s == Side.first ? names.$1 : names.$2);
+String _owner((String, String) names, Side? s) => s == null ? 'The bank' : (s == Side.first ? names.$1 : names.$2);
 
 /// Space [i]'s card: price, rents, owner and buildings, with Build / Sell /
 /// Mortgage / Unmortgage for the ones [legal] allows me now.
@@ -63,10 +62,7 @@ class SpaceCard extends StatelessWidget {
       ],
       if (s.kind == SpaceKind.station)
         for (var n = 1; n <= 4; n++) ('$n station${n == 1 ? '' : 's'} owned', money(25 << (n - 1))),
-      if (s.kind == SpaceKind.utility) ...[
-        ('One utility owned', '4× the dice'),
-        ('Both owned', '10× the dice'),
-      ],
+      if (s.kind == SpaceKind.utility) ...[('One utility owned', '4× the dice'), ('Both owned', '10× the dice')],
       if (s.ownable) ('Mortgage value', money(s.mortgageValue)),
     ];
     final actions = [
@@ -106,7 +102,12 @@ class SpaceCard extends StatelessWidget {
           for (final (k, v) in rows)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(children: [Expanded(child: Text(k)), Text(v)]),
+              child: Row(
+                children: [
+                  Expanded(child: Text(k)),
+                  Text(v),
+                ],
+              ),
             ),
         ] else
           Text(switch (s.kind) {
@@ -118,10 +119,7 @@ class SpaceCard extends StatelessWidget {
             SpaceKind.goToJail => 'Go straight to jail without collecting ${money(LandlordBoard.salary)}.',
             _ => '',
           }, style: small),
-        if (actions.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Wrap(spacing: 8, runSpacing: 8, children: actions),
-        ],
+        if (actions.isNotEmpty) ...[const SizedBox(height: 16), Wrap(spacing: 8, runSpacing: 8, children: actions)],
       ],
     );
   }
@@ -160,11 +158,7 @@ Future<void> showPropertiesSheet(
                   if (b.owner(i) == p)
                     ListTile(
                       dense: true,
-                      leading: Container(
-                        width: 12,
-                        height: 24,
-                        color: landlordSpaces[i].group!.color,
-                      ),
+                      leading: Container(width: 12, height: 24, color: landlordSpaces[i].group!.color),
                       title: Text(landlordSpaces[i].name),
                       subtitle: Text(
                         [

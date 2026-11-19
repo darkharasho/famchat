@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -8,6 +9,8 @@ import '../dots_and_boxes_view.dart';
 import 'landlord_log.dart';
 import 'space_sheet.dart';
 import 'trade_sheet.dart';
+
+part 'landlord_motion.dart';
 
 /// The board is a printed object on a table, the same in light and dark
 /// mode: paper spaces around a green felt centre.
@@ -177,10 +180,23 @@ class LandlordView extends StatefulWidget {
 class _LandlordViewState extends State<LandlordView> {
   Timer? _settle;
 
+  /// After a roll, tokens wait for the dice to land before walking.
+  Duration _walkDelay = Duration.zero;
+
+  /// When the last move's token walk ends; the deed is dealt then.
+  Duration _arrival = Duration.zero;
+
   @override
   void didUpdateWidget(LandlordView old) {
     super.didUpdateWidget(old);
     if (!identical(old.board, widget.board)) {
+      final roll = _lastRoll(widget.board);
+      _walkDelay = roll != null && !identical(roll, _lastRoll(old.board)) ? _tumble : Duration.zero;
+      _arrival = Duration.zero;
+      for (final p in Side.values) {
+        final t = _walkTime(old.board.position(p), widget.board.position(p), _walkDelay);
+        if (t > _arrival) _arrival = t;
+      }
       _settle?.cancel();
       _settle = Timer(LandlordView.settleTime, () {
         if (mounted) setState(() => _settle = null);
@@ -271,7 +287,13 @@ class _LandlordViewState extends State<LandlordView> {
                             width: 250,
                             child: Theme(
                               data: _feltTheme(theme),
-                              child: _Centre(view: w, armed: _settle == null, balances: balances, host: context),
+                              child: _Centre(
+                                view: w,
+                                armed: _settle == null,
+                                balances: balances,
+                                host: context,
+                                arrival: _arrival,
+                              ),
                             ),
                           ),
                         ),
@@ -279,6 +301,26 @@ class _LandlordViewState extends State<LandlordView> {
                     ),
                   ),
                 ),
+                // Tokens ride above everything; the one whose turn it is on top.
+                for (final p in [board.turn.other, board.turn])
+                  Theme(
+                    data: paper,
+                    child: _Walker(
+                      key: ValueKey('token-${p.name}'),
+                      side: p,
+                      target: board.position(p),
+                      size: _tokenSize(u),
+                      delay: _walkDelay,
+                      centreOf: (i) {
+                        final here = [
+                          for (final q in Side.values)
+                            if (board.position(q) == i) q,
+                        ];
+                        final k = here.indexOf(p);
+                        return _tokenCentre(i, k < 0 ? 0 : k, k < 0 ? 1 : here.length, u);
+                      },
+                    ),
+                  ),
               ],
             ),
           ),
@@ -289,7 +331,16 @@ class _LandlordViewState extends State<LandlordView> {
 }
 
 class _Centre extends StatelessWidget {
-  const _Centre({required this.view, required this.armed, required this.balances, required this.host});
+  const _Centre({
+    required this.view,
+    required this.armed,
+    required this.balances,
+    required this.host,
+    required this.arrival,
+  });
+
+  /// How long until the moving token lands; the deed is dealt then.
+  final Duration arrival;
 
   final LandlordView view;
 
@@ -316,22 +367,41 @@ class _Centre extends StatelessWidget {
       children: [
         balances,
         const SizedBox(height: 12),
-        if (dice != null) ...[
-          Semantics(
-            label: 'Dice: ${dice.$1} and ${dice.$2}',
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [_Die(dice.$1), const SizedBox(width: 8), _Die(dice.$2)],
-            ),
+        if (dice != null) ...[_Dice(values: dice, roll: _lastRoll(b)), const SizedBox(height: 10)],
+        if (_drawnThisTurn(b) case final draw?) ...[
+          _Dealt(
+            key: ObjectKey(draw),
+            delay: arrival,
+            child: _CardFace(card: draw.card!),
           ),
           const SizedBox(height: 10),
         ],
-        if (b.phase == LandlordPhase.buy) ...[_Deed(index: b.position(b.turn)), const SizedBox(height: 10)],
-        Text(
-          landlordStatus(b, me, names),
-          key: const Key('landlord-status'),
-          textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        if (b.phase == LandlordPhase.buy) ...[
+          _Dealt(
+            key: ObjectKey(_lastRoll(b)),
+            delay: arrival,
+            child: _Deed(index: b.position(b.turn)),
+          ),
+          const SizedBox(height: 10),
+        ],
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 260),
+          transitionBuilder: (child, a) => FadeTransition(
+            opacity: a,
+            child: SlideTransition(
+              position: Tween(begin: const Offset(0, 0.35), end: Offset.zero).animate(a),
+              child: child,
+            ),
+          ),
+          child: KeyedSubtree(
+            key: ValueKey(landlordStatus(b, me, names)),
+            child: Text(
+              landlordStatus(b, me, names),
+              key: const Key('landlord-status'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
         ),
         if (b.trade case final o?) ...[
           const SizedBox(height: 2),
@@ -343,12 +413,18 @@ class _Centre extends StatelessWidget {
           const SizedBox(height: 10),
           Text('While you were away', style: theme.textTheme.labelMedium),
           for (final e in shown)
-            Text(
-              landlordLog(e, names),
-              style: small,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(landlordLogIcon(e), size: 14, color: landlordTokenColor(context, e.actor)),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(landlordLog(e, names), style: small, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
             ),
           if (away.length > shown.length)
             TextButton(
@@ -472,7 +548,19 @@ class _Centre extends StatelessWidget {
                     ? const Center(child: Text('Nothing yet'))
                     : ListView.builder(
                         itemCount: events.length,
-                        itemBuilder: (context, i) => ListTile(dense: true, title: Text(landlordLog(events[i], names))),
+                        itemBuilder: (context, i) {
+                          final e = events[i];
+                          final c = landlordTokenColor(context, e.actor);
+                          return ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: c.withValues(alpha: 0.16),
+                              child: Icon(landlordLogIcon(e), size: 17, color: c),
+                            ),
+                            title: Text(landlordLog(e, names)),
+                          );
+                        },
                       ),
               ),
             ],
@@ -507,7 +595,7 @@ class _SpaceTile extends StatelessWidget {
     final label = switch (s.kind) {
       SpaceKind.card => s.deck == LandlordDeck.luck ? 'Luck' : 'Fund',
       SpaceKind.tax => 'Tax',
-      SpaceKind.station => '${s.name.split(' ').first}\nStn',
+      SpaceKind.station => s.name.split(' ').first,
       SpaceKind.utility => index == 12 ? 'Power' : 'Water',
       SpaceKind.start => 'Start',
       SpaceKind.jail => 'Jail',
@@ -515,30 +603,31 @@ class _SpaceTile extends StatelessWidget {
       SpaceKind.goToJail => 'Go to\nJail',
       SpaceKind.property => s.name.split(' ').first,
     };
-    final corner = switch (s.kind) {
+    final icon = switch (s.kind) {
       SpaceKind.start => Icons.west,
       SpaceKind.jail => Icons.lock_outline,
       SpaceKind.rest => Icons.local_cafe_outlined,
       SpaceKind.goToJail => Icons.local_police_outlined,
-      _ => null,
+      SpaceKind.card => landlordDeckIcon(s.deck!),
+      SpaceKind.tax => Icons.account_balance_outlined,
+      SpaceKind.station => Icons.train_outlined,
+      SpaceKind.utility => index == 12 ? Icons.bolt : Icons.water_drop_outlined,
+      SpaceKind.property => null,
     };
     final tokens = [
       for (final p in Side.values)
         if (board.position(p) == index) p,
     ];
     // The outer edge, where the owner's bar sits.
-    final outer = switch (dir) {
-      AxisDirection.up => Alignment.bottomCenter,
-      AxisDirection.down => Alignment.topCenter,
-      AxisDirection.left => Alignment.centerRight,
-      AxisDirection.right => Alignment.centerLeft,
-    };
+    final outer = _outerOf(dir);
     final body = Stack(
       fit: StackFit.expand,
       children: [
         Padding(
           padding: const EdgeInsets.all(1.5),
-          child: Align(
+          child: AnimatedAlign(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
             alignment: switch ((index % 10 == 0, vertical, tokens.isEmpty)) {
               (true, _, _) => const Alignment(0, -0.4),
               // A side space with a token: the name moves up out of its way.
@@ -547,10 +636,16 @@ class _SpaceTile extends StatelessWidget {
             },
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              child: Column(
+              // Corners and top/bottom spaces: icon over the name; side
+              // spaces (wide and short): icon before it.
+              child: Flex(
+                direction: index % 10 == 0 || vertical ? Axis.vertical : Axis.horizontal,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (corner != null) Icon(corner, size: unit * 0.7, color: theme.colorScheme.onSurfaceVariant),
+                  if (icon != null) ...[
+                    Icon(icon, size: unit * (index % 10 == 0 ? 0.7 : 0.5), color: theme.colorScheme.onSurfaceVariant),
+                    if (!(index % 10 == 0 || vertical)) SizedBox(width: unit * 0.08),
+                  ],
                   Text(
                     label,
                     textAlign: TextAlign.center,
@@ -568,39 +663,21 @@ class _SpaceTile extends StatelessWidget {
         if (owner != null)
           Align(
             alignment: outer,
-            child: FractionallySizedBox(
-              widthFactor: vertical ? 0.7 : 0.12,
-              heightFactor: vertical ? 0.1 : 0.7,
+            // A new owner's bar grows out from the middle.
+            child: TweenAnimationBuilder<double>(
+              key: ValueKey(owner),
+              tween: Tween(begin: _still(context) ? 1 : 0, end: 1),
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeOutBack,
+              builder: (context, g, child) => FractionallySizedBox(
+                widthFactor: vertical ? 0.7 * g : 0.12,
+                heightFactor: vertical ? 0.1 : 0.7 * g,
+                child: child,
+              ),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: landlordTokenColor(context, owner),
                   borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-          ),
-        for (final (k, p) in tokens.indexed)
-          Align(
-            // Corners and side spaces: side by side under the name. Top and
-            // bottom spaces: on the outer half.
-            alignment: index % 10 == 0
-                ? Alignment(tokens.length == 2 ? (k == 0 ? -0.35 : 0.35) : 0, 0.85)
-                : vertical
-                ? Alignment(tokens.length == 2 ? (k == 0 ? -0.5 : 0.5) : 0, 0.55 * outer.y)
-                : Alignment(-0.6 * outer.x + (tokens.length == 2 ? (k == 0 ? -0.3 : 0.3) : 0), 0.8),
-            child: FractionallySizedBox(
-              widthFactor: index % 10 == 0 ? 0.24 : (vertical ? 0.62 : 0.24),
-              heightFactor: index % 10 == 0 ? 0.24 : (vertical ? 0.31 : 0.48),
-              child: FittedBox(
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: landlordTokenColor(context, p),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: theme.colorScheme.surface, width: 1.5),
-                    boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 2, offset: Offset(0, 1))],
-                  ),
                 ),
               ),
             ),
@@ -746,8 +823,8 @@ class _Plate extends StatelessWidget {
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              money(cash),
+            child: _Cash(
+              cash: cash,
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
                 fontFeatures: const [FontFeature.tabularFigures()],

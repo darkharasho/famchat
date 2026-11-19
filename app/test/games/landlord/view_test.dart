@@ -182,6 +182,29 @@ void main() {
       ]);
     });
 
+    testWidgets('a card drawn this turn is shown face up', (tester) async {
+      final luck = [LandlordCard.luckBack3.index, for (var i = 0; i < 16; i++) if (i != LandlordCard.luckBack3.index) i];
+      final b = act(LandlordBoard.custom(rng: rollsSeed([(1, 2)]), positions: (4, 0), luck: luck), 'roll');
+      await tester.pumpWidget(view(b));
+      await tester.pumpAndSettle();
+      expect(find.text('Go back 3 spaces'), findsOneWidget);
+      await tester.pumpWidget(view(act(b, 'end_turn')));
+      await tester.pumpAndSettle();
+      expect(find.text('Go back 3 spaces'), findsNothing, reason: 'gone once the turn ends');
+    });
+
+    testWidgets('after a roll the token walks to its space', (tester) async {
+      final before = LandlordBoard.custom(rng: rollsSeed([(2, 4)]));
+      await tester.pumpWidget(view(before));
+      await tester.pumpWidget(view(act(before, 'roll')));
+      final token = find.byKey(const ValueKey('token-first'));
+      final dest = tester.getRect(find.byKey(const Key('space-6')));
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(dest.contains(tester.getCenter(token)), isFalse, reason: 'still on the way');
+      await tester.pumpAndSettle();
+      expect(dest.contains(tester.getCenter(token)), isTrue);
+    });
+
     testWidgets('a thumbnail has no ring', (tester) async {
       await tester.pumpWidget(view(LandlordBoard.setup(1), thumbnail: true));
       expect(anySpace, findsNothing);
