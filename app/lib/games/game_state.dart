@@ -105,7 +105,7 @@ List<GameState> _walk(
           !memberIds.contains(body.first) ||
           second == null ||
           (body.game.seeded && body.seed == null) ||
-          games.any((g) => !g.inert && g.outcome == null);
+          games.any((g) => !g.inert && g.outcome == null && g.type.long == body.game.long);
       final g = _Game(r.id, body.game, body.first, second ?? '', inert, r.seq, body.seed);
       games.add(g);
       byId[r.id] = g;
@@ -177,7 +177,12 @@ class GameCache {
           !memberIds.contains(first) ||
           second == null ||
           (s.body.game.seeded && s.body.seed == null) ||
-          done.any((d) => !d.$2.game.inert && !_endedBefore(d, s.pos));
+          done.any(
+            (d) =>
+                !d.$2.game.inert &&
+                d.$2.game.type.long == s.body.game.long &&
+                !_endedBefore(d, s.pos),
+          );
       done.add((s, _entryFor(s, second ?? '', inert)));
     }
     _entries
@@ -267,9 +272,15 @@ class _Entry {
   final GameState state;
 }
 
-/// The unfinished, non-inert game, if any.
-GameState? activeGame(List<GameState> games) =>
-    games.where((g) => !g.inert && !g.over).firstOrNull;
+/// The unfinished, non-inert game of the long or quick kind, if any.
+GameState? activeGame(List<GameState> games, {required bool long}) =>
+    games.where((g) => !g.inert && !g.over && g.type.long == long).firstOrNull;
+
+/// The unfinished games: the long one first, then the quick one.
+List<GameState> activeGames(List<GameState> games) => [
+  ?activeGame(games, long: true),
+  ?activeGame(games, long: false),
+];
 
 Plaintext? _decode(MessageRow r) {
   final body = r.body;

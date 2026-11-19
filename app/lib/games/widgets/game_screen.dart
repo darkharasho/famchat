@@ -169,11 +169,15 @@ class _GameOverlay extends StatelessWidget {
 }
 
 /// Whether [g] offers Rematch: it's over, mine, the chat is writable and it is
-/// the chat's newest game that started (inert ones never did).
+/// the chat's newest game of its kind (long or quick) that started (inert
+/// ones never did).
 bool canRematch(List<GameState> games, GameState g, GameViewer viewer) {
   final me = viewer.me;
   final mine = g.firstUserId == me || g.secondUserId == me;
-  final newest = games.lastWhere((x) => !x.inert, orElse: () => g);
+  final newest = games.lastWhere(
+    (x) => !x.inert && x.type.long == g.type.long,
+    orElse: () => g,
+  );
   return g.over && !viewer.readOnly && mine && newest.id == g.id;
 }
 
@@ -183,7 +187,7 @@ bool canRematch(List<GameState> games, GameState g, GameViewer viewer) {
 Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
   final sync = ref.read(chatSyncProvider);
   if (sync == null) return null;
-  final active = activeGame(ref.read(gamesProvider(chatId)));
+  final active = activeGame(ref.read(gamesProvider(chatId)), long: g.type.long);
   if (active != null) return active.id;
   return sync.startGame(chatId, g.type, first: g.secondUserId);
 }
@@ -342,7 +346,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         ],
       );
     }
-    final running = g.inert ? activeGame(games) : null;
+    final running = g.inert ? activeGame(games, long: g.type.long) : null;
     final me = viewer.me;
     final mySide = me == null ? null : g.sideOf(me);
     final live = !g.inert && !g.over && !viewer.readOnly && mySide != null;
@@ -355,7 +359,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (outcome != null) {
       final reason = outcome.reason == 'resigned'
           ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} resigned'
-          : outcome.reason == 'discs' || outcome.reason == 'boxes'
+          : outcome.reason == 'bankrupt'
+          ? '${viewer.nameOf(g.winnerUserId == g.firstUserId ? g.secondUserId : g.firstUserId)} went bankrupt'
+          : outcome.reason == 'discs' ||
+                outcome.reason == 'boxes' ||
+                outcome.reason == 'books'
           ? _finalScore(g.board, outcome)
           : _reasons[outcome.reason];
       if (reason != null) status = '$status · $reason';

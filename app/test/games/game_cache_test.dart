@@ -9,11 +9,14 @@ import 'package:famchat/games/checkers.dart';
 import 'package:famchat/games/chess_board.dart';
 import 'package:famchat/games/game_state.dart';
 import 'package:famchat/games/go_fish.dart';
+import 'package:famchat/games/landlord/landlord.dart';
 import 'package:famchat/games/providers.dart';
 import 'package:famchat/games/rules.dart';
 import 'package:famchat/games/tictactoe.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'landlord/helpers.dart';
 
 /// Everything a [GameState] shows, so two states can be compared.
 String fingerprint(GameState g) {
@@ -35,6 +38,12 @@ String fingerprint(GameState g) {
       b.books(Side.first),
       b.books(Side.second),
       b.stockCount,
+    ].join(','),
+    LandlordBoard() => [
+      for (final s in Side.values) ...[b.cash(s), b.position(s)],
+      for (var i = 0; i < 40; i++) '${b.owner(i)?.name}${b.level(i)}${b.isMortgaged(i)}',
+      b.phase,
+      b.events.length,
     ].join(','),
     _ => '?',
   };
@@ -123,6 +132,10 @@ Map<String, Object?> randomPlay(Random rnd, GameState g) {
     if (hand.isEmpty) return {'type': 'play', 'rank': 1};
     return {'type': 'play', 'rank': GoFishBoard.rankOf(hand[rnd.nextInt(hand.length)])};
   }
+  if (b is LandlordBoard) {
+    final a = randomLandlordAction(rnd, b);
+    return {'type': 'play', ...?a};
+  }
   return {'type': 'play'};
 }
 
@@ -197,6 +210,31 @@ void main() {
         );
       }
     }
+  });
+
+  test('a quick game during Landlord, then a second quick game: only that one is inert', () {
+    final steps = [
+      _Msg('l', 'A', const GameBody(GameType.landlord, 'A', seed: 5)),
+      _Msg('c', 'B', const GameBody(GameType.chess, 'B')),
+      _Msg('m1', 'A', const MoveBody('l', GameType.landlord, 0, {'type': 'play', 'a': 'roll'})),
+      _Msg('k', 'A', const GameBody(GameType.checkers, 'A')),
+      _Msg('m2', 'B', const MoveBody('c', GameType.chess, 0, {'type': 'play', 'uci': 'e2e4'})),
+      _Msg('m3', 'A', const MoveBody('c', GameType.chess, 1, {'type': 'resign'})),
+      _Msg('k2', 'B', const GameBody(GameType.checkers, 'B')),
+    ];
+    final msgs = <_Msg>[];
+    final cache = GameCache();
+    var seq = 0;
+    for (final m in steps) {
+      msgs.add(m); // pending first
+      expect(prints(cache.derive(_ordered(msgs), ['A', 'B'])), prints(deriveGames(_ordered(msgs), ['A', 'B'])));
+      m
+        ..seq = ++seq
+        ..state = 'sent';
+      expect(prints(cache.derive(_ordered(msgs), ['A', 'B'])), prints(deriveGames(_ordered(msgs), ['A', 'B'])));
+    }
+    final games = cache.derive(_ordered(msgs), ['A', 'B']);
+    expect({for (final g in games) g.id: g.inert}, {'l': false, 'c': false, 'k': true, 'k2': false});
   });
 
   test('a finished game keeps its state object across emissions', () {

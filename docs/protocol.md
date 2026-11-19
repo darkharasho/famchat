@@ -107,10 +107,10 @@ chat's `lastMessageAt`.
 Reactions, edits and deletes are sent with `silent: true` (see `send`), so they don't notify anyone.
 
 ### Games
-Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`), Dots and Boxes (`dotsandboxes`) and Go Fish (`gofish`). All are plain messages.
+Direct chats can hold games: tic-tac-toe (`tictactoe`), checkers (`checkers`), chess (`chess`), Four in a Row (`fourinarow`), Reversi (`reversi`), Dots and Boxes (`dotsandboxes`), Go Fish (`gofish`) and Landlord (`landlord`, a property-trading game). All are plain messages.
 
 ```
-{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes|gofish", "first":"<userId>", "seed":3735928559}
+{"kind":"game", "game":"tictactoe|checkers|chess|fourinarow|reversi|dotsandboxes|gofish|landlord", "first":"<userId>", "seed":3735928559}
 {"kind":"move", "target":"<gameMessageId>", "game":"...", "ply":0, "action":{"type":"play", ...}}
 ```
 
@@ -133,8 +133,8 @@ non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `
 Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
-Games with luck (`gofish`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
-generator when starting a game or a rematch. A `gofish` game without a valid seed (missing, out of range, not an
+Games with luck (`gofish`, `landlord`) need a `seed`: an integer in `0..4294967295`, picked by the sender with a secure random
+generator when starting a game or a rematch. A `gofish` or `landlord` game without a valid seed (missing, out of range, not an
 integer) is inert like a game started while another was running. Other games never send a seed and ignore one.
 Every device turns the seed into the same shuffle with this generator, which is permanent (changing it would
 change every past game):
@@ -175,6 +175,21 @@ Move fields of `play`:
   hand first; then a player with no cards draws one from the stock, the mover first. A player to move with no cards
   and an empty stock is passed over automatically (no message). The game ends at 13 books: more books wins (reason
   `books`). No draw offers. Hands are hidden by the clients' screens only.
+- Landlord: `{"a": "<action>", ...}`. A two-player property-trading game on a 40-space board (`0..39` clockwise
+  from Start; prices, rents and the two 16-card decks, Luck ids `0..15` and Family Fund `16..31`, are fixed in
+  `app/lib/games/landlord/`). Setup: the generator is created from the seed, Luck `[0..15]` is shuffled, then
+  Family Fund `[16..31]`; both start with 1500 at Start. Dice are `randInt(6) + 1` twice. Cards are drawn from the
+  top and go to the bottom before they take effect; a get out of jail free card is held until used. Whoever must
+  act sends the next `play`: a player in debt, else the receiver of a trade
+  offer, else the turn player. Actions: `roll`, `pay_bail`, `use_card`, `buy`, `decline` (no auction: the property stays
+  unowned), `end_turn`, `build {space}`, `sell {space}`, `mortgage {space}`,
+  `unmortgage {space}`, `offer {give: {cash, spaces, cards}, get: {cash, spaces, cards}}`, `accept`, `reject` and
+  `bankrupt`. A payment that can't be made becomes a debt the debtor clears by selling or mortgaging (it is paid
+  as soon as the cash covers it); a debtor who can't raise enough even by selling everything is bankrupt and the
+  other player wins (reason `bankrupt`). Draw offers are allowed.
+
+A direct chat runs at most one long game (Landlord) and one quick game (all the others) at once: a `game` message is
+inert if an unfinished, non-inert game of the same kind was running when it landed.
 
 ### Link previews
 A text may carry a card for its first link, made by the sender:

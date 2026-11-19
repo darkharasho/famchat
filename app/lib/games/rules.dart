@@ -3,6 +3,7 @@ import 'chess_board.dart';
 import 'dots_and_boxes.dart';
 import 'four_in_a_row.dart';
 import 'go_fish.dart';
+import 'landlord/landlord.dart';
 import 'reversi.dart';
 import 'tictactoe.dart';
 
@@ -30,7 +31,8 @@ enum GameType {
   fourinarow('fourinarow', 'Four in a Row'),
   reversi('reversi', 'Reversi'),
   dotsandboxes('dotsandboxes', 'Dots and Boxes'),
-  gofish('gofish', 'Go Fish');
+  gofish('gofish', 'Go Fish'),
+  landlord('landlord', 'Landlord');
 
   const GameType(this.wire, this.title);
 
@@ -38,7 +40,11 @@ enum GameType {
 
   /// Whether the game needs the `game` message's `seed` (it shuffles or
   /// rolls). Without a valid seed such a game is inert.
-  bool get seeded => this == gofish;
+  bool get seeded => this == gofish || this == landlord;
+
+  /// Long games (days) get their own slot: a DM can run one long and one
+  /// quick game at once.
+  bool get long => this == landlord;
 
   static GameType? fromWire(String s) {
     for (final t in values) {
@@ -49,7 +55,7 @@ enum GameType {
 }
 
 /// [winner] null means a draw. [reason] is one of 'line', 'full', 'no_moves',
-/// 'checkmate', 'stalemate', 'discs', 'boxes', 'books', 'threefold', 'fifty_moves',
+/// 'checkmate', 'stalemate', 'discs', 'boxes', 'books', 'bankrupt', 'threefold', 'fifty_moves',
 /// 'insufficient', 'resigned' or 'agreed'.
 class Outcome {
   const Outcome(this.winner, this.reason);
@@ -93,5 +99,7 @@ Board initialBoard(GameType t, [int? seed]) {
       return DotsAndBoxesBoard.initial();
     case GameType.gofish:
       return GoFishBoard.deal(seed ?? 0);
+    case GameType.landlord:
+      return LandlordBoard.setup(seed ?? 0);
   }
 }

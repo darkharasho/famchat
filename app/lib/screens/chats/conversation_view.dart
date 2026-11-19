@@ -21,7 +21,7 @@ import '../../chat/providers.dart';
 import '../../chat/spelling/providers.dart';
 import '../../chat/spelling/speller.dart';
 import '../../chat/reactions.dart';
-import '../../games/game_state.dart' show activeGame;
+import '../../games/game_state.dart' show GameState, activeGames;
 import '../../games/providers.dart';
 import '../../games/widgets/game_bar.dart';
 import '../../games/widgets/game_card.dart';
@@ -995,7 +995,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         ? {for (final m in members) if (m.userId != me && users[m.userId] != null) m.userId: users[m.userId]!.name}
         : const {};
     _canStartGame = !group && !readOnly && other != null;
-    final active = group ? null : activeGame(ref.watch(gamesProvider(chatId)));
+    final active = group ? const <GameState>[] : activeGames(ref.watch(gamesProvider(chatId)));
     final otherOnline = other != null && online.contains(other);
     final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
@@ -1198,7 +1198,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   ),
                 ],
               ),
-            if (active != null) GameBar(chatId: chatId, game: active),
+            for (final g in active) GameBar(key: ValueKey(g.id), chatId: chatId, game: g),
             Expanded(
               // Phones: a tap on the messages (not on a link or button in one) puts the keyboard
               // or emoji picker away.
