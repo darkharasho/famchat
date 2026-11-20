@@ -102,9 +102,10 @@ jobs:
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
           ICONS: ${{ steps.release.outputs.icons }}
+          PATCH_FLAGS: ${{ steps.release.outputs.patch_flags }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          shorebird patch ios --no-codesign --release-version="$VERSION" --track="$TRACK" -- \
+          shorebird patch ios --no-codesign --release-version="$VERSION" --track="$TRACK" $PATCH_FLAGS -- \
             --build-name "$NAME" --build-number "$NUMBER" $ICONS \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched iOS release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
@@ -133,8 +134,9 @@ jobs:
           NAME: ${{ steps.release.outputs.name }}
           NUMBER: ${{ steps.release.outputs.number }}
           ICONS: ${{ steps.release.outputs.icons }}
+          PATCH_FLAGS: ${{ steps.release.outputs.patch_flags }}
         run: |
-          shorebird patch android --release-version="$VERSION" --track="$TRACK" -- \
+          shorebird patch android --release-version="$VERSION" --track="$TRACK" $PATCH_FLAGS -- \
             --build-name "$NAME" --build-number "$NUMBER" $ICONS \
             --dart-define=FAMCHAT_VERSION="$NAME" --dart-define=FAMCHAT_BUILD="$NUMBER"
           echo "Patched Android release $VERSION ($TRACK track)" >> "$GITHUB_STEP_SUMMARY"
