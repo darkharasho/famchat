@@ -11,6 +11,8 @@ name: patch
 # reached TestFlight or Play (release.yml tags it shorebird/<platform>/<NAME+NUMBER>; dry runs and
 # failed uploads aren't tagged) unless a release version is given. FAMCHAT_VERSION/FAMCHAT_BUILD
 # are set from that release, so the app's About screen keeps showing the version the store installed.
+# With "latest", iOS also patches the version the App Store has live when that's older (a newer
+# version is waiting for review), so App Store installs get the fix too until Apple approves it.
 # Patches go to the stable track (every phone) unless track=staging: staging patches reach only
 # devices set to staging, and are promoted to stable in the Shorebird console.
 #
@@ -49,10 +51,39 @@ env:
   TRACK: ${{ inputs.track || 'stable' }}
 
 jobs:
-  ios:
+  # The iOS releases to patch: the newest one in TestFlight and, if older, the App Store's live one.
+  ios-targets:
     if: github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'ios')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      versions: ${{ steps.t.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: t
+        run: |
+          if [ "$RELEASE_VERSION" != latest ]; then
+            versions=("$RELEASE_VERSION")
+          else
+            versions=("$(scripts/shorebird-release-version.sh ios latest | sed -n 's/^version=//p')")
+            if store="$(scripts/shorebird-release-version.sh ios store | sed -n 's/^version=//p')" && [ -n "$store" ]; then
+              [ "$store" = "${versions[0]}" ] || versions+=("$store")
+            else
+              echo "::warning::Couldn't find the App Store's live release; patching only ${versions[0]}."
+            fi
+          fi
+          json="$(printf '%s\n' "${versions[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          echo "iOS releases to patch: ${versions[*]}" >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    needs: ios-targets
     runs-on: macos-26
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.ios-targets.outputs.versions) }}
     defaults:
       run: { working-directory: app }
     steps:
@@ -62,7 +93,7 @@ jobs:
       - uses: shorebirdtech/setup-shorebird@v1
       - name: Which release
         id: release
-        run: ../scripts/shorebird-release-version.sh ios "$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+        run: ../scripts/shorebird-release-version.sh ios "${{ matrix.release }}" >> "$GITHUB_OUTPUT"
       # Build exactly as release.yml does (same build name, number and team): Shorebird compares the
       # compiled app against the release and refuses a patch whose native code differs.
       - name: Shorebird patch

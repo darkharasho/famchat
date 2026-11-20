@@ -13,6 +13,12 @@ name: release
 # apps update to (app/lib/update). A manual run makes a draft prerelease instead. Everything is
 # also a workflow artifact.
 #
+# Desktop-only release (gh workflow run release.yml -f desktop_release=1.0.23): builds macOS,
+# Windows and Linux only and publishes them as the latest release v1.0.23, so desktop catches up
+# with a Dart change that phones got as a Shorebird patch, without a new store build to review or
+# a new Shorebird release. The tag is made by the release (GITHUB_TOKEN tags start no workflows),
+# so the full release doesn't run; the next full release takes a later version.
+#
 # Version: the tag (v1.2.3 -> 1.2.3), else pubspec.yaml. Build number: minutes since the Unix
 # epoch, so it only grows, whichever workflow or branch built it (Play and App Store Connect
 # refuse a build number they already have).
@@ -45,6 +51,9 @@ on:
         description: Create a draft prerelease with the desktop files (tags publish a release)
         type: boolean
         default: false
+      desktop_release:
+        description: "Desktop-only release: publish macOS/Windows/Linux as latest release v<this version> (e.g. 1.0.23); skips iOS and Android"
+        default: ""
 
 concurrency:
   group: release-${{ github.ref }}
@@ -67,9 +76,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: v
+        env:
+          DESKTOP_RELEASE: ${{ inputs.desktop_release }}
         run: |
           pub="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' app/pubspec.yaml)"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [ -n "$DESKTOP_RELEASE" ]; then
+            name="${DESKTOP_RELEASE#v}"
+            if git ls-remote --exit-code --tags origin "refs/tags/v$name" >/dev/null; then
+              echo "::error::v$name already exists; pick a later version."; exit 1
+            fi
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             name="${GITHUB_REF_NAME#v}"
             [ "$name" = "$pub" ] || echo "::warning::Tag $GITHUB_REF_NAME doesn't match pubspec.yaml ($pub); using the tag."
           else
@@ -83,7 +99,7 @@ jobs:
 
   ios:
     needs: version
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'ios')
+    if: github.event_name != 'workflow_dispatch' || (inputs.desktop_release == '' && (inputs.platforms == 'all' || contains(inputs.platforms, 'ios')))
     runs-on: macos-26
     timeout-minutes: 60
     defaults:
@@ -233,7 +249,7 @@ jobs:
 
   android:
     needs: version
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'android')
+    if: github.event_name != 'workflow_dispatch' || (inputs.desktop_release == '' && (inputs.platforms == 'all' || contains(inputs.platforms, 'android')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -355,9 +371,38 @@ jobs:
             fi
           done
 
+  # Tag releases go straight to App Store review once TestFlight has processed the build, pulling an
+  # older version that's waiting for review or in review: the newest build is the one worth
+  # reviewing, and patches (patch.yml patches the App Store's live version too) carry Dart changes
+  # meanwhile. If submitting fails, that's a warning; submit.yml can submit the build later.
+  app-store-review:
+    needs: ios
+    if: startsWith(github.ref, 'refs/tags/v') && needs.ios.outputs.shipped != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Submit for App Store review
+        env:
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          RELEASE: ${{ needs.ios.outputs.shipped }}
+        run: |
+          export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          (umask 077; printf '%s' "$ASC_KEY" > "$ASC_KEY_PATH")
+          if python3 scripts/asc-submit.py submit "$BUNDLE_ID" "$RELEASE" --wait 90 --replace-waiting \
+              --whats-new "Bug fixes and improvements." | tee -a "$GITHUB_STEP_SUMMARY"; [ "${PIPESTATUS[0]}" = 0 ]; then
+            echo "Submitted $RELEASE for App Store review" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::$RELEASE wasn't submitted for App Store review (see the log). Submit it later with submit.yml."
+          fi
+          rm -f "$ASC_KEY_PATH"
+
   macos:
     needs: version
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'macos')
+    if: github.event_name != 'workflow_dispatch' || inputs.desktop_release != '' || inputs.platforms == 'all' || contains(inputs.platforms, 'macos')
     runs-on: macos-26
     timeout-minutes: 60
     defaults:
@@ -446,7 +491,7 @@ jobs:
 
   windows:
     needs: version
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows')
+    if: github.event_name != 'workflow_dispatch' || inputs.desktop_release != '' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows')
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -540,7 +585,7 @@ jobs:
 
   linux:
     needs: version
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'linux')
+    if: github.event_name != 'workflow_dispatch' || inputs.desktop_release != '' || inputs.platforms == 'all' || contains(inputs.platforms, 'linux')
     # The oldest supported image, so the AppImage runs on older glibc.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -566,11 +611,14 @@ jobs:
 
   github-release:
     needs: [version, macos, windows, linux]
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.github_release
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.github_release || inputs.desktop_release != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
+      # Published as the latest release: a v* tag push, or a desktop-only release (tag made here).
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.desktop_release != '' }}
+      TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs.version.outputs.name) }}
       NAME: ${{ needs.version.outputs.name }}
       NUMBER: ${{ needs.version.outputs.number }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -578,9 +626,9 @@ jobs:
       - uses: actions/download-artifact@v7
         with: { pattern: desktop-*, path: dist, merge-multiple: true }
       # Sparkle's feed for the Mac app: the DMG, signed with the EdDSA key whose public half is
-      # SUPublicEDKey in macos/Runner/Info.plist. Tag builds only: drafts aren't "latest".
+      # SUPublicEDKey in macos/Runner/Info.plist. Published releases only: drafts aren't "latest".
       - name: Write the Sparkle appcast
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.PUBLISH == 'true'
         env:
           SPARKLE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
@@ -602,11 +650,11 @@ jobs:
               <item>
                 <title>FamChat $NAME</title>
                 <pubDate>$(date -R)</pubDate>
-                <link>$repo/releases/tag/$GITHUB_REF_NAME</link>
+                <link>$repo/releases/tag/$TAG</link>
                 <sparkle:version>$NUMBER</sparkle:version>
                 <sparkle:shortVersionString>$NAME</sparkle:shortVersionString>
                 <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-                <enclosure url="$repo/releases/download/$GITHUB_REF_NAME/FamChat-$NAME-macos.dmg"
+                <enclosure url="$repo/releases/download/$TAG/FamChat-$NAME-macos.dmg"
                   length="$(stat -c %s "$dmg")" type="application/octet-stream" sparkle:edSignature="$sig"/>
               </item>
             </channel>
@@ -616,9 +664,9 @@ jobs:
       - name: Create the release
         run: |
           ls -l dist
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [ "$PUBLISH" = true ]; then
             # Published and latest: desktop installs see it and update.
-            gh release create "$GITHUB_REF_NAME" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --latest --title "FamChat $NAME" --generate-notes
           else
             gh release create "v$NAME-build.$NUMBER" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \

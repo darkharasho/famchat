@@ -2,15 +2,17 @@
 """Submit an iOS build that's already in TestFlight for App Store review, without third-party packages.
 
   asc-submit.py status <bundle-id>
-  asc-submit.py submit <bundle-id> <NAME+NUMBER> [--whats-new TEXT] [--replace-waiting]
+  asc-submit.py submit <bundle-id> <NAME+NUMBER> [--whats-new TEXT] [--replace-waiting] [--wait MINUTES]
 
   env: ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID
 
 status lists the app's App Store versions, review submissions and newest builds; it only reads.
 submit puts build NAME+NUMBER on the app's editable App Store version (renaming that version or
 creating one), sets What's New where it's empty (or everywhere when --whats-new is given), and
-submits it for review. App Store Connect allows one version in flight: an older version waiting
-for review is pulled only with --replace-waiting, and one already in review stops the submission.
+submits it for review. --wait gives a just-uploaded build that long to
+appear and finish processing. App Store Connect allows one version in flight: an older version waiting
+for review or in review is pulled only with --replace-waiting (named before it covered reviews in
+progress); without it, the submission stops.
 Never prints keys.
 """
 import argparse
@@ -126,13 +128,21 @@ def status(asc: Asc, app: str) -> None:
               f"expired={a.get('expired')} uploaded {a.get('uploadedDate')}")
 
 
-def submit(asc: Asc, app: str, release: str, whats_new: str | None, replace_waiting: bool) -> None:
+def submit(asc: Asc, app: str, release: str, whats_new: str | None, replace_waiting: bool,
+           wait_minutes: int = 0) -> None:
     name, _, number = release.partition("+")
     if not name or not number:
         raise RuntimeError(f"expected NAME+NUMBER, got {release!r}")
 
-    builds = asc.get("/v1/builds", **{"filter[app]": app, "filter[version]": number,
-                                      "filter[preReleaseVersion.version]": name})["data"]
+    deadline = time.monotonic() + wait_minutes * 60
+    while True:
+        builds = asc.get("/v1/builds", **{"filter[app]": app, "filter[version]": number,
+                                          "filter[preReleaseVersion.version]": name})["data"]
+        processing = builds[0]["attributes"]["processingState"] if builds else None
+        if processing == "VALID" or processing in {"FAILED", "INVALID"} or time.monotonic() > deadline:
+            break
+        print(f"Build {release} is {processing or 'not in App Store Connect yet'}; waiting")
+        time.sleep(60)
     if not builds:
         raise RuntimeError(f"App Store Connect has no build {release}")
     build = builds[0]
@@ -142,17 +152,17 @@ def submit(asc: Asc, app: str, release: str, whats_new: str | None, replace_wait
         asc.patch("builds", build["id"], {"usesNonExemptEncryption": False})
     print(f"Build {release}: {build['id']}")
 
-    # One version in flight at a time: pull an older one that's only waiting, never one in review.
+    # One version in flight at a time: pull an older one, waiting or in review, when asked to.
     for s in submissions(asc, app):
         if s["attributes"]["state"] not in IN_FLIGHT:
             continue
-        if s["attributes"]["state"] != "WAITING_FOR_REVIEW" or not replace_waiting:
+        if not replace_waiting:
             raise RuntimeError(f"review submission {s['id']} is {s['attributes']['state']}; "
-                               "pass --replace-waiting to pull one that's waiting (one in review can't be replaced)")
-        print(f"Pulling waiting review submission {s['id']}")
+                               "pass --replace-waiting to pull it")
+        print(f"Pulling review submission {s['id']} ({s['attributes']['state']})")
         asc.patch("reviewSubmissions", s["id"], {"canceled": True})
         for _ in range(30):
-            if all(state(v) not in {"WAITING_FOR_REVIEW"} for v in versions(asc, app)):
+            if all(state(v) not in IN_FLIGHT for v in versions(asc, app)):
                 break
             time.sleep(10)
 
@@ -196,6 +206,7 @@ def main() -> int:
     p.add_argument("release", nargs="?")
     p.add_argument("--whats-new")
     p.add_argument("--replace-waiting", action="store_true")
+    p.add_argument("--wait", type=int, default=0, metavar="MINUTES")
     args = p.parse_args()
     try:
         asc = Asc()
@@ -205,7 +216,7 @@ def main() -> int:
         else:
             if not args.release:
                 p.error("submit needs NAME+NUMBER")
-            submit(asc, app, args.release, args.whats_new, args.replace_waiting)
+            submit(asc, app, args.release, args.whats_new, args.replace_waiting, args.wait)
             status(asc, app)
     except Exception as e:  # noqa: BLE001 - report any failure plainly
         print(f"error: {e}", file=sys.stderr)

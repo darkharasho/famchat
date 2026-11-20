@@ -7,7 +7,7 @@ name: submit
 #   gh workflow run submit.yml -f release=latest -f whats_new="…" -f submit=true
 #
 # release=latest is the newest shorebird/ios/<NAME+NUMBER> tag (builds that reached TestFlight).
-# replace_waiting pulls an older version that's waiting for review so this one takes its place.
+# replace_waiting pulls an older version that's waiting for review or in review so this one takes its place.
 #
 # Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY.
 
@@ -25,7 +25,7 @@ on:
         type: boolean
         default: false
       replace_waiting:
-        description: "Pull an older version that's waiting for review"
+        description: "Pull an older version that's waiting for review or in review"
         type: boolean
         default: false
 
