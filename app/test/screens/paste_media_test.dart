@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/main.dart';
