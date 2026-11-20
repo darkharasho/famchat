@@ -78,4 +78,32 @@ void main() {
     await tester.pumpWidget(app('now https://b.io'));
     expect(identical(recognizer(tester), first), isFalse);
   });
+
+  testWidgets('markdown shows as formatting, keeping links tappable', (tester) async {
+    final opened = <Uri>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: LinkText('**Plan** for _today_:\n- see https://a.io/x_y\n- ~~nap~~', onOpen: opened.add, markdown: true),
+      ),
+    ));
+    final texts = tester.widgetList<RichText>(find.byType(RichText)).map((r) => r.text.toPlainText()).toList();
+    expect(texts, containsAll(['Plan for today:', '•', 'see https://a.io/x_y', 'nap']));
+    TextSpan? bold;
+    TapGestureRecognizer? tap;
+    for (final r in tester.widgetList<RichText>(find.byType(RichText))) {
+      r.text.visitChildren((span) {
+        if (span is TextSpan && span.text == 'Plan') bold = span;
+        if (span is TextSpan && span.recognizer is TapGestureRecognizer) tap = span.recognizer! as TapGestureRecognizer;
+        return true;
+      });
+    }
+    expect(bold!.style!.fontWeight, FontWeight.w700);
+    tap!.onTap!();
+    expect(opened, [Uri.parse('https://a.io/x_y')]);
+  });
+
+  testWidgets('without markdown, marks stay as typed', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: LinkText('**hi**'))));
+    expect(find.text('**hi**'), findsOneWidget);
+  });
 }
