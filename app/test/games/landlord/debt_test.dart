@@ -76,7 +76,7 @@ void main() {
     expect(b.phase, LandlordPhase.debt);
     expect(b.position(first), 10);
     final p = act(b, 'mortgage', {'space': 1});
-    expect(p.cash(first), 0);
+    expect((b.pot, p.cash(first), p.pot), (0, 0, 50));
     expect(p.position(first), 13);
     expect(p.phase, LandlordPhase.buy);
     expect(p.inJail(first), isFalse);

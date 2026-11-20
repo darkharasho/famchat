@@ -116,7 +116,7 @@ class SpaceCard extends StatelessWidget {
             SpaceKind.card => 'Draw a ${s.deck!.title} card.',
             SpaceKind.jail => 'Just visiting, unless you were sent here.',
             SpaceKind.rest =>
-              'Land here to collect the tax paid so far. '
+              'Land here to collect the tax, bail and card payments paid so far. '
                   '${board.pot > 0 ? 'The pot holds ${money(board.pot)}.' : 'The pot is empty.'}',
             SpaceKind.goToJail => 'Go straight to jail without collecting ${money(LandlordBoard.salary)}.',
             _ => '',

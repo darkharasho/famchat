@@ -35,7 +35,7 @@ String landlordLog(LandlordEvent e, (String, String) names) {
     LandlordEventKind.declined => '$a passed on $sp',
     LandlordEventKind.rent => '$a paid $them $n rent',
     LandlordEventKind.tax => '$a paid $n $sp',
-    LandlordEventKind.pot => '$a collected $n of tax at $sp',
+    LandlordEventKind.pot => '$a collected the $n pot at $sp',
     LandlordEventKind.drew => '$a drew ${e.card?.deck.title}: ${e.card?.text}',
     LandlordEventKind.paid => o == null ? '$a paid $n' : '$a paid $them $n',
     LandlordEventKind.collected => o == null ? '$a collected $n' : '$a collected $n from $them',
