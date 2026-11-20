@@ -43,8 +43,8 @@ class GameViewer {
 
   /// `Your turn` (in checkers with a capture due, `Your turn: you have to
   /// jump`), `Mom's turn`, `You won`, `Mom won`, `Draw`,
-  /// `Game not started`, or `Game paused` for an unfinished game in a
-  /// read-only chat.
+  /// `Game not started`, `Game paused` for an unfinished game in a
+  /// read-only chat, or `Update FamChat to keep playing` when out of sync.
   String status(GameState g) {
     if (g.inert) return 'Game not started';
     final outcome = g.outcome;
@@ -54,6 +54,7 @@ class GameViewer {
       return winner == me ? 'You won' : '${nameOf(winner)} won';
     }
     if (readOnly) return 'Game paused';
+    if (g.outOfSync) return 'Update FamChat to keep playing';
     final next = g.toMoveUserId!;
     if (next != me) return "${nameOf(next)}'s turn";
     final b = g.board;
@@ -401,6 +402,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final myTurn = live && g.toMoveUserId == me;
     final opponent = me == g.firstUserId ? g.secondUserId : g.firstUserId;
     final offeredBy = g.drawOfferedBy;
+    final behind = live && g.behindUserId != me ? g.behindUserId : null;
 
     var status = viewer.status(g);
     final outcome = g.outcome;
@@ -474,6 +476,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 child: const Text('Accept'),
               ),
             ],
+          ),
+        if (live && g.outOfSync)
+          _Banner(
+            key: const Key('game-out-of-sync'),
+            text: "This game is out of step with ${viewer.nameOf(opponent)}'s FamChat. Update FamChat on both devices, or close and reopen it, to keep playing.",
+            actions: const [],
+          )
+        else if (behind != null)
+          _Banner(
+            key: const Key('game-behind'),
+            text: "${viewer.nameOf(behind)}'s FamChat is out of date. Ask them to update it, or close and reopen it, so this game stays in step.",
+            actions: const [],
           ),
         if (running != null)
           _Banner(

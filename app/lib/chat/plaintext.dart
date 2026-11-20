@@ -109,7 +109,10 @@ sealed class Plaintext {
         if (ply == null || ply < 0) throw const FormatException('bad ply');
         if (action is! Map<String, Object?> || action['type'] is! String) throw const FormatException('bad action');
         final type = GameType.fromWire(game);
-        return type == null ? UnknownBody(kind, j) : MoveBody(target, type, ply, action);
+        final rules = wireInt(j['rules']);
+        return type == null
+            ? UnknownBody(kind, j)
+            : MoveBody(target, type, ply, action, rules: rules != null && rules > 0 ? rules : null);
       default:
         return UnknownBody(kind, j);
     }
@@ -527,15 +530,18 @@ class GameBody extends Plaintext {
 /// One action in the game [target] (a `game` message id) at move number [ply]. [action] has a string
 /// `type` (play, resign, draw_offer, draw_accept, draw_decline, poke) and the game's move fields.
 class MoveBody extends Plaintext {
-  const MoveBody(this.target, this.game, this.ply, this.action);
+  const MoveBody(this.target, this.game, this.ply, this.action, {this.rules});
   final String target;
   final GameType game;
   final int ply;
   final Map<String, Object?> action;
+
+  /// The sender's [GameType.rules]; null from versions before it was sent.
+  final int? rules;
   @override
   String get kind => 'move';
   @override
-  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'game': game.wire, 'ply': ply, 'action': action};
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'game': game.wire, 'ply': ply, 'action': action, 'rules': ?rules};
 }
 
 /// A kind this version doesn't know (a newer version's).

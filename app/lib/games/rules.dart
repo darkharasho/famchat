@@ -48,6 +48,13 @@ enum GameType {
   /// quick game at once.
   bool get long => this == landlord;
 
+  /// This app's version of the game's rules. Every move carries its sender's,
+  /// so a phone with older rules (which would replay the same moves to a
+  /// different position) knows to update instead of going out of sync. Bump it
+  /// whenever a change makes the same moves play out differently.
+  /// Landlord: 2 tax goes into the Rest Stop pot; 3 bail and card payments too.
+  int get rules => this == landlord ? 3 : 1;
+
   static GameType? fromWire(String s) {
     for (final t in values) {
       if (t.wire == s) return t;
