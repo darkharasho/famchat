@@ -198,6 +198,7 @@ void main() {
     expect(b.inJail(first), isFalse);
     expect(b.cash(first), 1450);
     expect(b.position(first), 13);
+    expect(b.pot, 50);
     expect(b.phase, LandlordPhase.buy);
   });
 
@@ -205,6 +206,7 @@ void main() {
     final j = LandlordBoard.custom(positions: (10, 0), jailed: first);
     final b = act(j, 'pay_bail');
     expect((b.inJail(first), b.cash(first), b.phase), (false, 1450, LandlordPhase.roll));
+    expect(b.pot, 50);
     expect(legal(LandlordBoard.custom(), 'pay_bail'), isFalse);
     expect(legal(LandlordBoard.custom(positions: (10, 0), jailed: first, cash: (49, 1500)), 'pay_bail'), isFalse);
   });

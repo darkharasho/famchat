@@ -121,6 +121,14 @@ void main() {
     expect(draw(7, 10).cash(first), 1500, reason: 'nothing built, nothing paid');
   });
 
+  test('card payments to the bank go into the Rest Stop pot', () {
+    expect((draw(7, 11).cash(first), draw(7, 11).pot), (1485, 15));
+    expect((draw(17, 26).cash(first), draw(17, 26).pot), (1400, 100));
+    final owners = {1: first, 3: first};
+    expect(draw(7, 10, owners: owners, levels: {1: 2, 3: 1}).pot, 3 * 25);
+    expect(draw(7, 14).pot, 0, reason: 'paying the other player skips the pot');
+  });
+
   test('advance to South Station and Vista Heights', () {
     var b = draw(7, 12);
     expect((b.position(first), b.cash(first)), (5, 1700));

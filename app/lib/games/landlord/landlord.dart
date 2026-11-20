@@ -62,7 +62,7 @@ class LandlordDebt {
   /// Whether it couldn't be paid at once (an `owes` event was logged).
   final bool announced;
 
-  /// Whether it goes into the Rest Stop pot (tax) rather than the bank.
+  /// Whether it goes into the Rest Stop pot (tax, bail, card payments) rather than the bank.
   final bool toPot;
 }
 
@@ -165,7 +165,7 @@ class LandlordBoard implements Board {
   final (int, int)? dice;
   final LandlordOffer? trade;
 
-  /// Tax paid so far, waiting on the Rest Stop for whoever lands there next.
+  /// Tax, bail and card payments paid so far, waiting on the Rest Stop for whoever lands there next.
   final int pot;
 
   /// Debts still to pay, oldest first.
@@ -358,6 +358,7 @@ class _State {
         if (!_turnActs || stage != _Stage.roll || !inJail[_i(me)]) return false;
         if (cash[_i(me)] < LandlordBoard.bail) return false;
         cash[_i(me)] -= LandlordBoard.bail;
+        pot += LandlordBoard.bail;
         _leaveJail(me);
         log(LandlordEvent(me, LandlordEventKind.bail, amount: LandlordBoard.bail));
       case 'use_card':
@@ -609,7 +610,7 @@ class _State {
       _leaveJail(me);
       again = false;
       stage = _Stage.jailMove;
-      _charge(me, null, LandlordBoard.bail, LandlordEventKind.bail);
+      _charge(me, null, LandlordBoard.bail, LandlordEventKind.bail, toPot: true);
       return;
     }
     if (isDouble) {
@@ -708,7 +709,7 @@ class _State {
       log(LandlordEvent(s, LandlordEventKind.collected, amount: n));
     }
 
-    void pay(int n) => _charge(s, null, n, LandlordEventKind.paid);
+    void pay(int n) => _charge(s, null, n, LandlordEventKind.paid, toPot: true);
 
     int next(List<int> targets) {
       final at = pos[_i(s)];
