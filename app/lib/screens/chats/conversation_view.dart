@@ -30,6 +30,7 @@ import '../../games/labels.dart' show gameEventsOf;
 import '../../games/widgets/start_game_sheet.dart';
 import '../../gifs/klipy.dart' show GifResult;
 import '../../gifs/providers.dart';
+import '../../media/clipboard_media.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/send_media.dart';
@@ -231,7 +232,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _schedulePreview();
     });
     unawaited(_loadDraft());
+    _webPaste = listenForPastedFiles(() => mounted && _focus.hasFocus, (files) async {
+      final sorted = await pickedFromFiles(files);
+      await _confirmPaste(sorted.media);
+    });
   }
+
+  /// Web: photos and videos pasted into the composer.
+  StreamSubscription<Object?>? _webPaste;
 
   /// The latest draft of each chat this run (keyed by user and chat), ahead of the database write:
   /// a view replaced at once (the window crossing the wide layout) starts from it.
@@ -418,7 +426,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final span = speller == null || !usesWordListSpelling || index == null || !flagged
         ? null
         : state.findSuggestionSpanAtCursorIndex(index);
-    if (speller == null || span == null) return AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
+    if (speller == null || span == null) {
+      return AdaptiveTextSelectionToolbar.buttonItems(anchors: state.contextMenuAnchors, buttonItems: _menuItems(state));
+    }
     final word = span.range.textInside(value.text);
     void replace(String fix) {
       state.userUpdateTextEditingValue(
@@ -442,9 +452,95 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             unawaited(ref.read(userWordsProvider.notifier).add(word));
           },
         ),
-        ...state.contextMenuButtonItems,
+        ..._menuItems(state),
       ],
     );
+  }
+
+  /// The field's usual menu items, with Paste sending a photo or video on the clipboard. Phones
+  /// always offer Paste: their menus only show it for text, and a copied photo has none.
+  List<ContextMenuButtonItem> _menuItems(EditableTextState state) {
+    final items = state.contextMenuButtonItems;
+    final paste = items.indexWhere((i) => i.type == ContextMenuButtonType.paste);
+    if (paste == -1) {
+      if (!_touch || state.widget.readOnly) return items;
+      return [
+        ...items,
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: () {
+            state.hideToolbar();
+            unawaited(_pasteMedia(() => _snack('Nothing to paste.')));
+          },
+        ),
+      ];
+    }
+    final usual = items[paste].onPressed;
+    return [
+      for (final (i, item) in items.indexed)
+        if (i != paste)
+          item
+        else
+          item.copyWith(onPressed: () {
+            state.hideToolbar();
+            unawaited(_pasteMedia(usual));
+          }),
+    ];
+  }
+
+  /// Offers to send the photos and videos on the clipboard; with none, runs [otherwise] (the usual
+  /// text paste).
+  Future<void> _pasteMedia(VoidCallback? otherwise) async {
+    final media = await ref.read(clipboardMediaProvider)();
+    if (!mounted) return;
+    if (media.isEmpty) {
+      otherwise?.call();
+      return;
+    }
+    await _confirmPaste(media);
+  }
+
+  /// Asks before sending pasted [media] (a stray paste shouldn't reach the family), showing the
+  /// first photo.
+  Future<void> _confirmPaste(List<PickedMedia> media) async {
+    if (media.isEmpty || !mounted) return;
+    final photo = media.whereType<PickedPhoto>().firstOrNull;
+    final videos = media.whereType<PickedVideo>().length;
+    final title = media.length == 1
+        ? (videos == 1 ? 'Send this video?' : 'Send this photo?')
+        : videos == 0
+            ? 'Send ${media.length} photos?'
+            : videos == media.length
+                ? 'Send ${media.length} videos?'
+                : 'Send ${media.length} photos and videos?';
+    final send = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('paste-confirm'),
+        title: Text(title),
+        content: photo == null
+            ? null
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360, maxHeight: 360),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  child: Image.memory(
+                    photo.bytes,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(Icons.image_outlined, size: 64),
+                  ),
+                ),
+              ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(autofocus: true, onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
+        ],
+      ),
+    );
+    if (send == true && mounted) {
+      await sendPicked(media);
+      _focus.requestFocus();
+    }
   }
 
   /// Phones and tablets, where taps elsewhere should put the keyboard away.
@@ -461,6 +557,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   @override
   void dispose() {
+    unawaited(_webPaste?.cancel());
     HardwareKeyboard.instance.removeHandler(_typeToFocus);
     _recording.dispose(); // discards an unsent recording (one being finished still sends)
     // No voice keeps playing without its bubble on screen (after this frame: providers cannot change
@@ -874,7 +971,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               ? context.go('/')
                               : _focus.unfocus(),
                 },
-          child: Listener(
+          child: Actions(
+            actions: {PasteTextIntent: _PasteMediaAction(_pasteMedia)},
+            child: Listener(
             onPointerDown: (e) {
               if (e.buttons & kSecondaryMouseButton != 0) _secondaryClickAt = e.position;
             },
@@ -889,6 +988,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
             spellCheckConfiguration: _spellCheck(),
             contextMenuBuilder: _contextMenu,
             inputFormatters: const [ShortcodeFormatter(), EmoticonFormatter()],
+            // Android keyboards: images from the keyboard's clipboard, stickers and GIFs.
+            contentInsertionConfiguration: ContentInsertionConfiguration(
+              allowedMimeTypes: const ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic'],
+              onContentInserted: (content) {
+                if (content.data case final bytes? when bytes.isNotEmpty) {
+                  unawaited(_confirmPaste([PickedPhoto(bytes)]));
+                }
+              },
+            ),
             onTap: _closePicker,
             style: Theme.of(context).textTheme.bodyLarge,
             decoration: InputDecoration(
@@ -918,6 +1026,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               ),
             ),
             onChanged: (_) => ref.read(chatSyncProvider)?.typing(widget.chatId),
+          ),
           ),
           ),
         ),
@@ -1349,6 +1458,27 @@ const _gameChoice = #game;
 bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
+/// Ctrl/Cmd+V in the composer: a photo or video on the clipboard is offered for sending; anything
+/// else pastes as usual.
+class _PasteMediaAction extends ContextAction<PasteTextIntent> {
+  _PasteMediaAction(this.paste);
+
+  final Future<void> Function(VoidCallback? otherwise) paste;
+
+  @override
+  Object? invoke(PasteTextIntent intent, [BuildContext? context]) {
+    final usual = callingAction;
+    unawaited(paste(() {
+      if (usual is ContextAction<PasteTextIntent>) {
+        usual.invoke(intent, context);
+      } else {
+        usual?.invoke(intent);
+      }
+    }));
+    return null;
+  }
+}
+
 class _ComposeBanner extends StatelessWidget {
   const _ComposeBanner({
     required this.icon,

@@ -9,6 +9,7 @@ import '../api/models.dart';
 import '../chat/providers.dart';
 import '../session/session_controller.dart';
 import '../voice/voice_io.dart';
+import 'clipboard_media.dart';
 import 'http_media_api.dart';
 import 'media_api.dart';
 import 'media_db.dart';
@@ -33,6 +34,9 @@ final mediaApiProvider = Provider<MediaApi>((ref) => HttpMediaApi(ref.watch(apiC
 final photoProcessorProvider = Provider<PhotoProcessor>((ref) => PlatformPhotoProcessor());
 
 final photoPickerProvider = Provider<MediaPicker>((ref) => pickMedia);
+
+/// Reads the photos and videos on the clipboard (a fake in tests).
+final clipboardMediaProvider = Provider<ClipboardMediaReader>((ref) => readClipboardMedia);
 
 final videoProcessorProvider = Provider<VideoProcessor>((ref) => PlatformVideoProcessor());
 
