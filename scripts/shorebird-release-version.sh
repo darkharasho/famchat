@@ -12,6 +12,10 @@
 # after 1.0.20 keep the whole Material icon font (--no-tree-shake-icons), so a patch can use any
 # icon; 1.0.20 and earlier were built with the font trimmed to the icons they used, so patches to
 # them stay trimmed (an icon those releases lack still needs a release tag).
+#
+# patch_flags= are extra `shorebird patch` flags: for those trimmed releases, --allow-asset-diffs,
+# since the trimmed font differs once the app uses an icon they lack; the patch keeps the release's
+# font, so such an icon shows blank there, and everything else is patched.
 set -euo pipefail
 
 platform="$1" wanted="$2"
@@ -40,6 +44,8 @@ echo "name=${BASH_REMATCH[1]}"
 echo "number=${BASH_REMATCH[2]}"
 if [[ "$(printf '%s\n' 1.0.20 "${BASH_REMATCH[1]}" | sort -V | tail -1)" == 1.0.20 ]]; then
   echo "icons="
+  echo "patch_flags=--allow-asset-diffs"
 else
   echo "icons=--no-tree-shake-icons"
+  echo "patch_flags="
 fi
