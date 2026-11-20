@@ -159,17 +159,17 @@ void main() {
       expect(played, [{'a': 'end_turn'}]);
     });
 
-    testWidgets('while you were away: the last 3 and a link to the rest', (tester) async {
+    testWidgets('while you were away: a count on Log, which lists them', (tester) async {
       var b = LandlordBoard.custom(owners: {1: first, 3: first, 6: first, 8: first, 9: first});
       for (final s in [1, 3, 6, 8, 9]) {
         b = act(b, 'mortgage', {'space': s});
       }
       await tester.pumpWidget(view(b, mySide: second));
-      expect(find.text('While you were away'), findsOneWidget);
-      expect(find.textContaining('Mom mortgaged'), findsNWidgets(3));
-      await tester.tap(find.byKey(const Key('away-more')));
+      expect(find.descendant(of: find.byKey(const Key('away-count')), matching: find.text('5')), findsOneWidget);
+      expect(find.textContaining('Mom mortgaged'), findsNothing, reason: 'not spelled out on the board');
+      await tester.tap(find.byKey(const Key('open-log')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Mom mortgaged Acorn Lane'), findsOneWidget);
+      expect(find.textContaining('Mom mortgaged'), findsNWidgets(5));
     });
 
     testWidgets('a space sheet offers only legal actions', (tester) async {
