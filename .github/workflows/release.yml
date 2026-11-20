@@ -18,6 +18,9 @@ name: release
 # with a Dart change that phones got as a Shorebird patch, without a new store build to review or
 # a new Shorebird release. The tag is made by the release (GITHUB_TOKEN tags start no workflows),
 # so the full release doesn't run; the next full release takes a later version.
+# It then patches the phones too (patch.yml on the same commit, newest iOS/Android releases plus
+# the App Store's live one), so one release ships a Dart change everywhere; -f patch_phones=false
+# skips that. Tag releases don't: their phones get the new native build itself.
 #
 # Version: the tag (v1.2.3 -> 1.2.3), else pubspec.yaml. Build number: minutes since the Unix
 # epoch, so it only grows, whichever workflow or branch built it (Play and App Store Connect
@@ -54,6 +57,10 @@ on:
       desktop_release:
         description: "Desktop-only release: publish macOS/Windows/Linux as latest release v<this version> (e.g. 1.0.23); skips iOS and Android"
         default: ""
+      patch_phones:
+        description: "With desktop_release: also Shorebird-patch iOS and Android with this commit"
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ github.ref }}
@@ -672,3 +679,19 @@ jobs:
             gh release create "v$NAME-build.$NUMBER" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --draft --prerelease --title "FamChat $NAME" --generate-notes
           fi
+
+  # A desktop-only release carries a Dart change; phones get the same commit as a Shorebird patch.
+  phone-patch:
+    needs: github-release
+    if: inputs.desktop_release != '' && inputs.patch_phones
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start the phone patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run patch.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+          echo "Started patch.yml on $GITHUB_REF_NAME for iOS and Android" >> "$GITHUB_STEP_SUMMARY"
