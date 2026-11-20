@@ -142,6 +142,34 @@ void main() {
     expect(b.cash(first), 1400);
   });
 
+  test('tax goes into the Rest Stop pot', () {
+    var b = act(at(0, [(1, 3)]), 'roll');
+    expect(b.pot, 200);
+    b = act(at(35, [(1, 2)]), 'roll');
+    expect(b.pot, 100);
+  });
+
+  test('landing on Rest Stop collects the pot', () {
+    var b = LandlordBoard.custom(rng: rollsSeed([(4, 6)]), positions: (10, 0), pot: 300);
+    b = act(b, 'roll');
+    expect((b.position(first), b.cash(first), b.pot), (20, 1800, 0));
+    expect(b.events.last.kind, LandlordEventKind.pot);
+    expect(b.events.last.amount, 300);
+  });
+
+  test('an empty pot pays nothing', () {
+    final b = act(at(10, [(4, 6)]), 'roll');
+    expect((b.cash(first), b.pot), (1500, 0));
+    expect(b.events.last.kind, LandlordEventKind.rolled);
+  });
+
+  test('tax owed goes into the pot once it is paid', () {
+    var b = act(at(0, [(1, 3)], owners: {1: first}, cash: (180, 1500)), 'roll');
+    expect((b.phase, b.pot), (LandlordPhase.debt, 0));
+    b = act(b, 'mortgage', {'space': 1});
+    expect((b.phase, b.cash(first), b.pot), (LandlordPhase.end, 180 + 30 - 200, 200));
+  });
+
   test('Go to Jail space', () {
     var b = act(at(25, [(2, 3)]), 'roll');
     expect((b.position(first), b.inJail(first), b.phase), (10, true, LandlordPhase.end));

@@ -112,7 +112,10 @@ Iterable<(Side, int)> _cashOf(LandlordEvent e) sync* {
   final n = e.amount ?? 0;
   if (n == 0) return;
   switch (e.kind) {
-    case LandlordEventKind.passedStart || LandlordEventKind.mortgaged || LandlordEventKind.sold:
+    case LandlordEventKind.passedStart ||
+        LandlordEventKind.pot ||
+        LandlordEventKind.mortgaged ||
+        LandlordEventKind.sold:
       yield (e.actor, n);
     case LandlordEventKind.collected:
       yield (e.actor, n);

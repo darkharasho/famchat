@@ -45,6 +45,7 @@ class LandlordDebt {
     this.space,
     this.event,
     this.announced = false,
+    this.toPot = false,
   });
 
   final Side debtor;
@@ -60,6 +61,9 @@ class LandlordDebt {
 
   /// Whether it couldn't be paid at once (an `owes` event was logged).
   final bool announced;
+
+  /// Whether it goes into the Rest Stop pot (tax) rather than the bank.
+  final bool toPot;
 }
 
 int _i(Side s) => s == Side.first ? 0 : 1;
@@ -81,6 +85,7 @@ class LandlordBoard implements Board {
       _held = List.unmodifiable([for (final h in s.held) List<int>.unmodifiable(h)]),
       _luck = List.unmodifiable(s.luck),
       _fund = List.unmodifiable(s.fund),
+      pot = s.pot,
       _stage = s.stage,
       _again = s.again,
       _doubles = s.doubles,
@@ -114,6 +119,7 @@ class LandlordBoard implements Board {
     (List<int>, List<int>) held = (const [], const []),
     List<int>? luck,
     List<int>? fund,
+    int pot = 0,
   }) {
     final allHeld = {...held.$1, ...held.$2};
     final s = _State.fresh(
@@ -124,7 +130,8 @@ class LandlordBoard implements Board {
       ..turn = turn
       ..pos = [positions.$1, positions.$2]
       ..cash = [cash.$1, cash.$2]
-      ..held = [List.of(held.$1), List.of(held.$2)];
+      ..held = [List.of(held.$1), List.of(held.$2)]
+      ..pot = pot;
     owners.forEach((k, v) => s.owner[k] = v);
     levels.forEach((k, v) => s.level[k] = v);
     for (final m in mortgaged) {
@@ -157,6 +164,9 @@ class LandlordBoard implements Board {
   /// The last roll, or null before the first.
   final (int, int)? dice;
   final LandlordOffer? trade;
+
+  /// Tax paid so far, waiting on the Rest Stop for whoever lands there next.
+  final int pot;
 
   /// Debts still to pay, oldest first.
   final List<LandlordDebt> debts;
@@ -234,6 +244,7 @@ class LandlordBoard implements Board {
     held: [for (final h in _held) List.of(h)],
     luck: List.of(_luck),
     fund: List.of(_fund),
+    pot: pot,
     stage: _stage,
     again: _again,
     doubles: _doubles,
@@ -260,6 +271,7 @@ class _State {
     required this.held,
     required this.luck,
     required this.fund,
+    required this.pot,
     required this.stage,
     required this.again,
     required this.doubles,
@@ -283,6 +295,7 @@ class _State {
     held: [[], []],
     luck: luck,
     fund: fund,
+    pot: 0,
     stage: _Stage.roll,
     again: false,
     doubles: 0,
@@ -300,6 +313,7 @@ class _State {
   List<bool> mortgaged, inJail;
   List<List<int>> held;
   List<int> luck, fund;
+  int pot;
   _Stage stage;
   bool again;
   int doubles;
@@ -654,13 +668,20 @@ class _State {
         _charge(s, o, rent, LandlordEventKind.rent, space: sp.index);
       case SpaceKind.tax:
         _continue();
-        _charge(s, null, sp.tax, LandlordEventKind.tax, space: sp.index);
+        _charge(s, null, sp.tax, LandlordEventKind.tax, space: sp.index, toPot: true);
       case SpaceKind.card:
         _continue();
         _drawCard(s, sp.deck!);
       case SpaceKind.goToJail:
         _goToJail(s);
-      case SpaceKind.start || SpaceKind.jail || SpaceKind.rest:
+      case SpaceKind.rest:
+        _continue();
+        if (pot > 0) {
+          cash[_i(s)] += pot;
+          log(LandlordEvent(s, LandlordEventKind.pot, amount: pot, space: sp.index));
+          pot = 0;
+        }
+      case SpaceKind.start || SpaceKind.jail:
         _continue();
     }
   }
@@ -781,9 +802,9 @@ class _State {
     }
   }
 
-  /// [from] pays [amount] to [to] (null: the bank) now, or owes it.
-  /// [from] owes [amount] to [to] (null: the bank). [settle] pays it at once
-  /// if it can, logging [event] (default: [kind] by [from]).
+  /// [from] owes [amount] to [to] (null: the bank, or the Rest Stop pot if
+  /// [toPot]). [settle] pays it at once if it can, logging [event] (default:
+  /// [kind] by [from]).
   void _charge(
     Side from,
     Side? to,
@@ -791,6 +812,7 @@ class _State {
     LandlordEventKind? kind, {
     int? space,
     LandlordEvent? event,
+    bool toPot = false,
   }) {
     if (amount <= 0) return;
     debts.add(
@@ -800,6 +822,7 @@ class _State {
         amount,
         space: space,
         event: event ?? LandlordEvent(from, kind!, amount: amount, space: space, other: to),
+        toPot: toPot,
       ),
     );
   }
@@ -826,6 +849,7 @@ class _State {
               space: d.space,
               event: d.event,
               announced: true,
+              toPot: d.toPot,
             );
             log(
               LandlordEvent(
@@ -843,6 +867,7 @@ class _State {
         cash[_i(d.debtor)] -= d.amount;
         final c = d.creditor;
         if (c != null) cash[_i(c)] += d.amount;
+        if (d.toPot) pot += d.amount;
         if (d.announced) {
           log(LandlordEvent(d.debtor, LandlordEventKind.debtPaid, amount: d.amount, other: c));
         } else if (d.event case final e?) {

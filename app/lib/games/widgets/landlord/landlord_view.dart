@@ -622,7 +622,7 @@ class _SpaceTile extends StatelessWidget {
       SpaceKind.utility => index == 12 ? 'Power' : 'Water',
       SpaceKind.start => 'Start',
       SpaceKind.jail => 'Jail',
-      SpaceKind.rest => 'Rest',
+      SpaceKind.rest => board.pot > 0 ? 'Rest\n${money(board.pot)}' : 'Rest',
       SpaceKind.goToJail => 'Go to\nJail',
       SpaceKind.property => s.name.split(' ').first,
     };
