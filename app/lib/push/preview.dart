@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:characters/characters.dart';
 
 import '../chat/db/chat_db.dart';
+import '../chat/markdown.dart';
 import '../chat/plaintext.dart';
 import '../crypto/encoding.dart';
 import '../crypto/envelope.dart';
@@ -85,8 +86,9 @@ Future<String?> rowPreviewText(ChatDb db, MessageRow row) async {
 
 Future<String?> _previewOf(ChatDb db, Plaintext p, MessageRow row) async {
   if (p is TextBody) {
-    final chars = p.text.characters;
-    return chars.length <= maxPreviewChars ? p.text : '${chars.take(maxPreviewChars)}…';
+    final text = stripMarkdown(p.text);
+    final chars = text.characters;
+    return chars.length <= maxPreviewChars ? text : '${chars.take(maxPreviewChars)}…';
   }
   if (p is GameBody || p is MoveBody) return gamePushLabel(db, row.chatId, row);
   return mediaLabel(p.kind);

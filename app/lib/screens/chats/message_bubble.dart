@@ -445,7 +445,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: Space.sm,
         children: [
-          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames),
+          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames, markdown: true),
           if (showEdited) Padding(padding: const EdgeInsets.only(top: 2), child: edited),
         ],
       );

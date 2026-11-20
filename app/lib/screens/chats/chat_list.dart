@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
+import '../../chat/markdown.dart';
 import '../../chat/message_changes.dart';
 import '../../chat/providers.dart';
 import '../../games/labels.dart';
@@ -215,7 +216,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
 String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
-    'text' => (changes.textOf(m) ?? '').replaceAll('\n', ' '),
+    'text' => stripMarkdown(changes.textOf(m) ?? '').replaceAll('\n', ' '),
     _ => gameListLabel(m) ?? mediaLabel(m.kind) ?? 'Message',
   };
 }
