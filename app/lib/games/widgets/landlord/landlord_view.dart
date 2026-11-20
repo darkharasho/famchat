@@ -317,18 +317,18 @@ class _LandlordViewState extends State<LandlordView> {
                   rect: ring.centre,
                   child: Padding(
                     padding: EdgeInsets.all(u * 0.25),
-                    // Drawn 250 wide and scaled with the board (about full
-                    // size on a phone, at most 1.35× on a big screen), so it
-                    // doesn't change size between phases; only a centre
-                    // too tall for the space shrinks.
+                    // Drawn 210 wide and scaled with the board (a little
+                    // over full size on a phone, at most 1.6× on a big
+                    // screen), so it doesn't change size between phases;
+                    // only a centre too tall for the space shrinks.
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: SizedBox(
-                        width: 250 * (8.5 * u / 250).clamp(0.5, 1.35),
+                        width: 210 * (8.5 * u / 210).clamp(0.5, 1.6),
                         child: FittedBox(
                           fit: BoxFit.fitWidth,
                           child: SizedBox(
-                            width: 250,
+                            width: 210,
                             child: Theme(
                               data: _feltTheme(theme),
                               child: _Centre(view: w, armed: _settle == null, balances: balances, host: context, motion: _motion),
@@ -391,10 +391,9 @@ class _Centre extends StatelessWidget {
     final b = view.board;
     final me = view.mySide ?? Side.first;
     final names = view._names;
-    final small = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     final dice = b.dice;
-    final away = view.mySide == null ? const <LandlordEvent>[] : sinceMyLast(b.events, me);
-    final shown = away.length > 3 ? away.sublist(away.length - 3) : away;
+    // What happened since my last move: a count on the Log button, not lines here.
+    final away = view.mySide == null ? 0 : sinceMyLast(b.events, me).length;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -443,44 +442,39 @@ class _Centre extends StatelessWidget {
         ],
         const SizedBox(height: 8),
         Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: _actions(context)),
-        if (shown.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text('While you were away', style: theme.textTheme.labelMedium),
-          for (final e in shown)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(landlordLogIcon(e), size: 14, color: landlordTokenColor(context, e.actor)),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(landlordLog(e, names), style: small, maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
+        const SizedBox(height: 8),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              key: const Key('open-log'),
+              tooltip: away > 0 ? 'Log: $away new' : 'Log',
+              onPressed: () => _showLog(host),
+              icon: Badge(
+                key: const Key('away-count'),
+                isLabelVisible: away > 0,
+                label: Text('$away'),
+                child: const Icon(Icons.receipt_long_outlined),
               ),
             ),
-          if (away.length > shown.length)
-            TextButton(key: const Key('away-more'), onPressed: () => _showLog(host), child: Text('+${away.length - shown.length} more')),
-        ],
-        const SizedBox(height: 8),
-        Wrap(
-          alignment: WrapAlignment.center,
-          children: [
-            TextButton(key: const Key('open-log'), onPressed: () => _showLog(host), child: const Text('Log')),
-            TextButton(
+            const SizedBox(width: 12),
+            IconButton(
               key: const Key('open-properties'),
+              tooltip: 'Properties',
               onPressed: () => showPropertiesSheet(host, b, me, names, view._legal, view.onPlay, canAct: view._canAct),
-              child: const Text('Properties'),
+              icon: const Icon(Icons.home_work_outlined),
             ),
-            if (view.mySide != null)
-              TextButton(
+            if (view.mySide != null) ...[
+              const SizedBox(width: 12),
+              IconButton(
                 key: const Key('open-trade'),
+                tooltip: 'Trade',
                 onPressed: view._canAct && b.turn == me && (b.phase == LandlordPhase.roll || b.phase == LandlordPhase.end)
                     ? () => showTradeSheet(host, b, me, names, view.onPlay)
                     : null,
-                child: const Text('Trade'),
+                icon: const Icon(Icons.swap_horiz),
               ),
+            ],
           ],
         ),
       ],
@@ -811,8 +805,8 @@ class _Plate extends StatelessWidget {
     final c = landlordTokenColor(context, side);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      width: 112,
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 7),
+      width: 100,
+      padding: const EdgeInsets.fromLTRB(9, 6, 9, 7),
       decoration: BoxDecoration(
         color: active ? Color.alphaBlend(c.withValues(alpha: 0.14), theme.colorScheme.surfaceContainerHigh) : theme.colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(12),
