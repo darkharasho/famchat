@@ -11,6 +11,7 @@ import 'package:famchat/chat/providers.dart';
 import 'package:famchat/chat/spelling/providers.dart';
 import 'package:famchat/chat/spelling/speller.dart';
 import 'package:famchat/main.dart';
+import 'package:famchat/media/clipboard_media.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
@@ -94,6 +95,7 @@ Future<ScriptedHubLink> pumpChatApp(
   bool admin = false,
   MediaDb? mediaDb,
   MediaPicker? picker,
+  ClipboardMediaReader? clipboard,
   VideoProcessor? videos,
   VideoFiles? videoFiles,
   ShareSource? shares,
@@ -122,6 +124,8 @@ Future<ScriptedHubLink> pumpChatApp(
       photoProcessorProvider.overrideWithValue(FakeProcessor()),
       mediaOffloadProvider.overrideWithValue(null), // isolates never answer under fake time
       if (picker != null) photoPickerProvider.overrideWithValue(picker),
+      // Never the real clipboard: nothing on it unless a test brings a reader.
+      clipboardMediaProvider.overrideWithValue(clipboard ?? () async => const []),
       videoProcessorProvider.overrideWithValue(videos ?? FakeVideoProcessor()),
       // No files or native players in tests: an in-memory stand-in (use FakeVideoPlatform to play).
       videoFilesProvider.overrideWithValue(videoFiles ?? fakeVideoFiles()),
