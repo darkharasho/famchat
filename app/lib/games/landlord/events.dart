@@ -10,6 +10,7 @@ enum LandlordEventKind {
   declined,
   rent,
   tax,
+  pot,
   drew,
   paid,
   collected,
