@@ -173,6 +173,64 @@ void main() {
     expect(g.toMoveUserId, 'A');
   });
 
+  group('rules versions', () {
+    MessageRow stamped(String sender, int ply, int cell, int? rules) =>
+        row(sender, MoveBody('g', GameType.tictactoe, ply, {'type': 'play', 'cell': cell}, rules: rules));
+
+    test('a refused play at the current ply puts the game out of sync until a play applies', () {
+      final rows = [game('g', GameType.tictactoe, 'A'), ttt('A', 'g', 0, 0), ttt('B', 'g', 1, 0)];
+      final stuck = deriveGames(rows, members).single;
+      expect(stuck.outOfSync, isTrue);
+      expect(stuck.toMoveUserId, isNull);
+      final fine = deriveGames([...rows, ttt('B', 'g', 1, 4)], members).single;
+      expect(fine.outOfSync, isFalse);
+      expect(fine.ply, 2);
+    });
+
+    test('stale and out-of-turn plays are not a sync problem', () {
+      final g = deriveGames([
+        game('g', GameType.tictactoe, 'A'),
+        ttt('A', 'g', 0, 0),
+        ttt('A', 'g', 0, 1),
+        ttt('A', 'g', 1, 2),
+      ], members).single;
+      expect(g.outOfSync, isFalse);
+      expect(g.toMoveUserId, 'B');
+    });
+
+    test('a move from newer rules puts the game out of sync', () {
+      final g = deriveGames([
+        game('g', GameType.tictactoe, 'A'),
+        stamped('A', 0, 0, GameType.tictactoe.rules + 1),
+      ], members).single;
+      expect(g.outOfSync, isTrue);
+      expect(g.ply, 1);
+      expect(g.toMoveUserId, isNull);
+    });
+
+    test("the player whose newest move has older rules is behind", () {
+      final l = GameType.landlord;
+      MessageRow lm(String sender, int ply, int? rules) =>
+          row(sender, MoveBody('l', l, ply, {'type': 'poke'}, rules: rules));
+      final rows = [game('l', l, 'A', seed: 3)];
+      expect(deriveGames([...rows, lm('B', 0, null)], members).single.behindUserId, isNull);
+      expect(deriveGames([...rows, lm('B', 0, l.rules - 1)], members).single.behindUserId, 'B');
+      expect(deriveGames([...rows, lm('B', 0, l.rules - 1), lm('B', 0, l.rules)], members).single.behindUserId, isNull);
+      expect(deriveGames([...rows, lm('B', 0, l.rules - 1)], members).single.outOfSync, isFalse);
+    });
+
+    test('a move carries its rules on the wire', () {
+      final m = MoveBody('g', GameType.landlord, 4, {'type': 'poke'}, rules: 3);
+      final back = Plaintext.decode(utf8.encode(jsonEncode(m.toJson()))) as MoveBody;
+      expect(m.toJson()['rules'], 3);
+      expect(back.rules, 3);
+      final old = Plaintext.decode(utf8.encode(jsonEncode({...m.toJson()}..remove('rules')))) as MoveBody;
+      expect(old.rules, isNull);
+      final bad = Plaintext.decode(utf8.encode(jsonEncode({...m.toJson(), 'rules': 'x'}))) as MoveBody;
+      expect(bad.rules, isNull);
+    });
+  });
+
   test('resign ends with the other player winning', () {
     final g = deriveGames([
       game('g', GameType.chess, 'A'),

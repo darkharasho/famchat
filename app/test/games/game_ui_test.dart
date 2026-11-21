@@ -185,6 +185,36 @@ void main() {
     expect(find.text("Bob's turn"), findsOneWidget);
   });
 
+  chatTestWidgets('a move from newer rules stops play and says to update', (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.tictactoe, alice.userId),
+        ...tttPlays('g1', alice.userId, bob.userId, [0]),
+        msg(bob.userId, MoveBody('g1', GameType.tictactoe, 1, {'type': 'play', 'cell': 4}, rules: GameType.tictactoe.rules + 1)),
+      ],
+    );
+    await openBoard(tester);
+    expect(find.byKey(const Key('game-out-of-sync')), findsOneWidget);
+    expect(find.text('Update FamChat to keep playing'), findsWidgets);
+    await tester.tap(find.descendant(of: find.byType(GameScreen), matching: find.byKey(const Key('sq-8'))));
+    await settle(tester);
+    expect(await outbox(tester), isEmpty);
+  });
+
+  chatTestWidgets("an opponent on older rules is named", (tester) async {
+    await open(
+      tester,
+      messages: [
+        game('g1', GameType.landlord, alice.userId, seed: 3),
+        msg(bob.userId, MoveBody('g1', GameType.landlord, 0, {'type': 'poke'}, rules: GameType.landlord.rules - 1)),
+      ],
+    );
+    await openBoard(tester);
+    expect(find.byKey(const Key('game-behind')), findsOneWidget);
+    expect(find.byKey(const Key('game-out-of-sync')), findsNothing);
+  });
+
   chatTestWidgets('playing on the board sends a move with the current ply', (
     tester,
   ) async {
@@ -211,6 +241,7 @@ void main() {
         'game': 'tictactoe',
         'ply': 2,
         'action': {'type': 'play', 'cell': 8},
+        'rules': 1,
       },
     ]);
     // The pending move shows at once: now it's Bob's turn.
@@ -328,6 +359,7 @@ void main() {
         'game': 'tictactoe',
         'ply': 1,
         'action': {'type': 'poke'},
+        'rules': 1,
       },
     ]);
     expect(find.text('Poked Bob'), findsOneWidget);

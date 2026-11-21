@@ -797,7 +797,7 @@ class ChatSync {
 
   /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].
   Future<String> sendMove(String chatId, String gameId, GameType game, int ply, Map<String, Object?> action) =>
-      _enqueueMessage(chatId, MoveBody(gameId, game, ply, action), targetId: gameId);
+      _enqueueMessage(chatId, MoveBody(gameId, game, ply, action, rules: game.rules), targetId: gameId);
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.

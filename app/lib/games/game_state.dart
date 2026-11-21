@@ -20,6 +20,8 @@ class GameState {
     required this.drawOfferedBy,
     required this.inert,
     required this.startedSeq,
+    this.outOfSync = false,
+    this.behindUserId,
   });
 
   /// The game message's id.
@@ -41,10 +43,20 @@ class GameState {
   final bool inert;
   final int? startedSeq;
 
+  /// This device can't follow the game: a move came with newer rules
+  /// ([GameType.rules]), or the newest play at the current ply was refused
+  /// (the sender's device has different rules). Until an update, nobody can
+  /// move here.
+  final bool outOfSync;
+
+  /// The player whose newest move has older rules than this app's: their
+  /// device may go out of sync until they update. Null if none (or unknown).
+  final String? behindUserId;
+
   bool get over => outcome != null;
 
-  /// Null when over or inert.
-  String? get toMoveUserId => over || inert ? null : _userOf(board.toMove);
+  /// Null when over, inert or [outOfSync].
+  String? get toMoveUserId => over || inert || outOfSync ? null : _userOf(board.toMove);
 
   Side? sideOf(String userId) => userId == firstUserId
       ? Side.first
@@ -314,8 +326,17 @@ class _Game {
   Outcome? outcome;
   String? drawOfferedBy;
 
+  /// A move came with newer rules than this app's.
+  bool newerRules = false;
+
+  /// The newest play at the current ply was refused, and none applied since.
+  bool refused = false;
+
+  /// Each player's newest known [MoveBody.rules].
+  final _rules = <String, int>{};
+
   void apply(String sender, MoveBody m) {
-    if (inert || outcome != null || m.game != type || m.ply != ply) return;
+    if (inert || outcome != null || m.game != type) return;
     final Side side;
     if (sender == first) {
       side = Side.first;
@@ -324,12 +345,23 @@ class _Game {
     } else {
       return;
     }
+    if (m.rules case final r?) {
+      _rules[sender] = r;
+      if (r > type.rules) newerRules = true;
+    }
+    if (m.ply != ply) return;
     final other = side == Side.first ? second : first;
     switch (m.action['type']) {
       case 'play':
         if (board.toMove != side) return;
         final next = board.play({...m.action}..remove('type'));
-        if (next == null) return;
+        // Both devices had this position at this ply, so a refused play
+        // means the sender's device has different rules.
+        if (next == null) {
+          refused = true;
+          return;
+        }
+        refused = false;
         board = next;
         ply++;
         // A play by the offerer's opponent declines a pending offer.
@@ -357,5 +389,7 @@ class _Game {
     drawOfferedBy: drawOfferedBy,
     inert: inert,
     startedSeq: startedSeq,
+    outOfSync: newerRules || refused,
+    behindUserId: [first, second].where((u) => (_rules[u] ?? type.rules) < type.rules).firstOrNull,
   );
 }
