@@ -90,9 +90,7 @@ class _WarViewState extends MoveMotionState<WarView> {
     final a = old.board, b = widget.board;
     if (widget.thumbnail || b.battles.isEmpty || b.toMove == a.toMove) return;
     final battle = b.battles.last;
-    // One battle apart: each deck lost exactly what it laid down.
-    final laid = battle.rounds.length + battle.downs.fold(0, (s, n) => s + n);
-    if (a.deck(Side.first).length - b.deck(Side.first).length != laid) return;
+    if (b.flips != a.flips + 1) return;
     final rounds = <(int, int)>[(0, _flyMs + _turnMs)];
     for (var r = 1; r < battle.rounds.length; r++) {
       final s = rounds.last.$2 + _gapMs;
@@ -165,7 +163,8 @@ class _WarViewState extends MoveMotionState<WarView> {
 
     // Decks and won piles.
     for (final s in [them, me]) {
-      final left = shown.deck(s).length - (battle == null ? 0 : _gone(s));
+      // A deck that runs out mid-battle takes its pile (whole deck).
+      final left = battle == null ? shown.deck(s).length : _left(shown, s);
       children.add(
         _pile(
           at: deckAt(s),
@@ -181,8 +180,10 @@ class _WarViewState extends MoveMotionState<WarView> {
         ),
       );
       final won = sweeping
-          ? (s == Side.first ? board.won.$1 : board.won.$2)
-          : (s == Side.first ? shown.won.$1 : shown.won.$2);
+          ? board.pile(s).length
+          : battle != null && _reshuffled(shown, s)
+          ? 0
+          : shown.pile(s).length;
       children.add(
         _pile(
           at: wonAt(s),
@@ -295,6 +296,18 @@ class _WarViewState extends MoveMotionState<WarView> {
       ),
     );
   }
+
+  /// [s]'s deck so far in the battle playing out from [before].
+  int _left(WarBoard before, Side s) {
+    final gone = _gone(s);
+    final deck = before.deck(s).length;
+    if (gone <= deck) return deck - gone;
+    return before.pile(s).length - (gone - deck);
+  }
+
+  /// Whether [s]'s pile has gone into their deck yet in the battle playing out.
+  bool _reshuffled(WarBoard before, Side s) =>
+      before.wholeDeck && _gone(s) > before.deck(s).length;
 
   /// Cards that have left [s]'s deck so far in the battle playing out.
   int _gone(Side s) {

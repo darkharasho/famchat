@@ -66,4 +66,19 @@ void main() {
     expect((r! as StartChoice).type, GameType.chess);
     expect((r as StartChoice).optionalJumps, isFalse);
   });
+
+  testWidgets('the War chip plays to the whole deck', (tester) async {
+    final r = await pick(tester, () async {
+      await tester.tap(find.byKey(const Key('whole-deck')));
+      await tester.pump();
+      expect(
+        find.text('Flip cards, higher wins. Play until someone has them all'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('War'));
+    });
+    expect((r! as StartChoice).type, GameType.war);
+    expect((r as StartChoice).wholeDeck, isTrue);
+    expect(r.optionalJumps, isFalse);
+  });
 }

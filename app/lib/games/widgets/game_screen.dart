@@ -205,14 +205,21 @@ Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
     g.type,
     first: g.secondUserId,
     optionalJumps: b is CheckersBoard && b.optionalJumps,
+    wholeDeck: b is WarBoard && b.wholeDeck,
   );
 }
 
 /// The panel's subtitle: who it's with, and a house rule in play.
 String? _subtitle(String? who, Board b) {
-  final rule = b is CheckersBoard && b.optionalJumps ? 'jumps optional' : null;
+  final rule = b is CheckersBoard && b.optionalJumps
+      ? 'jumps optional'
+      : b is WarBoard && b.wholeDeck
+      ? 'whole deck'
+      : null;
   if (rule == null) return who;
-  return who == null ? 'Jumps optional' : '$who · $rule';
+  return who == null
+      ? '${rule[0].toUpperCase()}${rule.substring(1)}'
+      : '$who · $rule';
 }
 
 const _reasons = {
@@ -480,13 +487,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         if (live && g.outOfSync)
           _Banner(
             key: const Key('game-out-of-sync'),
-            text: "This game is out of step with ${viewer.nameOf(opponent)}'s FamChat. Update FamChat on both devices, or close and reopen it, to keep playing.",
+            text:
+                "This game is out of step with ${viewer.nameOf(opponent)}'s FamChat. Update FamChat on both devices, or close and reopen it, to keep playing.",
             actions: const [],
           )
         else if (behind != null)
           _Banner(
             key: const Key('game-behind'),
-            text: "${viewer.nameOf(behind)}'s FamChat is out of date. Ask them to update it, or close and reopen it, so this game stays in step.",
+            text:
+                "${viewer.nameOf(behind)}'s FamChat is out of date. Ask them to update it, or close and reopen it, so this game stays in step.",
             actions: const [],
           ),
         if (running != null)

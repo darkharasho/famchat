@@ -53,8 +53,13 @@ enum GameType {
   /// different position) knows to update instead of going out of sync. Bump it
   /// whenever a change makes the same moves play out differently.
   /// Landlord: 2 tax goes into the Rest Stop pot; 3 bail and card payments
-  /// too; 4 the bank never runs out of houses or hotels.
-  int get rules => this == landlord ? 4 : 1;
+  /// too; 4 the bank never runs out of houses or hotels. War: 2 the whole-deck
+  /// mode.
+  int get rules => switch (this) {
+    landlord => 4,
+    war => 2,
+    _ => 1,
+  };
 
   static GameType? fromWire(String s) {
     for (final t in values) {
@@ -92,9 +97,14 @@ abstract class Board {
 
 /// The starting position of [t]. [seed] is the `game` message's seed, used
 /// by [GameType.seeded] games (a missing one deals from 0; such games are
-/// inert anyway). [optionalJumps] is checkers' house rule (ignored by other
-/// games).
-Board initialBoard(GameType t, [int? seed, bool optionalJumps = false]) {
+/// inert anyway). [optionalJumps] is checkers' house rule and [wholeDeck]
+/// War's (each ignored by other games).
+Board initialBoard(
+  GameType t, [
+  int? seed,
+  bool optionalJumps = false,
+  bool wholeDeck = false,
+]) {
   switch (t) {
     case GameType.tictactoe:
       return TicTacToeBoard.initial();
@@ -111,7 +121,7 @@ Board initialBoard(GameType t, [int? seed, bool optionalJumps = false]) {
     case GameType.gofish:
       return GoFishBoard.deal(seed ?? 0);
     case GameType.war:
-      return WarBoard.deal(seed ?? 0);
+      return WarBoard.deal(seed ?? 0, wholeDeck: wholeDeck);
     case GameType.landlord:
       return LandlordBoard.setup(seed ?? 0);
   }

@@ -170,7 +170,7 @@ String sideColourName(Board b, Side side) {
   ReversiBoard() => b.counts,
   DotsAndBoxesBoard() => b.scores,
   GoFishBoard() => b.scores,
-  WarBoard() => b.won,
+  WarBoard() => b.score,
   _ => null,
 };
 

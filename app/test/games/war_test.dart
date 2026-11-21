@@ -94,6 +94,14 @@ void main() {
       }
     });
 
+    test('a plain deal is the same with or without the option off', () {
+      final a = initialBoard(GameType.war, 7) as WarBoard;
+      final b = initialBoard(GameType.war, 7, false, true) as WarBoard;
+      expect(a.wholeDeck, isFalse);
+      expect(b.wholeDeck, isTrue);
+      expect(b.deck(Side.first), a.deck(Side.first));
+      expect(GameType.war.rules, 2);
+    });
     test('log lines', () {
       final b =
           WarBoard.custom([c(13)], [c(7, 1)]).play({'flip': true})! as WarBoard;
@@ -211,5 +219,83 @@ void main() {
       expect(boardScore(b), (2, 0));
       expect(boardAspectRatio(b), 3 / 2);
     });
+  });
+
+  group('whole deck', () {
+    test('an empty deck takes its pile, shuffled; the game goes on', () {
+      final b = WarBoard.custom(
+        [c(13)],
+        [c(2)],
+        firstPile: [c(5), c(6)],
+        secondPile: [c(3), c(4)],
+        wholeDeck: true,
+      );
+      final one = b.play({'flip': true})! as WarBoard;
+      expect(one.outcome, isNull);
+      expect(one.deck(Side.first), isEmpty);
+      expect(one.pile(Side.first), [c(5), c(6), c(13), c(2)]);
+      expect(one.score, (4, 2));
+      final two = one.play({'flip': true})! as WarBoard;
+      // Both decks were empty: both piles became decks.
+      expect(two.held.$1 + two.held.$2, 6);
+      expect(two.pile(Side.first).length + two.pile(Side.second).length, 2);
+      expect(two.flips, 2);
+    });
+
+    test('it ends when one player has every card', () {
+      final b = WarBoard.custom([c(13)], [c(2)], wholeDeck: true);
+      final done = b.play({'flip': true})! as WarBoard;
+      expect(done.outcome!.winner, Side.first);
+      expect(done.outcome!.reason, 'cards');
+      expect(boardScore(done), (2, 0));
+      expect(done.play({'flip': true}), isNull);
+    });
+
+    test('a war lays what the shorter hand can; no card to flip loses', () {
+      // Second has 2 cards: the tie, then one to flip, no face-down cards.
+      final b = WarBoard.custom(
+        [c(7), c(2), c(3), c(4), c(5)],
+        [c(7, 1), c(13)],
+        wholeDeck: true,
+      );
+      final w = b.play({'flip': true})! as WarBoard;
+      expect(w.battles.last.downs, [0]);
+      expect(w.battles.last.winner, Side.second);
+      expect(w.held, (3, 4));
+      // Second has only the tie card: they can't flip again and lose it.
+      final short =
+          WarBoard.custom(
+                [c(7), c(2)],
+                [c(7, 1)],
+                wholeDeck: true,
+              ).play({'flip': true})!
+              as WarBoard;
+      expect(short.battles.last.winner, Side.first);
+      expect(short.outcome!.winner, Side.first);
+      expect(short.held, (3, 0));
+    });
+
+    test(
+      'dealt games end with all 52 cards on one side, the same each time',
+      () {
+        for (var seed = 0; seed < 40; seed++) {
+          WarBoard run() {
+            Board b = initialBoard(GameType.war, seed, false, true);
+            var flips = 0;
+            while (b.outcome == null && flips < 100000) {
+              b = b.play({'flip': true})!;
+              flips++;
+            }
+            return b as WarBoard;
+          }
+
+          final b = run();
+          expect(b.outcome, isNotNull, reason: 'seed $seed');
+          expect(b.outcome!.winner, isNotNull);
+          expect({b.held.$1, b.held.$2}, {0, 52});
+          expect(run().flips, b.flips);
+        }
+      },
+    );
   });
 }

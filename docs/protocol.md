@@ -134,7 +134,7 @@ Integer fields (`ply` and the numbers in `play` moves) accept any integral numbe
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
 A `move` may carry `"rules":<n>`, the sender's version of that game's rules (Landlord 4: tax, bail and card
-payments go into the Rest Stop pot, and the bank has unlimited houses and hotels; every other game 1). Every device replays the same moves, so two devices with
+payments go into the Rest Stop pot, and the bank has unlimited houses and hotels; War 2: the whole-deck mode; every other game 1). Every device replays the same moves, so two devices with
 different rules end up in different positions. A device that sees a move with a newer `rules` than its own, or
 whose newest `play` at the current ply from the player to move is illegal there (until a later play applies), lets
 nobody move and asks to update; a device whose opponent's newest move has an older `rules` says so. A missing or invalid `rules` (versions before it)
@@ -191,8 +191,13 @@ Move fields of `play`:
   Fish, aces high (2 lowest). The deck `0..51` is shuffled with the seed and dealt alternately from the top, 26
   each, the first player first; each deck is played from its top. A flip turns both top cards: the higher takes
   both. Equal cards are a war: each lays `min(3, cards left - 1)` cards face down, then flips again, until one is
-  higher; if the decks run out first, each takes back their own cards. Won cards are counted, never played again.
-  When the decks are empty the game ends: more cards won wins (reason `cards`), equal is a draw. No draw offers.
+  higher; if the decks run out first, each takes back their own cards. Won cards go on the winner's pile in the order
+  laid, first's before second's. They are counted, never played again: when the decks are empty the game ends, more
+  cards won wins (reason `cards`), equal is a draw. No draw offers.
+  A `war` game may carry `"until":"all_cards"` (picked when starting it, kept by a rematch): then a player whose deck
+  is empty when they need a card shuffles their pile into it (the seed's generator, carrying on after the deal), a
+  war lays `min(3, cards held by the player with fewer - 1)` each, a player with no card to flip loses the battle,
+  and the game ends when one player holds every card (reason `cards`). Other games, and other values, ignore the field.
 - Landlord: `{"a": "<action>", ...}`. A two-player property-trading game on a 40-space board (`0..39` clockwise
   from Start; prices, rents and the two 16-card decks, Luck ids `0..15` and Family Fund `16..31`, are fixed in
   `app/lib/games/landlord/`). Setup: the generator is created from the seed, Luck `[0..15]` is shuffled, then

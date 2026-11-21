@@ -34,25 +34,34 @@ Future<void> showStartGameSheet(BuildContext context, String chatId) async {
     choice.type,
     first: me,
     optionalJumps: choice.optionalJumps,
+    wholeDeck: choice.wholeDeck,
   );
   if (context.mounted) unawaited(openGame(context, chatId, id));
 }
 
 /// A game to start, with its house rules.
 class StartChoice {
-  const StartChoice(this.type, {this.optionalJumps = false});
+  const StartChoice(
+    this.type, {
+    this.optionalJumps = false,
+    this.wholeDeck = false,
+  });
 
   final GameType type;
 
   /// Checkers: captures may be skipped.
   final bool optionalJumps;
+
+  /// War: play until one player has every card.
+  final bool wholeDeck;
 }
 
 /// The sheet's body: every game, quick ones first, then long ones. Pops with
 /// a [StartChoice], or the id of an unfinished game to open. While a game of
 /// one kind is unfinished, that kind's games can't start: a line offers to
 /// open the running one instead. Checkers carries a chip to make jumps
-/// optional (by default a capture, when there is one, must be taken).
+/// optional (by default a capture, when there is one, must be taken), and War
+/// one to play until someone has the whole deck (by default one pass).
 class StartGameSheet extends ConsumerStatefulWidget {
   const StartGameSheet({super.key, required this.chatId});
 
@@ -64,6 +73,7 @@ class StartGameSheet extends ConsumerStatefulWidget {
 
 class _StartGameSheetState extends ConsumerState<StartGameSheet> {
   bool _optionalJumps = false;
+  bool _wholeDeck = false;
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +129,11 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
       subtitle: t.long
           ? const Text('A long game, played over days')
           : t == GameType.war
-          ? const Text('Flip cards, higher wins. Most cards after one deck')
+          ? Text(
+              _wholeDeck
+                  ? 'Flip cards, higher wins. Play until someone has them all'
+                  : 'Flip cards, higher wins. Most cards after one deck',
+            )
           : t == GameType.checkers
           ? Text(
               _optionalJumps
@@ -134,6 +148,13 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
               selected: _optionalJumps,
               onSelected: (v) => setState(() => _optionalJumps = v),
             )
+          : t == GameType.war && enabled
+          ? FilterChip(
+              key: const Key('whole-deck'),
+              label: const Text('Whole deck'),
+              selected: _wholeDeck,
+              onSelected: (v) => setState(() => _wholeDeck = v),
+            )
           : null,
       onTap: enabled
           ? () => Navigator.pop(
@@ -141,6 +162,7 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
               StartChoice(
                 t,
                 optionalJumps: t == GameType.checkers && _optionalJumps,
+                wholeDeck: t == GameType.war && _wholeDeck,
               ),
             )
           : null,
