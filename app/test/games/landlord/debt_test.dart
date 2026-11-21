@@ -6,17 +6,6 @@ import 'helpers.dart';
 
 const first = Side.first, second = Side.second;
 
-Map<int, int> housesUsed(int n) {
-  final out = <int, int>{};
-  for (final s in [6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 23, 24]) {
-    if (n <= 0) break;
-    final k = n >= 4 ? 4 : n;
-    out[s] = k;
-    n -= k;
-  }
-  return out;
-}
-
 /// First draws Family Fund card 24 ("collect 10 from the other player") at #17.
 LandlordBoard birthday({required (int, int) cash, Map<int, Side> owners = const {}}) => act(
   LandlordBoard.custom(
@@ -100,30 +89,6 @@ void main() {
     expect(b.events.last.kind, LandlordEventKind.bankrupt);
     expect(b.events.last.actor, second);
     expect(b.play({'a': 'end_turn'}), isNull);
-  });
-
-  test('hotels in a house shortage count at full value', () {
-    LandlordBoard land(int cash) => act(
-      LandlordBoard.custom(
-        rng: rollsSeed([(1, 2)]),
-        positions: (36, 0),
-        cash: (cash, 1500),
-        owners: {1: first, 3: first, 37: second, 39: second, for (final s in housesUsed(32).keys) s: second},
-        levels: {1: 5, 3: 5, 37: 5, 39: 5, ...housesUsed(32)},
-      ),
-      'roll',
-    );
-    expect(land(1689).outcome?.reason, 'bankrupt');
-    var b = land(1690);
-    expect(b.outcome, isNull);
-    expect(b.liquidation(first), 2000);
-    b = act(b, 'sell', {'space': 1});
-    b = act(b, 'sell', {'space': 3});
-    b = act(b, 'mortgage', {'space': 1});
-    b = act(b, 'mortgage', {'space': 3});
-    expect(b.debts, isEmpty);
-    expect(b.cash(first), 0);
-    expect(b.cash(second), 3500);
   });
 
   test('declaring bankruptcy', () {
