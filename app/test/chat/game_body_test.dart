@@ -99,6 +99,15 @@ void main() {
     expect(timelineHiddenKinds, {'reaction', 'edit', 'delete', 'move'});
   });
 
+  test('war may play to the whole deck', () {
+    const g = GameBody(GameType.war, 'U1', seed: 4, wholeDeck: true);
+    expect(g.toJson()['until'], 'all_cards');
+    expect((Plaintext.decode(g.encode()) as GameBody).wholeDeck, isTrue);
+    expect(const GameBody(GameType.gofish, 'U1', seed: 4, wholeDeck: true).toJson().containsKey('until'), isFalse);
+    expect((decode({'kind': 'game', 'game': 'gofish', 'first': 'U1', 'seed': 4, 'until': 'all_cards'}) as GameBody).wholeDeck, isFalse);
+    expect((decode({'kind': 'game', 'game': 'war', 'first': 'U1', 'seed': 4, 'until': 'all'}) as GameBody).wholeDeck, isFalse);
+  });
+
   test('checkers can carry optional jumps; other games ignore it', () {
     const g = GameBody(GameType.checkers, 'U1', optionalJumps: true);
     expect(g.toJson(), {'kind': 'game', 'game': 'checkers', 'first': 'U1', 'jumps': 'optional'});

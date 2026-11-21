@@ -799,9 +799,16 @@ class ChatSync {
     required String first,
     int? seed,
     bool optionalJumps = false,
+    bool wholeDeck = false,
   }) => _enqueueMessage(
     chatId,
-    GameBody(game, first, seed: game.seeded ? seed ?? newSeed() : null, optionalJumps: optionalJumps),
+    GameBody(
+      game,
+      first,
+      seed: game.seeded ? seed ?? newSeed() : null,
+      optionalJumps: optionalJumps,
+      wholeDeck: wholeDeck,
+    ),
   );
 
   /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].
