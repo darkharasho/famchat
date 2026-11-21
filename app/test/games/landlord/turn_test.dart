@@ -33,8 +33,6 @@ void main() {
     final fund = shuffled(List.generate(16, (i) => i + 16), r);
     expect(b.deck(LandlordDeck.luck), luck);
     expect(b.deck(LandlordDeck.fund), fund);
-    expect(b.housesLeft, 32);
-    expect(b.hotelsLeft, 12);
   });
 
   test('roll and move', () {

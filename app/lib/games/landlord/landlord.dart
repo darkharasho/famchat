@@ -145,7 +145,6 @@ class LandlordBoard implements Board {
   }
 
   static const startCash = 1500, salary = 200, bail = 50, maxEvents = 200;
-  static const houses = 32, hotels = 12;
 
   final int _rng;
 
@@ -187,9 +186,6 @@ class LandlordBoard implements Board {
 
   @visibleForTesting
   List<int> deck(LandlordDeck d) => d == LandlordDeck.luck ? _luck : _fund;
-
-  int get housesLeft => _state().housesLeft;
-  int get hotelsLeft => _state().hotelsLeft;
 
   LandlordPhase get phase {
     if (debts.isNotEmpty) return LandlordPhase.debt;
@@ -322,10 +318,6 @@ class _State {
   List<LandlordDebt> debts;
   List<LandlordEvent> events;
   Outcome? outcome;
-
-  int get housesLeft =>
-      LandlordBoard.houses - level.where((l) => l >= 1 && l <= 4).fold(0, (a, l) => a + l);
-  int get hotelsLeft => LandlordBoard.hotels - level.where((l) => l == 5).length;
 
   Side get toMove {
     if (debts.isNotEmpty) return debts.first.debtor;
@@ -525,7 +517,6 @@ class _State {
     final l = level[sp];
     if (l >= 5 || set.any((x) => level[x] < l)) return false;
     if (cash[_i(me)] < space.houseCost) return false;
-    if (l == 4 ? hotelsLeft < 1 : housesLeft < 1) return false;
     cash[_i(me)] -= space.houseCost;
     level[sp] = l + 1;
     log(LandlordEvent(me, LandlordEventKind.built, space: sp, amount: space.houseCost));
@@ -537,16 +528,7 @@ class _State {
     final l = level[sp];
     if (owner[sp] != who || l == 0) return false;
     final half = space.houseCost ~/ 2;
-    if (l == 5) {
-      // Break the hotel down to 4 houses, or as many as the bank has,
-      // selling the rest too (no even-selling check in that case).
-      final keep = housesLeft < 4 ? housesLeft : 4;
-      level[sp] = keep;
-      final got = half * (1 + 4 - keep);
-      cash[_i(who)] += got;
-      log(LandlordEvent(who, LandlordEventKind.sold, space: sp, amount: got));
-      return true;
-    }
+    // A hotel sells back to 4 houses. The bank never runs out of either.
     if (groupSpaces(space.group!).any((x) => level[x] > l)) return false;
     level[sp] = l - 1;
     cash[_i(who)] += half;

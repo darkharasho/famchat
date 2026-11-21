@@ -51,27 +51,23 @@ void main() {
 
   test('a hotel replaces 4 houses and returns them', () {
     final b = mine({37: 4, 39: 4});
-    expect(b.housesLeft, 24);
     final h = act(b, 'build', at(39));
     expect(h.level(39), 5);
-    expect((h.housesLeft, h.hotelsLeft), (28, 11));
     expect(legal(mine({37: 4, 39: 3}), 'build', at(37)), isFalse);
   });
 
-  test('bank limits: 32 houses, 12 hotels', () {
-    final full = LandlordBoard.custom(
+  test('the bank never runs out of houses or hotels', () {
+    final houses = LandlordBoard.custom(
       owners: {1: first, 3: first, for (final s in housesUsed(32).keys) s: second},
       levels: housesUsed(32),
     );
-    expect(full.housesLeft, 0);
-    expect(legal(full, 'build', at(1)), isFalse);
+    expect(legal(houses, 'build', at(1)), isTrue);
     final hotels = {6: 5, 8: 5, 9: 5, 11: 5, 13: 5, 14: 5, 16: 5, 18: 5, 19: 5, 21: 5, 23: 5, 24: 5};
-    final noHotels = LandlordBoard.custom(
+    final full = LandlordBoard.custom(
       owners: {37: first, 39: first, for (final s in hotels.keys) s: second},
       levels: {37: 4, 39: 4, ...hotels},
     );
-    expect(noHotels.hotelsLeft, 0);
-    expect(legal(noHotels, 'build', at(37)), isFalse);
+    expect(act(full, 'build', at(37)).level(37), 5);
   });
 
   test('build only in roll or end, by the turn player', () {
@@ -93,26 +89,6 @@ void main() {
     expect(legal(mine({1: 0, 3: 0}), 'sell', at(1)), isFalse);
     final h = act(mine({37: 5, 39: 5}), 'sell', at(39));
     expect((h.level(39), h.cash(first)), (4, 1600));
-  });
-
-  test('selling a hotel in a house shortage sells houses too', () {
-    // 30 houses elsewhere leaves 2 in the bank.
-    final two = LandlordBoard.custom(
-      owners: {37: first, 39: first, for (final s in housesUsed(30).keys) s: second},
-      levels: {37: 5, 39: 5, ...housesUsed(30)},
-    );
-    expect(two.housesLeft, 2);
-    final s = act(two, 'sell', at(39));
-    expect(s.level(39), 2);
-    expect(s.cash(first), 1500 + 100 * 3);
-    final none = LandlordBoard.custom(
-      owners: {37: first, 39: first, for (final s in housesUsed(32).keys) s: second},
-      levels: {37: 5, 39: 5, ...housesUsed(32)},
-    );
-    final z = act(none, 'sell', at(39));
-    expect((z.level(39), z.cash(first)), (0, 1500 + 100 * 5));
-    // The even-selling check is skipped: 37 still has its hotel.
-    expect(z.level(37), 5);
   });
 
   test('mortgage', () {

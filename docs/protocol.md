@@ -133,8 +133,8 @@ non-empty `first`, or a `move` without a `target`, a `ply` of 0 or more, or an `
 Integer fields (`ply` and the numbers in `play` moves) accept any integral number, so `3` and `3.0` are both 3;
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
-A `move` may carry `"rules":<n>`, the sender's version of that game's rules (Landlord 3: tax, bail and card
-payments go into the Rest Stop pot; every other game 1). Every device replays the same moves, so two devices with
+A `move` may carry `"rules":<n>`, the sender's version of that game's rules (Landlord 4: tax, bail and card
+payments go into the Rest Stop pot, and the bank has unlimited houses and hotels; every other game 1). Every device replays the same moves, so two devices with
 different rules end up in different positions. A device that sees a move with a newer `rules` than its own, or
 whose newest `play` at the current ply from the player to move is illegal there (until a later play applies), lets
 nobody move and asks to update; a device whose opponent's newest move has an older `rules` says so. A missing or invalid `rules` (versions before it)

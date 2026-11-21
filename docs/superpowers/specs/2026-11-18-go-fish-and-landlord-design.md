@@ -209,13 +209,10 @@ rounded up to a whole dollar.
 
 - You may build only on a complete colour set that you own with nothing in it mortgaged. Build
   evenly: a property may not get its next house while another in the set has fewer. A hotel
-  replaces 4 houses, needs 4 on every property in the set, and returns those 4 houses to the bank.
+  replaces 4 houses and needs 4 on every property in the set.
   Stations and utilities can't be built on.
 - A house sells back for half its cost; so does a hotel. Sell evenly: the reverse of building.
-  Selling a hotel returns 4 houses to the property, if the bank has them. **If the bank has fewer
-  than 4 houses**, selling a hotel also sells enough houses on that property, at half price, that
-  what stays on it fits in the bank (down to bare land). The even-selling check is skipped for
-  this one case, so a debtor holding hotels during a shortage can always raise cash.
+  Selling a hotel leaves 4 houses on the property.
 - A property can be mortgaged only when no property in its colour set has buildings.
 - Rent with mortgages: unimproved properties in a fully owned set still charge double rent even if
   another property in the set is mortgaged. Mortgaged stations and utilities still count toward
@@ -224,8 +221,7 @@ rounded up to a whole dollar.
   `trade`: the turn player in `roll`, `buy` and `end`, the bidder whose turn it is in `auction`,
   and the debtor in `debt`. That lets a player mortgage to afford a buy or a bid. `build`,
   `unmortgage` and `offer` stay limited to the turn player in `roll` and `end`.
-- Automatic bankruptcy counts everything sellable under these rules, including the hotel
-  shortage case above.
+- Automatic bankruptcy counts everything sellable under these rules.
 
 ### Cards (permanent wire format)
 
@@ -250,9 +246,7 @@ Start. The deck order above is the order before shuffling.
 ### Money and the bank
 
 - Each player starts with 1500. All amounts are whole dollars. The bank never runs out of money.
-- The bank has 32 houses and 12 hotels. A build that needs a house or hotel the bank doesn't have
-  is illegal. If both players want the last houses, whoever builds first gets them; there's no
-  shortage auction.
+- The bank never runs out of houses or hotels (since rules 4; it had 32 and 12 before).
 - Free Parking does nothing. Taxes go to the bank.
 
 ### Turn flow and who acts
