@@ -208,6 +208,28 @@ void main() {
     await sub.cancel();
   });
 
+  test('a catch-up shows the missed messages at once, not one by one', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    await until(() async => await bob.d.db.chatById(chatId) != null, reason: 'bob knows the chat');
+    await bob.sync.idle;
+    bob.d.hub.drop();
+    for (var i = 0; i < 12; i++) {
+      await alice.sync.sendText(chatId, 'm$i');
+    }
+    await until(() async => backend.storedMessages(chatId).length == 12);
+    final sizes = <int>[];
+    final sub = bob.d.db.watchMessages(chatId).listen((rows) => sizes.add(rows.length));
+    await until(() async => sizes.isNotEmpty);
+    await bob.d.hub.connect();
+    await until(() async => (await bob.texts(chatId)).length == 12, reason: 'bob catches up');
+    await bob.sync.idle;
+    await pump();
+    expect(sizes.toSet(), {0, 12}, reason: 'no partial lists on the way');
+    await sub.cancel();
+  });
+
   test("a chat this device didn't know before the sync (a first download) reports nothing", () async {
     final alice = await start(await backend.addUser('Alice'));
     final bobUser = await backend.addUser('Bob');

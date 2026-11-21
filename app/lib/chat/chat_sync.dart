@@ -251,22 +251,31 @@ class ChatSync {
   }
 
   /// Fetches every message after the chat's synced seq; rows stored for the first time are added
-  /// to [fresh].
+  /// to [fresh]. Each page is stored in one transaction, so the chat (and any game in it) updates
+  /// once per page instead of replaying every missed message on screen.
   Future<void> _catchUp(String chatId, {List<MessageRow>? fresh}) async {
     for (;;) {
       final chat = await db.chatById(chatId);
       if (chat == null) return;
       final page = await api.messages(chatId, after: chat.syncedSeq, limit: pageSize);
-      for (final m in page) {
-        final row = await _apply(m, catchingUp: true);
-        if (row != null) fresh?.add(row);
-      }
+      // Decrypting may fetch keys or devices, so it happens before the transaction.
+      final decrypted = <String, MessageRow>{
+        for (final m in page)
+          if (m.seq > chat.syncedSeq && await db.messageById(m.id) == null) m.id: await _decrypt(m),
+      };
+      await db.transaction(() async {
+        for (final m in page) {
+          final row = await _apply(m, catchingUp: true, decrypted: decrypted[m.id]);
+          if (row != null) fresh?.add(row);
+        }
+      });
       if (page.length < pageSize) return;
     }
   }
 
   /// Stores [m]; returns its row when this is the first time this device stores it (else null).
-  Future<MessageRow?> _apply(MessageDto m, {bool catchingUp = false}) async {
+  /// [decrypted] is [m] already decrypted, if it was.
+  Future<MessageRow?> _apply(MessageDto m, {bool catchingUp = false, MessageRow? decrypted}) async {
     var chat = await db.chatById(m.chatId);
     if (chat == null) {
       await _refreshChat(m.chatId);
@@ -289,7 +298,7 @@ class ChatSync {
       _inflight.remove(m.id);
       row = existing;
     } else {
-      row = await _decrypt(m);
+      row = decrypted ?? await _decrypt(m);
       await db.insertMessageIfAbsent(row);
     }
     await db.setSyncedSeq(m.chatId, m.seq);
