@@ -31,6 +31,12 @@ dependencies:
   shared_preferences: ^2.5.6
   famchat_updater:
     path: packages/famchat_updater
+  # Decodes voice clips for on-device transcripts (iOS, macOS, Android).
+  voice_pcm:
+    path: packages/voice_pcm
+  # On-device Whisper for voice transcripts (docs/superpowers/specs/2026-11-22-voice-transcripts-design.md).
+  sherpa_onnx: 2.0.3
+  path: ^1.9.0
   flutter:
     sdk: flutter
   flutter_web_plugins:
@@ -123,6 +129,8 @@ flutter:
     - assets/fonts/OFL-NotoSansSymbols2.txt
     - assets/spelling/
     - shorebird.yaml
+    # Silero VAD (sherpa-onnx asr-models release), splitting voice clips for Whisper.
+    - assets/models/silero_vad.onnx
 
   # Bundled, never fetched at runtime. All are SIL Open Font License 1.1 (assets/fonts/OFL-*.txt).
   fonts:
