@@ -92,23 +92,26 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
       }
     }
   }
-  // Pins: the latest event per target wins (rows are in order); deleted targets drop out.
+  // Pins, in event order (rows are in order): pinning moves a target to the newest place, and
+  // pinning past [maxPins] unpins the oldest for good (unpinning or deleting another later doesn't
+  // bring it back). Deleted targets drop out at the end.
   final pinEvents = <MessageRow>[];
-  final latest = <String, (int, bool)>{};
+  final current = <String>[]; // oldest first
   for (final r in rows) {
     if (r.kind != 'pin' || r.state == 'failed' || r.targetId == null) continue;
     final target = byId[r.targetId!];
-    if (target == null || deleted.contains(target.id) || timelineHiddenKinds.contains(target.kind)) continue;
+    if (target == null || timelineHiddenKinds.contains(target.kind)) continue;
     final p = _decode(r);
     if (p is! PinBody) continue;
-    pinEvents.add(r);
-    latest[target.id] = (pinEvents.length, p.pinned);
+    if (!deleted.contains(target.id)) pinEvents.add(r);
+    current.remove(target.id);
+    if (p.pinned) {
+      current.add(target.id);
+      if (current.length > maxPins) current.removeAt(0);
+    }
   }
-  final pinned = [
-    for (final e in latest.entries)
-      if (e.value.$2) (e.key, e.value.$1),
-  ]..sort((a, b) => b.$2.compareTo(a.$2));
-  return MessageChanges._(texts, deleted, previews, [for (final p in pinned.take(maxPins)) p.$1], pinEvents);
+  final pinned = [for (final id in current.reversed) if (!deleted.contains(id)) id];
+  return MessageChanges._(texts, deleted, previews, pinned, pinEvents);
 }
 
 /// The id [m] replies to, or null.

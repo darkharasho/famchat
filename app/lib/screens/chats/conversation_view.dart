@@ -271,7 +271,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final read = _readAtOpen;
     if (_unreadFrom != null || read == null || widget.jumpTo != null) return;
     if (DateTime.now().difference(_openedAt) > const Duration(seconds: 5)) return;
-    _unreadFrom = visible.where((m) => m.senderUserId != me && m.seq != null && m.seq! > read).firstOrNull?.id;
+    _unreadFrom = visible.where((m) => m.senderUserId != me && m.kind != 'pin' && m.seq != null && m.seq! > read).firstOrNull?.id;
     if (_unreadFrom != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_scrollToUnread());
@@ -1299,14 +1299,26 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
-                onForward: forwardableKinds.contains(m.kind) && m.body != null && !changes.isDeleted(m.id) ? () => _forward(album ?? [m]) : null,
+                onForward: (album ?? [m]).every((i) => forwardableKinds.contains(i.kind) && i.body != null && !changes.isDeleted(i.id))
+                    ? () => _forward(album ?? [m])
+                    : null,
                 forwarded: isForwarded(m),
                 onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(album ?? [m]) : null,
-                pinned: pinnedIds.contains(m.id),
+                // An album counts as pinned when any of its items is; unpinning unpins those.
+                pinned: (album ?? [m]).any((i) => pinnedIds.contains(i.id)),
                 onPin: m.seq == null || changes.isDeleted(m.id) || readOnly
                     ? null
-                    : () => sync?.pinMessage(chatId, m.id, pinned: !pinnedIds.contains(m.id)),
+                    : () {
+                        final pinnedItems = [for (final i in album ?? [m]) if (pinnedIds.contains(i.id)) i.id];
+                        if (pinnedItems.isEmpty) {
+                          sync?.pinMessage(chatId, m.id, pinned: true);
+                        } else {
+                          for (final id in pinnedItems) {
+                            sync?.pinMessage(chatId, id, pinned: false);
+                          }
+                        }
+                      },
                 starred: starred.contains(m.id),
                 onStar: m.seq == null || changes.isDeleted(m.id)
                     ? null

@@ -14,23 +14,18 @@ class StarredScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final starred = ref.watch(starredMessagesProvider(null)).value ?? const <MessageRow>[];
-    // Deleted messages drop out: their deletes are in each chat's changes.
-    final byChat = <String, List<MessageRow>>{};
-    for (final m in starred) {
-      byChat.putIfAbsent(m.chatId, () => []);
-    }
-    final deleted = <String>{
-      for (final chatId in byChat.keys)
-        for (final m in ref.watch(messagesProvider(chatId)).value ?? const <MessageRow>[])
-          if (m.kind == 'delete' && m.targetId != null) m.targetId!,
+    // Each chat's own changes: edits show, and only deletes the chat honours hide a message.
+    final changes = <String, MessageChanges>{
+      for (final chatId in {for (final m in starred) m.chatId})
+        chatId: messageChanges(ref.watch(messagesProvider(chatId)).value ?? const <MessageRow>[]),
     };
-    final shown = [for (final m in starred) if (!deleted.contains(m.id)) m];
+    final shown = [for (final m in starred) if (!changes[m.chatId]!.isDeleted(m.id)) m];
     return Scaffold(
       appBar: AppBar(
         leading: BackButton(onPressed: () => context.go('/settings')),
         title: const Text('Starred messages'),
       ),
-      body: StarredList(messages: shown, changes: messageChanges(shown)),
+      body: StarredList(messages: shown, changesOf: (m) => changes[m.chatId]!),
     );
   }
 }

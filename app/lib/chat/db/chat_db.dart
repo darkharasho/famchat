@@ -654,7 +654,7 @@ class ChatDb extends _$ChatDb {
       final unread = await customSelect(
         // Counted from where I joined: history from before is shown, not unread.
         "SELECT COUNT(*) AS n FROM local_messages m WHERE chat_id = ? AND sender_user_id != ? "
-        "AND kind NOT IN ('reaction', 'edit', 'delete') "
+        "AND kind NOT IN (${_changeKinds.map((k) => "'$k'").join(', ')}) "
         // Messages their sender deleted aren't unread either.
         "AND NOT EXISTS (SELECT 1 FROM local_messages d WHERE d.chat_id = m.chat_id AND d.kind = 'delete' "
         'AND d.target_id = m.id AND d.sender_user_id = m.sender_user_id) '

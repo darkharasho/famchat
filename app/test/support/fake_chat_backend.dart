@@ -577,6 +577,9 @@ class FakeChatApi implements ChatApi {
   /// Calls (by name) that fail as if offline until removed.
   final offlineCalls = <String>{};
 
+  /// Calls (by name) that throw their error until removed.
+  final failCalls = <String, Object>{};
+
   /// Calls (by name, e.g. `GET /chats/<id>/messages`) that wait for their completer: a slow network.
   final holds = <String, Completer<void>>{};
 
@@ -586,6 +589,8 @@ class FakeChatApi implements ChatApi {
     if (h != null) await h.future;
     b.calls.add(call);
     if (offlineCalls.contains(call)) throw Exception('offline: $call');
+    final failing = failCalls[call];
+    if (failing != null) throw failing;
     final fail = failNext;
     if (fail != null) {
       failNext = null;

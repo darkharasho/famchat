@@ -280,6 +280,16 @@ void main() {
     expect(c.pinned, ['m0', 'm1', 'm3']);
   });
 
+  test('a pin pushed out by a fourth stays out when another is unpinned or deleted', () {
+    final rows = [
+      for (var i = 0; i < 4; i++) row('a', TextBody('m$i'), id: 'm$i'),
+      for (var i = 0; i < 4; i++) row('b', PinBody('m$i', pinned: true)),
+    ];
+    expect(messageChanges(rows).pinned, ['m3', 'm2', 'm1']);
+    expect(messageChanges([...rows, row('b', const PinBody('m3', pinned: false))]).pinned, ['m2', 'm1']);
+    expect(messageChanges([...rows, row('a', const DeleteBody('m3'))]).pinned, ['m2', 'm1']);
+  });
+
   test('a deleted message is no longer pinned, and pins of unknown messages are ignored', () {
     final rows = [
       row('a', const TextBody('hi'), id: 't'),

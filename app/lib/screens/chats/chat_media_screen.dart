@@ -66,7 +66,7 @@ class ChatMediaScreen extends ConsumerWidget {
         body: TabBarView(children: [
           _MediaGrid(media: media),
           _LinkList(links: links),
-          StarredList(messages: starred, changes: changes, showChat: false),
+          StarredList(messages: starred, changesOf: (_) => changes, showChat: false),
         ]),
       ),
     );
@@ -174,10 +174,11 @@ class _LinkList extends StatelessWidget {
 /// Starred messages, newest star first; tapping one opens it in its chat. [showChat]: say which chat
 /// (the list across all chats).
 class StarredList extends ConsumerWidget {
-  const StarredList({super.key, required this.messages, required this.changes, this.showChat = true});
+  const StarredList({super.key, required this.messages, required this.changesOf, this.showChat = true});
 
   final List<MessageRow> messages;
-  final MessageChanges changes;
+  /// The changes (edits, deletes) of the chat a message is in.
+  final MessageChanges Function(MessageRow m) changesOf;
   final bool showChat;
 
   @override
@@ -196,7 +197,7 @@ class StarredList extends ConsumerWidget {
         return ListTile(
           key: Key('starred-${m.id}'),
           leading: const Icon(Icons.star_rounded, color: Color(0xFFE0A100)),
-          title: Text(messageSnippet(m, changes), maxLines: 2, overflow: TextOverflow.ellipsis),
+          title: Text(messageSnippet(m, changesOf(m)), maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             [who, ?chat, shortTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt), h24: h24)].join(' · '),
             maxLines: 1,
