@@ -6,7 +6,7 @@ import 'db/chat_db.dart';
 import 'plaintext.dart';
 
 /// Kinds that change another message instead of showing as one.
-const changeKinds = {'reaction', 'edit', 'delete'};
+const changeKinds = {'reaction', 'edit', 'delete', 'pin'};
 
 /// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
 /// and count as activity and unread, unlike changes).
@@ -17,7 +17,14 @@ const captionKinds = {'photo', 'video'};
 
 /// The edits and deletes in force over a chat's messages.
 class MessageChanges {
-  MessageChanges._(this._texts, this._deleted, this._previews);
+  MessageChanges._(this._texts, this._deleted, this._previews, this.pinned, this.pinEvents);
+
+  /// Ids of the pinned messages, newest pin first, at most [maxPins].
+  final List<String> pinned;
+
+  /// The pin and unpin events that count (their target is here and not deleted), in order: the
+  /// timeline shows each as a line.
+  final List<MessageRow> pinEvents;
 
   final Map<String, String> _texts;
   final Set<String> _deleted;
@@ -85,7 +92,23 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
       }
     }
   }
-  return MessageChanges._(texts, deleted, previews);
+  // Pins: the latest event per target wins (rows are in order); deleted targets drop out.
+  final pinEvents = <MessageRow>[];
+  final latest = <String, (int, bool)>{};
+  for (final r in rows) {
+    if (r.kind != 'pin' || r.state == 'failed' || r.targetId == null) continue;
+    final target = byId[r.targetId!];
+    if (target == null || deleted.contains(target.id) || timelineHiddenKinds.contains(target.kind)) continue;
+    final p = _decode(r);
+    if (p is! PinBody) continue;
+    pinEvents.add(r);
+    latest[target.id] = (pinEvents.length, p.pinned);
+  }
+  final pinned = [
+    for (final e in latest.entries)
+      if (e.value.$2) (e.key, e.value.$1),
+  ]..sort((a, b) => b.$2.compareTo(a.$2));
+  return MessageChanges._(texts, deleted, previews, [for (final p in pinned.take(maxPins)) p.$1], pinEvents);
 }
 
 /// The id [m] replies to, or null.

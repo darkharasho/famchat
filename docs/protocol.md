@@ -112,6 +112,21 @@ Edits and deletes are messages too, and count only when their sender is the targ
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
+Pins are messages too, but anyone in the chat can pin any message (docs: "Pins"):
+
+```
+{"kind":"pin", "target":"<messageId>", "pinned":true|false}   pin for everyone, or unpin
+```
+
+For each target the latest pin event (by order) wins; the pinned messages are those whose latest event
+is `pinned:true`, newest first, and only the newest 3 stay pinned (a 4th pushes out the oldest with no
+further event). Deleted messages drop out. Clients show a line ("Bob pinned a message") for each event.
+Pins are sent `silent` like edits.
+
+Photos and videos sent together carry `"album":"<ULID>"` (the same for each, only when there are 2 or
+more). Consecutive messages from one sender with the same album show as one album; clients that don't
+know `album` show them one by one.
+
 A deleted message shows as "This message was deleted" and loses its reactions; replies quote it as
 "Deleted message". Neither changes nor deleted messages count as unread, and changes don't move the
 chat's `lastMessageAt`.

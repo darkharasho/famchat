@@ -20,7 +20,8 @@ MessageRow row(String sender, Plaintext p, {String? id, String state = 'sent'}) 
     kind: p.kind,
     body: jsonEncode(p.toJson()),
     targetId: switch (p) {
-      EditBody(:final target) || DeleteBody(:final target) || ReactionBody(:final target) => target,
+      EditBody(:final target) || DeleteBody(:final target) || ReactionBody(:final target) || PinBody(:final target) =>
+        target,
       _ => null,
     },
     envelope: null,
@@ -258,5 +259,53 @@ void main() {
     expect(mentionsOf(rows[0]), ['u']);
     expect(messageSnippet(rows[0], c), '📷 beach day');
     expect(messageSnippet(rows[3], c), '📷 Photo');
+  });
+
+  test('pins: anyone pins, the latest event per message wins, the newest 3 stay', () {
+    final msgs = [for (var i = 0; i < 5; i++) row('a', TextBody('m$i'), id: 'm$i')];
+    final rows = [
+      ...msgs,
+      row('b', const PinBody('m0', pinned: true)),
+      row('a', const PinBody('m1', pinned: true)),
+      row('b', const PinBody('m1', pinned: false)),
+      row('a', const PinBody('m2', pinned: true)),
+      row('b', const PinBody('m3', pinned: true)),
+      row('a', const PinBody('m4', pinned: true), state: 'failed'),
+    ];
+    var c = messageChanges(rows);
+    expect(c.pinned, ['m3', 'm2', 'm0']);
+    expect(c.pinEvents.length, 5, reason: 'the failed one does not count');
+    // A fourth pin pushes out the oldest; re-pinning moves one to the front.
+    c = messageChanges([...rows, row('a', const PinBody('m1', pinned: true)), row('b', const PinBody('m0', pinned: true))]);
+    expect(c.pinned, ['m0', 'm1', 'm3']);
+  });
+
+  test('a deleted message is no longer pinned, and pins of unknown messages are ignored', () {
+    final rows = [
+      row('a', const TextBody('hi'), id: 't'),
+      row('b', const PinBody('t', pinned: true)),
+      row('b', const PinBody('gone', pinned: true)),
+    ];
+    expect(messageChanges(rows).pinned, ['t']);
+    expect(messageChanges([...rows, row('a', const DeleteBody('t'))]).pinned, isEmpty);
+    expect(() => Plaintext.decode(utf8.encode('{"kind":"pin","target":"t"}')), throwsFormatException);
+  });
+
+  test('photos sent together carry an album id; a bad one is dropped', () {
+    const album = '01JC0000000000000000000001';
+    final p = Plaintext.decode(PhotoBody(
+      mediaKey: '01JMEDAA000000000000000000',
+      thumbKey: '01JTHMB0000000000000000000',
+      key: Uint8List.fromList(List.filled(32, 1)),
+      sha256: Uint8List.fromList(List.filled(32, 2)),
+      thumbSha256: Uint8List.fromList(List.filled(32, 3)),
+      width: 20,
+      height: 10,
+      bytes: 500,
+      album: album,
+    ).encode()) as PhotoBody;
+    expect(p.album, album);
+    final bad = Plaintext.decode(utf8.encode(jsonEncode({...p.toJson(), 'album': 'x'}))) as PhotoBody;
+    expect(bad.album, isNull);
   });
 }

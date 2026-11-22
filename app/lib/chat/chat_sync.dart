@@ -391,6 +391,7 @@ class ChatSync {
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
       EditBody(:final target) => base.copyWith(kind: 'edit', body: Value(body), targetId: Value(target)),
       DeleteBody(:final target) => base.copyWith(kind: 'delete', body: Value(body), targetId: Value(target)),
+      PinBody(:final target) => base.copyWith(kind: 'pin', body: Value(body), targetId: Value(target)),
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
@@ -726,6 +727,10 @@ class ChatSync {
 
   /// Replaces the text of this user's text message [messageId]. Throws [ArgumentError] for empty or
   /// too-long text.
+  /// Pins [messageId] for everyone in the chat, or unpins it (docs/protocol.md "Pins").
+  Future<String> pinMessage(String chatId, String messageId, {required bool pinned}) =>
+      _enqueueMessage(chatId, PinBody(messageId, pinned: pinned), targetId: messageId);
+
   Future<void> editText(String chatId, String messageId, String text) {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');

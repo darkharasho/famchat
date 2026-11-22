@@ -512,7 +512,7 @@ class ChatDb extends _$ChatDb {
   Stream<List<MemberRow>> watchMembers(String chatId) =>
       (select(localMembers)..where((m) => m.chatId.equals(chatId))).watch();
 
-  static const _changeKinds = ['reaction', 'edit', 'delete'];
+  static const _changeKinds = ['reaction', 'edit', 'delete', 'pin'];
 
   /// Keeps [text] as [chatId]'s draft; blank text clears it.
   Future<void> setDraft(String chatId, String? text) => (update(localChats)..where((c) => c.id.equals(chatId)))
