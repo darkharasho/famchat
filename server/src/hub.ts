@@ -279,8 +279,8 @@ export class FamilyHub extends DurableObject<Env> {
    * Sends [userId]'s presence to the sockets of [peers] (everyone who shares a family with them).
    * Synchronous, so callers decide and send with no await in between.
    */
-  private sendPresence(userId: string, online: boolean, peers: Set<string>, exclude?: WebSocket): void {
-    const text = JSON.stringify({ type: "presence", userId, online });
+  private sendPresence(userId: string, online: boolean, peers: Set<string>, exclude?: WebSocket, lastSeenAt?: number): void {
+    const text = JSON.stringify({ type: "presence", userId, online, ...(lastSeenAt === undefined ? {} : { lastSeenAt }) });
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === exclude) continue;
       const att = ws.deserializeAttachment() as Att | null;
@@ -295,7 +295,12 @@ export class FamilyHub extends DurableObject<Env> {
     ws.serializeAttachment(null);
     // Peers first: a reconnect during this (maybe D1) load must be seen by the check below.
     const peers = await this.peersOf(att.userId);
-    if (this.sockets(att.userId, ws).length === 0) this.sendPresence(att.userId, false, peers, ws);
+    if (this.sockets(att.userId, ws).length !== 0) return;
+    const at = this.now();
+    this.sendPresence(att.userId, false, peers, ws, at);
+    // "Last seen": after the frame, so a reconnect during the write can't be overtaken by it.
+    await this.env.DB.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").bind(at, att.userId).run()
+      .catch((e) => console.error("last seen not saved", e));
   }
 
   private async memberIds(chatId: string): Promise<string[]> {

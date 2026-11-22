@@ -9,6 +9,8 @@ import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
 import { messageOut } from "../lib/messages";
 import { notify } from "../notify";
+import { newId } from "../lib/ids";
+import { readAvatarJpeg } from "./me";
 
 export const chats = new Hono<AppEnv>();
 chats.use(requireAuth);
@@ -180,6 +182,105 @@ chats.put("/:id/mute", async (c) => {
   if (res.meta.changes !== 1) throw new ApiError("not_found");
   await notify(c.env, [me], { type: "chat", chatId });
   return c.body(null, 204);
+});
+
+/**
+ * The caller's own chat list state: any of `pinned`, `archived` and `unread` (booleans). Pinning or
+ * archiving stamps the time; `unread: true` is "mark as unread", cleared by `unread: false` (the app
+ * sends it when the chat is opened). Only the caller's own sockets get a `chat` event.
+ */
+chats.patch("/:id/me", async (c) => {
+  const db = c.env.DB;
+  const me = c.get("userId");
+  const body = await readJson(c);
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const now = Date.now();
+  for (const [field, col] of [["pinned", "pinned_at"], ["archived", "archived_at"]] as const) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== "boolean") throw new ApiError("invalid_request");
+    sets.push(`${col} = ?`);
+    binds.push(body[field] ? now : null);
+  }
+  if (body.unread !== undefined) {
+    if (typeof body.unread !== "boolean") throw new ApiError("invalid_request");
+    sets.push("marked_unread = ?");
+    binds.push(body.unread ? 1 : 0);
+  }
+  if (sets.length === 0) throw new ApiError("invalid_request");
+  const chatId = c.req.param("id");
+  const res = await db.prepare(`UPDATE chat_members SET ${sets.join(", ")} WHERE chat_id = ? AND user_id = ?`)
+    .bind(...binds, chatId, me).run();
+  if (res.meta.changes !== 1) throw new ApiError("not_found");
+  await notify(c.env, [me], { type: "chat", chatId });
+  return c.body(null, 204);
+});
+
+/** Renames a group (any member). Titles aren't end-to-end encrypted (docs/protocol.md "Chats"). */
+chats.patch("/:id", async (c) => {
+  const db = c.env.DB;
+  const chat = await requireMemberChat(db, c.req.param("id"), c.get("userId"));
+  if (chat.kind !== "group") throw new ApiError("invalid_request");
+  const raw = (await readJson(c)).title;
+  if (typeof raw === "string" && /[\u0000-\u001f\u007f]/.test(raw)) throw new ApiError("invalid_request");
+  const title = name(raw, 60);
+  await db.prepare("UPDATE chats SET title = ? WHERE id = ?").bind(title, chat.id).run();
+  await notify(c.env, chat.members.map((m) => m.userId), { type: "chat", chatId: chat.id });
+  return c.json({ chat: await chatOut(db, chat.id, c.get("userId")) });
+});
+
+export const chatAvatarObject = (chatId: string, key: string) => `chat-avatars/${chatId}/${key}`;
+
+/** Sets [chatId]'s photo key to [key] and returns the one it replaced, in one transaction. */
+async function swapChatAvatar(db: D1Database, chatId: string, key: string | null): Promise<string | null> {
+  const [prev] = await db.batch([
+    db.prepare("SELECT avatar_key FROM chats WHERE id = ?").bind(chatId),
+    db.prepare("UPDATE chats SET avatar_key = ? WHERE id = ?").bind(key, chatId),
+  ]);
+  return (prev.results[0] as { avatar_key: string | null } | undefined)?.avatar_key ?? null;
+}
+
+/** Sets a group's photo (any member): the raw JPEG as the body. Answers the new avatarKey. */
+chats.put("/:id/avatar", async (c) => {
+  const db = c.env.DB;
+  const chat = await requireMemberChat(db, c.req.param("id"), c.get("userId"));
+  if (chat.kind !== "group") throw new ApiError("invalid_request");
+  const body = await readAvatarJpeg(c);
+  const key = newId();
+  await c.env.MEDIA.put(chatAvatarObject(chat.id, key), body, { httpMetadata: { contentType: "image/jpeg" } });
+  const old = await swapChatAvatar(db, chat.id, key);
+  if (old) await c.env.MEDIA.delete(chatAvatarObject(chat.id, old)).catch(() => {});
+  await notify(c.env, chat.members.map((m) => m.userId), { type: "chat", chatId: chat.id });
+  return c.json({ avatarKey: key });
+});
+
+/** Removes a group's photo (any member). */
+chats.delete("/:id/avatar", async (c) => {
+  const db = c.env.DB;
+  const chat = await requireMemberChat(db, c.req.param("id"), c.get("userId"));
+  if (chat.kind !== "group") throw new ApiError("invalid_request");
+  const old = await swapChatAvatar(db, chat.id, null);
+  if (old) {
+    await c.env.MEDIA.delete(chatAvatarObject(chat.id, old)).catch(() => {});
+    await notify(c.env, chat.members.map((m) => m.userId), { type: "chat", chatId: chat.id });
+  }
+  return c.body(null, 204);
+});
+
+/** A group's photo, for members. With `?v=<avatarKey>` it's cacheable for good; 404 once replaced. */
+chats.get("/:id/avatar", async (c) => {
+  const chat = await requireMemberChat(c.env.DB, c.req.param("id"), c.get("userId"));
+  const v = c.req.query("v");
+  if (!chat.avatarKey || (v !== undefined && v !== chat.avatarKey)) throw new ApiError("not_found");
+  const obj = await c.env.MEDIA.get(chatAvatarObject(chat.id, chat.avatarKey));
+  if (!obj) throw new ApiError("not_found");
+  return new Response(obj.body, {
+    headers: {
+      "content-type": "image/jpeg",
+      "content-length": String(obj.size),
+      "cache-control": v ? "private, max-age=31536000, immutable" : "private, no-cache",
+    },
+  });
 });
 
 /** Publishes the key of the chat's current epoch (after a leave or removal). First one wins. */
