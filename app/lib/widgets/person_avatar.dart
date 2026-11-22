@@ -28,7 +28,12 @@ class PersonAvatar extends StatelessWidget {
     this.radius = 20,
     this.ringColor,
     this.userId,
+    this.chatId,
+    this.chatPhotoKey,
   });
+
+  /// A group's photo to show over the group icon: its chat id and photo key.
+  final String? chatId, chatPhotoKey;
 
   /// Whose profile photo to show over the initials, if they have one.
   final String? userId;
@@ -78,6 +83,13 @@ class PersonAvatar extends StatelessWidget {
                   ? Consumer(builder: (context, ref, _) {
                       final photo = ref.watch(userPhotoProvider(userId!));
                       return photo == null ? initialsText(c.fg, initials) : _Photo(bytes: photo, diameter: d);
+                    })
+                  : group && chatId != null && chatPhotoKey != null
+                  ? Consumer(builder: (context, ref, _) {
+                      final photo = ref.watch(chatAvatarBytesProvider((chatId!, chatPhotoKey!))).value;
+                      return photo == null
+                          ? Icon(Icons.groups_rounded, color: c.fg, size: radius * 1.1)
+                          : _Photo(bytes: photo, diameter: d);
                     })
                   : group
                   ? Icon(Icons.groups_rounded, color: c.fg, size: radius * 1.1)

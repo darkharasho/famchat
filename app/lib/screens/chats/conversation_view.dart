@@ -38,6 +38,7 @@ import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
 import '../../voice/waveform.dart';
+import '../../settings/time_format.dart' show lastSeenLabel;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
@@ -1106,7 +1107,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _canStartGame = !group && !readOnly && other != null;
     final active = group ? const <GameState>[] : activeGames(ref.watch(gamesProvider(chatId)));
     final otherOnline = other != null && online.contains(other);
-    final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
+    final otherSeen = other == null ? null : users[other]?.lastSeenAt;
+    final subtitle = group
+        ? membersLabel(members.length)
+        : otherOnline
+        ? 'Online'
+        : otherSeen == null
+        ? null
+        : lastSeenLabel(DateTime.fromMillisecondsSinceEpoch(otherSeen), h24: MediaQuery.alwaysUse24HourFormatOf(context));
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
     final changed = [
       for (final m in members)
@@ -1235,6 +1243,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               colorKey: group ? chat.id : (other ?? chat.id),
               userId: group ? null : other,
               group: group,
+              chatId: chat.id,
+              chatPhotoKey: chat.avatarKey,
               online: otherOnline,
               radius: 20,
             ),
@@ -1321,6 +1331,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         colorKey: group ? chat.id : (other ?? chat.id),
                         userId: group ? null : other,
                         group: group,
+                        chatId: chat.id,
+                        chatPhotoKey: chat.avatarKey,
                         radius: 36,
                       ),
                       title: 'Say hello 👋',

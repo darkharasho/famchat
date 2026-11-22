@@ -50,6 +50,8 @@ class _ForwardSheet extends ConsumerWidget {
                         colorKey: group ? i.chat.id : (otherMember(i.chat, i.members, me) ?? i.chat.id),
                         userId: group ? null : otherMember(i.chat, i.members, me),
                         group: group,
+                        chatId: i.chat.id,
+                        chatPhotoKey: i.chat.avatarKey,
                         radius: 20,
                       ),
                       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),

@@ -96,6 +96,7 @@ class Directory {
         deleted: u.deleted,
         former: u.former,
         avatarKey: u.avatarKey,
+        lastSeenAt: u.lastSeenAt,
         familyIds: jsonEncode(u.former ? const <int>[] : ({for (final f in u.families) f.id}.toList()..sort())),
       ));
       for (final d in u.devices) {

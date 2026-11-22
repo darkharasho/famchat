@@ -59,9 +59,13 @@ class UserDto {
     this.deleted = false,
     this.former = false,
     this.avatarKey,
+    this.lastSeenAt,
   });
 
   final String id, name, identityPub;
+
+  /// When their last socket closed (Unix ms): "last seen". Null for former partners and the never seen.
+  final int? lastSeenAt;
 
   /// The user's profile photo (`GET /users/:id/avatar?v=`), or null.
   final String? avatarKey;
@@ -102,6 +106,7 @@ class UserDto {
       deleted: j['deleted'] == true,
       former: j['former'] == true,
       avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
+      lastSeenAt: j['lastSeenAt'] is int ? j['lastSeenAt'] as int : null,
     );
   }
 }
@@ -192,7 +197,23 @@ class ChatDto {
     required this.members,
     this.mutedUntil,
     this.familyId,
+    this.pinnedAt,
+    this.archivedAt,
+    this.markedUnread = false,
+    this.avatarKey,
   });
+
+  /// This user's pin (Unix ms when pinned), or null.
+  final int? pinnedAt;
+
+  /// When this user archived the chat (Unix ms), or null. It shows again once a newer message arrives.
+  final int? archivedAt;
+
+  /// This user marked the chat as unread.
+  final bool markedUnread;
+
+  /// A group's photo (`GET /chats/:id/avatar?v=`), or null.
+  final String? avatarKey;
 
   final String id, kind, createdBy;
 
@@ -222,6 +243,11 @@ class ChatDto {
         members: [for (final m in _list(j, 'members')) MemberDto.fromJson(m)],
         mutedUntil: _f<int?>(j, 'mutedUntil'),
         familyId: _f<int?>(j, 'familyId'),
+        // Absent from servers before chat list state.
+        pinnedAt: j['pinnedAt'] is int ? j['pinnedAt'] as int : null,
+        archivedAt: j['archivedAt'] is int ? j['archivedAt'] as int : null,
+        markedUnread: j['markedUnread'] == true,
+        avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
       );
 }
 
@@ -321,6 +347,20 @@ abstract interface class ChatApi {
 
   /// Mutes the chat for this user until [until] (Unix ms), or unmutes it (null).
   Future<void> muteChat(String chatId, int? until);
+
+  /// This user's own chat list state: pin, archive, marked unread (null fields stay as they are).
+  Future<void> setChatState(String chatId, {bool? pinned, bool? archived, bool? unread});
+
+  /// Renames a group (1–60 characters).
+  Future<ChatDto> renameChat(String chatId, String title);
+
+  /// Sets a group's photo (a JPEG); returns its key.
+  Future<String> setChatAvatar(String chatId, Uint8List jpeg);
+
+  Future<void> removeChatAvatar(String chatId);
+
+  /// A group's photo [key] (a JPEG).
+  Future<Uint8List> chatAvatar(String chatId, String key);
   Future<void> createEpoch(String chatId, int epoch, List<ChatKeyWrap> wraps);
   Future<List<MessageDto>> messages(String chatId, {int? after, int? before, int limit = 100});
   Future<List<ChatKeyWrap>> wraps({String? chatId});

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -9,6 +11,7 @@ import '../../chat/providers.dart';
 import '../../games/labels.dart';
 import '../../push/preview.dart';
 import '../../session/session_controller.dart';
+import '../sign_out.dart' show apiErrorMessage;
 import '../../settings/time_format.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
@@ -16,14 +19,92 @@ import '../../widgets/brand_mark.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
 
-/// Chats by latest activity, with unread counts and presence.
-class ChatList extends ConsumerWidget {
+/// Chats by latest activity (pinned ones first), with unread counts and presence. Archived chats
+/// sit behind an "Archived" row at the top.
+class ChatList extends ConsumerStatefulWidget {
   const ChatList({super.key, this.selectedId});
 
   final String? selectedId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatList> createState() => _ChatListState();
+}
+
+enum _ChatAction { pin, unpin, markUnread, markRead, archive, unarchive }
+
+class _ChatListState extends ConsumerState<ChatList> {
+  bool _showArchived = false;
+
+  Future<void> _act(ChatListItem item, _ChatAction action) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final id = item.chat.id;
+    try {
+      switch (action) {
+        case _ChatAction.pin || _ChatAction.unpin:
+          await sync.pin(id, action == _ChatAction.pin);
+        case _ChatAction.markUnread:
+          await sync.markUnread(id, true);
+        case _ChatAction.markRead:
+          await sync.markRead(id);
+          if (item.chat.markedUnread) await sync.markUnread(id, false);
+        case _ChatAction.archive || _ChatAction.unarchive:
+          await sync.archive(id, action == _ChatAction.archive);
+          if (mounted) {
+            final archived = action == _ChatAction.archive;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(archived ? 'Chat archived' : 'Chat moved out of the archive'),
+              action: SnackBarAction(label: 'Undo', onPressed: () => unawaited(sync.archive(id, !archived).catchError((_) {}))),
+            ));
+          }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+    }
+  }
+
+  List<(_ChatAction, IconData, String)> _actionsFor(ChatListItem item, bool archived) => [
+        item.pinned
+            ? (_ChatAction.unpin, Icons.push_pin_outlined, 'Unpin')
+            : (_ChatAction.pin, Icons.push_pin_rounded, 'Pin to top'),
+        item.looksUnread
+            ? (_ChatAction.markRead, Icons.mark_chat_read_outlined, 'Mark as read')
+            : (_ChatAction.markUnread, Icons.mark_chat_unread_outlined, 'Mark as unread'),
+        archived
+            ? (_ChatAction.unarchive, Icons.unarchive_outlined, 'Move out of archive')
+            : (_ChatAction.archive, Icons.archive_outlined, 'Archive'),
+      ];
+
+  /// Long press: a sheet. Right click: a menu where the pointer is.
+  Future<void> _menu(ChatListItem item, bool archived, {Offset? at}) async {
+    final actions = _actionsFor(item, archived);
+    final _ChatAction? picked;
+    if (at != null) {
+      final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+      picked = await showMenu<_ChatAction>(
+        context: context,
+        position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & overlay.size),
+        items: [
+          for (final (a, icon, label) in actions)
+            PopupMenuItem(value: a, child: Row(children: [Icon(icon, size: 20), const SizedBox(width: Space.md), Text(label)])),
+        ],
+      );
+    } else {
+      picked = await showModalBottomSheet<_ChatAction>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final (a, icon, label) in actions)
+              ListTile(key: Key('chat-action-${a.name}'), leading: Icon(icon), title: Text(label), onTap: () => Navigator.pop(context, a)),
+          ]),
+        ),
+      );
+    }
+    if (picked != null) await _act(item, picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final chats = ref.watch(chatListProvider);
     final users = ref.watch(usersProvider).value ?? const {};
     final online = ref.watch(onlineProvider).value ?? const {};
@@ -44,23 +125,104 @@ class ChatList extends ConsumerWidget {
         ),
       );
     }
+    final now = DateTime.now();
+    final archived = [for (final i in items) if (i.archivedAt(now)) i];
+    final showArchived = _showArchived && archived.isNotEmpty;
+    final shown = showArchived ? archived : [for (final i in items) if (!i.archivedAt(now)) i];
+    final header = showArchived
+        ? _ArchiveHeader(onBack: () => setState(() => _showArchived = false))
+        : archived.isEmpty
+        ? null
+        : _ArchivedRow(
+            count: archived.length,
+            unread: archived.where((i) => i.looksUnread).length,
+            onTap: () => setState(() => _showArchived = true),
+          );
+    final lead = header == null ? 0 : 1;
     return ListView.builder(
       padding: EdgeInsets.only(top: Space.xs, bottom: Space.xs + MediaQuery.paddingOf(context).bottom),
-      itemCount: items.length,
-      itemBuilder: (context, i) => _ChatTile(
-        item: items[i],
-        users: users,
-        online: online,
-        me: me,
-        selected: items[i].chat.id == selectedId,
+      itemCount: shown.length + lead,
+      itemBuilder: (context, i) {
+        if (i < lead) return header!;
+        final item = shown[i - lead];
+        return _ChatTile(
+          item: item,
+          users: users,
+          online: online,
+          me: me,
+          selected: item.chat.id == widget.selectedId,
+          onMenu: (at) => _menu(item, showArchived, at: at),
+        );
+      },
+    );
+  }
+}
+
+/// "Archived": opens the archive.
+class _ArchivedRow extends StatelessWidget {
+  const _ArchivedRow({required this.count, required this.unread, required this.onTap});
+  final int count, unread;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
+      child: ListTile(
+        key: const Key('archived-chats'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+        leading: SizedBox(width: 52, child: Icon(Icons.archive_outlined, color: s.onSurfaceVariant)),
+        title: Text('Archived', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+        trailing: Text(
+          unread > 0 ? '$unread unread' : '$count',
+          style: theme.textTheme.labelMedium?.copyWith(color: unread > 0 ? s.primary : s.onSurfaceVariant),
+        ),
+        onTap: onTap,
       ),
     );
   }
 }
 
-class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.item, required this.users, required this.online, required this.me, required this.selected});
+/// Back out of the archive.
+class _ArchiveHeader extends StatelessWidget {
+  const _ArchiveHeader({required this.onBack});
+  final VoidCallback onBack;
 
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.xs, 0, Space.lg, Space.xs),
+      child: Row(children: [
+        IconButton(key: const Key('archive-back'), tooltip: 'Back to chats', icon: const Icon(Icons.arrow_back_rounded), onPressed: onBack),
+        Expanded(child: Text('Archived', style: theme.textTheme.titleMedium)),
+        Flexible(
+          child: Text(
+            'They come back when a message arrives, unless muted',
+            textAlign: TextAlign.end,
+            maxLines: 2,
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ChatTile extends StatelessWidget {
+  const _ChatTile({
+    required this.item,
+    required this.users,
+    required this.online,
+    required this.me,
+    required this.selected,
+    required this.onMenu,
+  });
+
+  /// Opens the chat's menu: at a pointer position (right click), or as a sheet (null).
+  final void Function(Offset? at) onMenu;
   final ChatListItem item;
   final Map<String, UserRow> users;
   final Set<String> online;
@@ -75,7 +237,7 @@ class _ChatTile extends StatelessWidget {
     final title = chatTitle(item.chat, item.members, users, me);
     final other = otherMember(item.chat, item.members, me);
     final group = item.chat.kind == 'group';
-    final unread = item.unread > 0;
+    final unread = item.looksUnread;
     final changed = item.members.any((m) {
       final u = users[m.userId];
       return m.userId != me && u != null && u.identityPub != u.trustedIdentityPub;
@@ -92,6 +254,8 @@ class _ChatTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(Radii.md),
           onTap: () => context.go('/chats/${item.chat.id}'),
+          onLongPress: () => onMenu(null),
+          onSecondaryTapUp: (d) => onMenu(d.globalPosition),
           child: Semantics(
             button: true,
             selected: selected,
@@ -103,6 +267,8 @@ class _ChatTile extends StatelessWidget {
                   colorKey: group ? item.chat.id : (other ?? item.chat.id),
                   userId: group ? null : other,
                   group: group,
+                  chatId: item.chat.id,
+                  chatPhotoKey: item.chat.avatarKey,
                   online: other != null && online.contains(other),
                   radius: 26,
                   ringColor: tileColor == null ? s.surface : Color.alphaBlend(tileColor, s.surface),
@@ -128,6 +294,10 @@ class _ChatTile extends StatelessWidget {
                           if (muted) ...[
                             const SizedBox(width: 4),
                             Icon(Icons.notifications_off_outlined, size: 16, color: s.onSurfaceVariant, semanticLabel: 'Muted'),
+                          ],
+                          if (item.pinned) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.push_pin_rounded, size: 15, color: s.onSurfaceVariant, semanticLabel: 'Pinned'),
                           ],
                         ]),
                       ),
@@ -165,7 +335,19 @@ class _ChatTile extends StatelessWidget {
                                 ),
                               ),
                       ),
-                      if (unread) ...[
+                      if (item.unread == 0 && item.chat.markedUnread) ...[
+                        const SizedBox(width: Space.sm),
+                        Semantics(
+                          label: 'Marked as unread',
+                          child: Container(
+                            key: const Key('marked-unread-dot'),
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(color: muted ? s.outline : t.badge, shape: BoxShape.circle),
+                          ),
+                        ),
+                      ],
+                      if (item.unread > 0) ...[
                         const SizedBox(width: Space.sm),
                         Container(
                           constraints: const BoxConstraints(minWidth: 22),

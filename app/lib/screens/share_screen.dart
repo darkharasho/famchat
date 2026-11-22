@@ -106,6 +106,8 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                           colorKey: group ? i.chat.id : (other ?? i.chat.id),
                           userId: group ? null : other,
                           group: group,
+                          chatId: i.chat.id,
+                          chatPhotoKey: i.chat.avatarKey,
                         ),
                         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
                         onTap: () => _sendTo(share, i.chat.id),
