@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/markdown.dart';
 import '../../chat/message_changes.dart';
+import '../../chat/polls.dart' show pollOf;
 import '../../chat/providers.dart';
 import '../../games/labels.dart';
 import '../../push/preview.dart';
@@ -388,6 +389,7 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
   return switch (m.kind) {
     'text' || 'photo' || 'voice' || 'gif' || 'video' => '$who${messageSnippet(m, c)}',
     'game' || 'move' => '$who${gameListLabel(m) ?? 'Unsupported message'}',
+    'poll' => '$who${switch (pollOf(m)) { final p? => pollLabel(p), null => 'Unsupported message' }}',
     'undecryptable' => 'Waiting for this message…',
     'invalid' => "Message couldn't be verified",
     _ => 'Unsupported message',
@@ -399,6 +401,7 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
     'text' => stripMarkdown(changes.textOf(m) ?? '').replaceAll('\n', ' '),
+    'poll' => switch (pollOf(m)) { final p? => '📊 ${p.question.replaceAll('\n', ' ')}', null => 'Message' },
     _ => switch (changes.textOf(m)) {
         final caption? => captionLabel(m.kind, caption),
         null => gameListLabel(m) ?? mediaLabel(m.kind) ?? 'Message',

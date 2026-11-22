@@ -479,11 +479,11 @@ void main() {
       expect(find.byType(VerticalDivider), findsNothing);
     });
 
-    chatTestWidgets('on a phone, + opens a sheet with the library, the camera and Game', (tester) async {
+    chatTestWidgets('on a phone, + opens a sheet with the library, the camera, Poll and Game', (tester) async {
       await open(tester);
       await tester.tap(find.byTooltip('Attach'));
       await settle(tester);
-      for (final item in ['Photos and videos', 'Take a photo', 'Record a video', 'Game']) {
+      for (final item in ['Photos and videos', 'Take a photo', 'Record a video', 'Poll', 'Game']) {
         expect(find.text(item), findsOneWidget, reason: item);
       }
       expect(find.byTooltip('GIF'), findsNothing, reason: 'GIFs live in the emoji picker');
@@ -497,8 +497,9 @@ void main() {
         await tester.tap(find.byTooltip('Attach'));
         await settle(tester);
         expect(find.byType(BottomSheet), findsNothing, reason: 'a menu by the button, not a sheet');
-        expect(find.byType(PopupMenuItem<Object>), findsNWidgets(2));
+        expect(find.byType(PopupMenuItem<Object>), findsNWidgets(3));
         expect(find.text('Photos and videos'), findsOneWidget);
+        expect(find.text('Poll'), findsOneWidget);
         expect(find.text('Take a photo'), findsNothing);
         expect(find.text('Record a video'), findsNothing);
         await tester.tap(find.text('Game'));
@@ -509,7 +510,7 @@ void main() {
       }
     });
 
-    chatTestWidgets('on desktop, the + menu has no Game in groups', (tester) async {
+    chatTestWidgets('on desktop, the + menu has Poll but no Game in groups', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         final carol = await backend.addUser('Carol');
@@ -521,6 +522,7 @@ void main() {
         await tester.tap(find.byTooltip('Attach'));
         await settle(tester);
         expect(find.text('Photos and videos'), findsOneWidget);
+        expect(find.text('Poll'), findsOneWidget);
         expect(find.text('Game'), findsNothing);
       } finally {
         debugDefaultTargetPlatformOverride = null;

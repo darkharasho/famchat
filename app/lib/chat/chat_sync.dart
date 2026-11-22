@@ -403,6 +403,9 @@ class ChatSync {
       VideoBody() => base.copyWith(kind: 'video', body: Value(body)),
       GameBody() => base.copyWith(kind: 'game', body: Value(body)),
       MoveBody(:final target) => base.copyWith(kind: 'move', body: Value(body), targetId: Value(target)),
+      PollBody() => base.copyWith(kind: 'poll', body: Value(body)),
+      VoteBody(:final target) => base.copyWith(kind: 'vote', body: Value(body), targetId: Value(target)),
+      PollEndBody(:final target) => base.copyWith(kind: 'poll_end', body: Value(body), targetId: Value(target)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }
@@ -545,7 +548,8 @@ class ChatSync {
     if (chat == null) return;
     if (seq == chat.syncedSeq + 1) {
       await db.setSyncedSeq(row.chatId, seq);
-      await db.noteActivity(row.chatId, seq, at);
+      // My own change to another message (a vote, reaction, pin, …) isn't chat activity either.
+      await db.noteActivity(row.chatId, seq, changeKinds.contains(row.kind) ? 0 : at);
     } else if (seq > chat.syncedSeq + 1) {
       await _catchUp(row.chatId);
     }
@@ -919,6 +923,24 @@ class ChatSync {
   /// Sends [action] (docs/protocol.md "Games") for game [gameId] at move number [ply].
   Future<String> sendMove(String chatId, String gameId, GameType game, int ply, Map<String, Object?> action) =>
       _enqueueMessage(chatId, MoveBody(gameId, game, ply, action, rules: game.rules), targetId: gameId);
+
+  /// Sends [poll] to [chatId]; the returned id (the message's) is the poll's id. Throws
+  /// [ArgumentError] for a poll receivers would drop (see [validPoll]).
+  Future<String> sendPoll(String chatId, PollBody poll) {
+    final p = validPoll(poll.question, poll.options, multi: poll.multi, replyTo: poll.replyTo);
+    if (p == null || p.options.length != poll.options.length) {
+      throw ArgumentError.value(poll, 'poll', 'question or options out of limits');
+    }
+    return _enqueueMessage(chatId, p);
+  }
+
+  /// Sets this user's choices on poll [pollId] (option indexes); empty takes the vote back. Sent silent.
+  Future<String> vote(String chatId, String pollId, List<int> choices) =>
+      _enqueueMessage(chatId, VoteBody(pollId, List.unmodifiable(choices)), targetId: pollId);
+
+  /// Ends this user's poll [pollId] for everyone (docs/protocol.md "Polls"). Sent silent.
+  Future<String> endPoll(String chatId, String pollId) =>
+      _enqueueMessage(chatId, PollEndBody(pollId), targetId: pollId);
 
   /// Trusts [userId]'s changed identity key (the banner's OK): their waiting messages are shown and
   /// their new devices get the chat keys this device holds.

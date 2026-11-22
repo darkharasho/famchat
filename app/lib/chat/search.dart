@@ -1,6 +1,7 @@
 // Searching messages on this device (the server only holds ciphertext).
 import 'db/chat_db.dart';
 import 'message_changes.dart';
+import 'polls.dart' show pollOf;
 
 /// A message whose current text matches.
 class SearchHit {
@@ -11,8 +12,9 @@ class SearchHit {
   final String text;
 }
 
-/// Text messages whose current text contains [query] (ignoring case), newest first. Deleted
-/// messages, and text only an earlier version had, don't match.
+/// Text messages whose current text contains [query] (ignoring case), newest first, and polls whose
+/// question or an option does (their text: "📊 question · option · option"). Deleted messages, and
+/// text only an earlier version had, don't match.
 Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId, int limit = 50}) async {
   final q = query.trim();
   if (q.isEmpty) return const [];
@@ -20,7 +22,9 @@ Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId,
   final needle = q.toLowerCase();
   final hits = <SearchHit>[];
   for (final m in await db.searchCandidates(pattern, chatId: chatId)) {
-    final text = messageChanges([m, ...await db.changesTo(m.chatId, m.id)]).textOf(m);
+    final c = messageChanges([m, ...await db.changesTo(m.chatId, m.id)]);
+    final poll = c.isDeleted(m.id) ? null : pollOf(m);
+    final text = poll == null ? c.textOf(m) : '📊 ${[poll.question, ...poll.options].join(' · ')}';
     if (text != null && text.toLowerCase().contains(needle)) hits.add(SearchHit(m, text));
     if (hits.length >= limit) break;
   }

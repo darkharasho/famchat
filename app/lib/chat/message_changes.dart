@@ -5,8 +5,8 @@ import 'dart:convert';
 import 'db/chat_db.dart';
 import 'plaintext.dart';
 
-/// Kinds that change another message instead of showing as one.
-const changeKinds = {'reaction', 'edit', 'delete', 'pin'};
+/// Kinds that change another message instead of showing as one (poll votes and ends included).
+const changeKinds = {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end'};
 
 /// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
 /// and count as activity and unread, unlike changes).
@@ -115,7 +115,8 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
 }
 
 /// The id [m] replies to, or null.
-String? replyTargetOf(MessageRow m) => m.kind == 'text' || captionKinds.contains(m.kind) ? _field(m, 'replyTo') : null;
+String? replyTargetOf(MessageRow m) =>
+    m.kind == 'text' || m.kind == 'poll' || captionKinds.contains(m.kind) ? _field(m, 'replyTo') : null;
 
 /// Whether a preview of [url] belongs with [text]: the text still has that link.
 bool previewFits(String text, String url) => text.contains(url.replaceFirst(RegExp(r'/$'), ''));

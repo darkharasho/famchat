@@ -118,6 +118,19 @@ sealed class Plaintext {
         return type == null
             ? UnknownBody(kind, j)
             : MoveBody(target, type, ply, action, rules: rules != null && rules > 0 ? rules : null);
+      case 'poll':
+        return PollBody._fromJson(j);
+      case 'vote':
+        final target = j['target'], choices = j['choices'];
+        if (target is! String || target.isEmpty) throw const FormatException('bad vote target');
+        if (choices is! List || choices.length > maxPollOptions) throw const FormatException('bad choices');
+        final ints = [for (final c in choices) wireInt(c)];
+        if (ints.any((c) => c == null)) throw const FormatException('bad choices');
+        return VoteBody(target, List.unmodifiable(ints.cast<int>()));
+      case 'poll_end':
+        final target = j['target'];
+        if (target is! String || target.isEmpty) throw const FormatException('bad poll_end');
+        return PollEndBody(target);
       default:
         return UnknownBody(kind, j);
     }
@@ -633,6 +646,84 @@ class MoveBody extends Plaintext {
   String get kind => 'move';
   @override
   Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'game': game.wire, 'ply': ply, 'action': action, 'rules': ?rules};
+}
+
+/// Most options a poll has (and least: 2).
+const maxPollOptions = 10;
+
+/// Longest poll question and option, in characters.
+const maxPollQuestion = 300;
+const maxPollOption = 100;
+
+/// A poll; the message's id is the poll's id and option ids are indexes (docs/protocol.md "Polls").
+/// [multi]: voters may pick more than one option.
+class PollBody extends Plaintext {
+  const PollBody(this.question, this.options, {this.multi = false, this.replyTo});
+  final String question;
+  final List<String> options;
+  final bool multi;
+  final String? replyTo;
+  @override
+  String get kind => 'poll';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'question': question, 'options': options, 'multi': multi, 'replyTo': ?replyTo};
+
+  /// Throws [FormatException] unless the question and options keep the limits (receivers drop such polls).
+  factory PollBody._fromJson(Map<String, Object?> j) {
+    final question = j['question'], options = j['options'], multi = j['multi'];
+    if (question is! String || _pollText(question, maxPollQuestion) == null) throw const FormatException('bad question');
+    if (options is! List || options.any((o) => o is! String || o.trim().isEmpty)) throw const FormatException('bad options');
+    if (multi != null && multi is! bool) throw const FormatException('bad multi');
+    final p = validPoll(question, options.cast<String>(), multi: multi == true, replyTo: _replyTo(j));
+    if (p == null) throw const FormatException('bad options');
+    return p;
+  }
+}
+
+/// The trimmed text if it's 1–[max] characters, else null.
+String? _pollText(String s, int max) {
+  final t = s.trim();
+  return t.isEmpty || t.runes.length > max ? null : t;
+}
+
+/// A poll that can be sent: [question] and [options] trimmed, blank options dropped; null if the
+/// question isn't 1–[maxPollQuestion] characters, there aren't 2–[maxPollOptions] options of
+/// 1–[maxPollOption] characters, or two options are the same (ignoring case).
+PollBody? validPoll(String question, List<String> options, {bool multi = false, String? replyTo}) {
+  final q = _pollText(question, maxPollQuestion);
+  if (q == null) return null;
+  final opts = <String>[];
+  final seen = <String>{};
+  for (final o in options) {
+    if (o.trim().isEmpty) continue;
+    final t = _pollText(o, maxPollOption);
+    if (t == null || !seen.add(t.toLowerCase())) return null;
+    opts.add(t);
+  }
+  if (opts.length < 2 || opts.length > maxPollOptions) return null;
+  return PollBody(q, List.unmodifiable(opts), multi: multi, replyTo: replyTo);
+}
+
+/// This sender's choices (option indexes) on the poll [target], replacing their earlier vote; `[]`
+/// takes the vote back.
+class VoteBody extends Plaintext {
+  const VoteBody(this.target, this.choices);
+  final String target;
+  final List<int> choices;
+  @override
+  String get kind => 'vote';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'choices': choices};
+}
+
+/// Ends the poll [target]; counts only from the poll's sender.
+class PollEndBody extends Plaintext {
+  const PollEndBody(this.target);
+  final String target;
+  @override
+  String get kind => 'poll_end';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target};
 }
 
 /// A kind this version doesn't know (a newer version's).

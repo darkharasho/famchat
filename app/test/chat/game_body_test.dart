@@ -95,8 +95,8 @@ void main() {
   });
 
   test('only moves are hidden from the timeline besides changes', () {
-    expect(changeKinds, {'reaction', 'edit', 'delete', 'pin'});
-    expect(timelineHiddenKinds, {'reaction', 'edit', 'delete', 'pin', 'move'});
+    expect(changeKinds, {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end'});
+    expect(timelineHiddenKinds, {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end', 'move'});
   });
 
   test('war may play to the whole deck', () {

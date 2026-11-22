@@ -234,4 +234,10 @@ void main() {
       '♟ Moved in Chess',
     );
   });
+
+  test('a poll shows its question; votes and ends have no preview', () async {
+    expect(await preview(await envelopeOf(const PollBody('Pizza or tacos?', ['Pizza', 'Tacos']))), '📊 Poll: Pizza or tacos?');
+    expect(await preview(await envelopeOf(const VoteBody('p1', [0]))), isNull);
+    expect(await preview(await envelopeOf(const PollEndBody('p1'))), isNull);
+  });
 }

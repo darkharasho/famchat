@@ -110,6 +110,13 @@ void main() {
     expect(replyTargetOf(row('b', const TextBody('no'))), isNull);
   });
 
+  test('a poll that replies quotes its target, and reads as its question', () {
+    final r = row('b', const PollBody('Pizza or tacos?', ['Pizza', 'Tacos'], replyTo: 't'));
+    expect(replyTargetOf(r), 't');
+    expect(replyTargetOf(row('b', const PollBody('Q?', ['a', 'b']))), isNull);
+    expect(messageSnippet(r, messageChanges([r])), '📊 Pizza or tacos?');
+  });
+
   test('isChangeKind', () {
     expect(changeKinds, containsAll(['reaction', 'edit', 'delete']));
     expect(changeKinds.contains('text'), isFalse);

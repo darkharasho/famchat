@@ -50,6 +50,23 @@ void main() {
     expect(await searchMessages(db, '   '), isEmpty);
   });
 
+  test('finds polls by their question or an option, and skips deleted ones', () async {
+    MessageRow poll(String id, int seq, String q, List<String> options) => text(id, 'A', seq, '').copyWith(
+          kind: 'poll',
+          body: Value(jsonEncode({'kind': 'poll', 'question': q, 'options': options, 'multi': false})),
+        );
+    await put([
+      poll('p1', 1, 'Thanksgiving dinner?', ['Thursday', 'Saturday']),
+      poll('p2', 2, 'Which movie?', ['Dune', 'Up']),
+      change('d1', 'A', 3, 'delete', 'p2'),
+    ]);
+    final hits = await searchMessages(db, 'saturday');
+    expect(hits.map((h) => h.message.id), ['p1']);
+    expect(hits.single.text, '📊 Thanksgiving dinner? · Thursday · Saturday');
+    expect((await searchMessages(db, 'thanksgiving')).map((h) => h.message.id), ['p1']);
+    expect(await searchMessages(db, 'dune'), isEmpty);
+  });
+
   test("matches the latest edit, not the original, and skips deleted messages", () async {
     await put([
       text('m1', 'A', 1, 'meet at 5'),

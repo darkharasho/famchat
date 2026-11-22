@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/plaintext.dart';
+import '../../chat/polls.dart' show pollOf;
 import '../../gifs/gif_picker.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
@@ -111,7 +112,11 @@ class MessageBubble extends StatefulWidget {
     this.starred = false,
     this.album,
     this.onOpenAlbumItem,
+    this.custom,
   });
+
+  /// What the bubble shows for a kind with its own look (a poll), in place of text; not while deleted.
+  final Widget? custom;
 
   /// Photos and videos sent together, oldest first, shown as one grid; [message] is the last of
   /// them (it carries the caption, and the bubble's actions apply to it).
@@ -324,6 +329,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     if (widget.deleted) return 'This message was deleted.';
     return switch (m.kind) {
       'text' => widget.shownText ?? (jsonDecode(m.body!) as Map)['text'] as String,
+      // A poll that didn't go out (sent ones show as [custom]).
+      'poll' => '📊 ${pollOf(m)?.question ?? 'Poll'}',
       'undecryptable' => 'Waiting for this message…',
       'invalid' => "This message couldn't be verified.",
       _ => 'This message needs a newer version of FamChat.',
@@ -379,7 +386,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   bool get _reactable =>
-      !widget.deleted && const {'text', 'photo', 'voice', 'gif', 'video'}.contains(widget.message.kind) && widget.message.seq != null;
+      !widget.deleted && const {'text', 'photo', 'voice', 'gif', 'video', 'poll'}.contains(widget.message.kind) && widget.message.seq != null;
 
   BorderRadius get _radius {
     const big = Radius.circular(Radii.lg), small = Radius.circular(Radii.xs);
@@ -400,7 +407,9 @@ class _MessageBubbleState extends State<MessageBubble> {
     final voice = _voice;
     final gif = _gif;
     final video = _video;
-    final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null);
+    final custom = widget.deleted ? null : widget.custom;
+    final special =
+        widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null && custom == null);
     // Edge-to-edge media: little padding around it.
     final album = widget.deleted ? null : widget.album;
     final visual = photo != null || gif != null || video != null || album != null;
@@ -482,7 +491,9 @@ class _MessageBubbleState extends State<MessageBubble> {
           );
 
     Widget content;
-    if (album != null) {
+    if (custom != null) {
+      content = custom;
+    } else if (album != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         AlbumGrid(items: album, onOpen: (i) => widget.onOpenAlbumItem?.call(i)),
         ?captionLine(),

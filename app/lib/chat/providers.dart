@@ -12,6 +12,7 @@ import 'db/chat_db.dart';
 import 'directory.dart';
 import 'http_chat_api.dart';
 import 'hub_link.dart';
+import 'polls.dart';
 import 'wire.dart';
 
 final chatDbProvider = Provider<ChatDb>((ref) {
@@ -129,6 +130,12 @@ final starredMessagesProvider = StreamProvider.family<List<MessageRow>, String?>
 
 final messagesProvider =
     StreamProvider.family<List<MessageRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMessages(id));
+
+/// A chat's polls (poll id → state), folded from its messages; empty while they load.
+final pollsProvider = Provider.family<Map<String, PollState>, String>((ref, chatId) {
+  final rows = ref.watch(messagesProvider(chatId)).value;
+  return rows == null ? const {} : pollStates(rows);
+});
 
 final membersProvider =
     StreamProvider.family<List<MemberRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMembers(id));

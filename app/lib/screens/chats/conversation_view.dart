@@ -18,6 +18,7 @@ import '../../chat/mentions.dart';
 import '../../chat/wire.dart' show FetchedPreview;
 import '../../widgets/link_text.dart' show splitLinks;
 import '../../chat/message_changes.dart';
+import '../../chat/polls.dart' show PollState;
 import '../../chat/providers.dart';
 import '../../chat/spelling/providers.dart';
 import '../../chat/spelling/speller.dart';
@@ -56,6 +57,8 @@ import 'message_bubble.dart';
 import 'album_grid.dart';
 import 'media_pager.dart';
 import 'pin_bar.dart';
+import 'poll_bubble.dart';
+import 'poll_sheet.dart';
 import 'staged_tray.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -94,6 +97,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Desktop and web: the emoji popover.
   final _emojiPopover = EmojiPopoverHandle();
+
+  /// Poll id → (my picks as the fold showed them when I tapped, the picks I sent): until the fold
+  /// moves off the former, quick taps build on what was sent rather than on the stale fold.
+  final _sentVotes = <String, (List<int>, List<int>)>{};
 
   /// The `:partial` being typed, its matches and the highlighted one.
   ShortcodeQuery? _query;
@@ -928,7 +935,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _startGame() => showStartGameSheet(context, widget.chatId);
 
-  /// The "+" menu: the library, the camera where there is one, and Game where one can start. Phones
+  /// Opens the new-poll sheet; the poll replies to the message being replied to, if any.
+  Future<void> _startPoll() async {
+    final replyTo = _editing == null ? _replyTo : null;
+    try {
+      final id = await showNewPollSheet(context, widget.chatId, replyTo: replyTo?.id);
+      if (id != null && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
+    } catch (_) {
+      _snack("Couldn't send the poll.");
+    }
+  }
+
+  /// The "+" menu: the library, the camera where there is one, Poll, and Game where one can start. Phones
   /// show it as a sheet; desktop and web as a menu by the button ([anchor]'s context).
   Future<void> _attach(BuildContext anchor) async {
     final items = <(IconData, String, Object)>[
@@ -937,9 +955,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         (Icons.photo_camera_outlined, 'Take a photo', PickSource.camera),
         (Icons.videocam_outlined, 'Record a video', PickSource.cameraVideo),
       ],
+      (Icons.poll_outlined, 'Poll', _pollChoice),
       if (_canStartGame) (Icons.casino_outlined, 'Game', _gameChoice),
     ];
-    // A PickSource, or [_gameChoice].
+    // A PickSource, [_pollChoice] or [_gameChoice].
     final Object? choice;
     if (emojiPopover) {
       final button = anchor.findRenderObject()! as RenderBox;
@@ -976,6 +995,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
     if (choice == _gameChoice) {
       if (mounted) await _startGame();
+      return;
+    }
+    if (choice == _pollChoice) {
+      if (mounted) await _startPoll();
       return;
     }
     if (choice is! PickSource || !mounted) return;
@@ -1241,6 +1264,31 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final pinNotes = {for (final r in changes.pinEvents) r.id: r};
     final pinnedIds = changes.pinned.toSet();
     final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
+    final polls = ref.watch(pollsProvider(chatId));
+    Widget? pollIn(MessageRow m) {
+      final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
+      if (state == null) return null;
+      final open = m.state != 'failed' && !readOnly && !state.ended;
+      final folded = me == null ? const <int>[] : state.mine(me);
+      final sent = _sentVotes[m.id];
+      if (sent != null && !listEquals(sent.$1, folded)) _sentVotes.remove(m.id);
+      return PollBubble(
+        row: m,
+        state: state,
+        me: me,
+        mine: m.senderUserId == me,
+        nameOf: (u) => users[u]?.name ?? '?',
+        picked: _sentVotes[m.id]?.$2,
+        onVote: open
+            ? (choices) {
+                setState(() => _sentVotes[m.id] = (_sentVotes[m.id]?.$1 ?? folded, choices));
+                ref.read(chatSyncProvider)?.vote(chatId, m.id, choices);
+              }
+            : null,
+        onEnd: open && m.senderUserId == me && m.seq != null ? () => ref.read(chatSyncProvider)?.endPoll(chatId, m.id) : null,
+        onSeeVotes: () => showPollVotesSheet(context, chatId: chatId, pollId: m.id, initial: state, members: members, users: users, me: me),
+      );
+    }
     final visible = messages
         .where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id) || pinNotes.containsKey(m.id))
         .toList();
@@ -1296,6 +1344,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   if (group && mentionsOf(m).isNotEmpty) everyoneName,
                 ],
                 linkPreview: changes.previewOf(m),
+                custom: pollIn(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
@@ -1645,10 +1694,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-/// The attach menu's Game entry.
-const _gameChoice = #game;
+/// The attach menu's Game and Poll entries.
+const _gameChoice = #game, _pollChoice = #poll;
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video', 'poll'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 /// Ctrl/Cmd+V in the composer: a photo or video on the clipboard is offered for sending; anything
