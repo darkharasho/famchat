@@ -136,6 +136,15 @@ describe("upload and download", () => {
     expect(KIND_LIMITS.get("video")).toBe(64 * MiB);
   });
 
+  it("files up to 64 MiB accepted, 413 above", async () => {
+    expect(KIND_LIMITS.get("file")).toBe(64 * MiB);
+    expect((await upload(alice, { chatId, kind: "file" }, randomBytes(64 * MiB))).status).toBe(201);
+    const res = await upload(alice, { chatId, kind: "file" }, randomBytes(64 * MiB + 1));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_large" });
+    expect(await usage()).toBe(64 * MiB);
+  });
+
   it("voice up to 8 MiB accepted", async () => {
     expect((await upload(alice, { chatId, kind: "voice" }, randomBytes(8 * MiB))).status).toBe(201);
     expect((await upload(alice, { chatId, kind: "voice" }, randomBytes(8 * MiB + 1))).status).toBe(413);
@@ -206,6 +215,14 @@ describe("quota", () => {
     const res = await download(bob, old);
     expect(res.status).toBe(410);
     expect(await res.json()).toEqual({ error: "media_expired" });
+  });
+
+  it("files count toward the cap and expire oldest first", async () => {
+    const old = await insertMedia({ chatId, uploader: alice, bytes: 8 * GiB, createdAt: 1, kind: "file" });
+    expect(await usage()).toBe(8 * GiB);
+    await upload(alice, { chatId, kind: "file" }, randomBytes(10));
+    expect((await download(bob, old)).status).toBe(410);
+    expect(await usage()).toBe(10);
   });
 
   it("an object missing from R2 → 410", async () => {

@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- App-icon unread badge (app_badge_plus): the launcher permissions its README lists. Stock
@@ -15,6 +16,12 @@
     <uses-permission android:name="com.huawei.android.launcher.permission.CHANGE_BADGE"/>
     <uses-permission android:name="com.huawei.android.launcher.permission.READ_SETTINGS"/>
     <uses-permission android:name="com.huawei.android.launcher.permission.WRITE_SETTINGS"/>
+    <!-- open_filex declares these for opening files elsewhere on the device; FamChat only opens
+         files in its own cache, which needs none (and Play restricts the media ones). -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -52,7 +59,7 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="famchat.dev" android:pathPrefix="/join"/>
             </intent-filter>
-            <!-- Share to FamChat: text and links, photos and videos (one or several). singleTask
+            <!-- Share to FamChat: text and links, photos, videos and any other file (one or several). singleTask
                  above brings a running FamChat forward instead of starting a second one. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>
@@ -64,12 +71,14 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="image/*"/>
                 <data android:mimeType="video/*"/>
+                <data android:mimeType="*/*"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="image/*"/>
                 <data android:mimeType="video/*"/>
+                <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

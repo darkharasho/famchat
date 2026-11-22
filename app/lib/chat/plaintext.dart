@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import '../crypto/encoding.dart';
 import '../games/rules.dart';
+import '../media/media_api.dart';
 
 const maxTextLength = 4000;
 
@@ -91,6 +92,8 @@ sealed class Plaintext {
         return GifBody._fromJson(j);
       case 'video':
         return VideoBody._fromJson(j);
+      case 'file':
+        return FileBody._fromJson(j);
       case 'game':
         final game = j['game'], first = j['first'];
         if (first is! String || first.isEmpty) throw const FormatException('bad first');
@@ -489,6 +492,103 @@ class VideoBody extends Plaintext with Captioned {
       album: _album(j),
     );
   }
+}
+
+/// Any file (docs/protocol.md "Files"): one encrypted blob in R2 under a fresh media [key], pinned
+/// by the SHA-256 of its ciphertext. [name] is for display and the default save name only, never a
+/// path: receivers pass it through [cleanFileName].
+class FileBody extends Plaintext {
+  const FileBody({
+    required this.mediaKey,
+    required this.key,
+    required this.sha256,
+    required this.name,
+    required this.bytes,
+    this.mime = defaultMime,
+    this.replyTo,
+  });
+
+  /// What a file whose type is unknown (or doesn't check out) is sent and shown as.
+  static const defaultMime = 'application/octet-stream';
+
+  /// Media key (`/api/media/:key`) of the file.
+  final String mediaKey;
+
+  /// The 32-byte media key, and SHA-256 of the encrypted blob.
+  final Uint8List key, sha256;
+
+  /// The file's name (cleaned) and its size in bytes.
+  final String name;
+  final int bytes;
+  final String mime;
+  final String? replyTo;
+
+  @override
+  String get kind => 'file';
+
+  /// [mime] when it is a plain `type/subtype` of at most 100 characters, else [defaultMime].
+  static String mimeOrDefault(String? mime) =>
+      mime != null && mime.length <= 100 && _mimeType.hasMatch(mime) ? mime.toLowerCase() : defaultMime;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'mediaKey': mediaKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        'name': name,
+        'bytes': bytes,
+        'mime': mime,
+        'replyTo': ?replyTo,
+      };
+
+  factory FileBody._fromJson(Map<String, Object?> j) {
+    final name = j['name'], mime = j['mime'];
+    if (name is! String) throw const FormatException('bad name');
+    return FileBody(
+      mediaKey: _mediaId(j, 'mediaKey'),
+      key: _bytes32(j, 'key'),
+      sha256: _bytes32(j, 'sha256'),
+      // A name that needs cleaning is cleaned, not refused: it's only ever shown.
+      name: cleanFileName(name),
+      bytes: _positive(j, 'bytes', mediaKindLimits['file']!),
+      mime: mimeOrDefault(mime is String ? mime : null),
+      replyTo: _replyTo(j),
+    );
+  }
+}
+
+final _mimeType = RegExp(r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$");
+
+/// Longest file name, in characters (most file systems allow 255).
+const maxFileName = 255;
+
+/// Path separators (`/`, `\`, `:`), C0 and C1 control characters, line and paragraph separators,
+/// and the invisible marks that reorder text (bidi overrides, isolates and marks:
+/// "invoice\u202Efdp.exe" shows as "invoiceexe.pdf").
+final _unsafeInName = RegExp(r'[/\\:\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028-\u202E\u2066-\u2069]');
+
+/// [name] safe to show and to offer as a save name: separators and control characters removed,
+/// trimmed, cut to [maxFileName] characters (keeping the extension when it's short), trailing dots
+/// and spaces stripped (Windows drops them when writing, so "evil.exe." would be saved as
+/// "evil.exe"), and "file" when nothing is left (so it can never be `.` or `..`).
+String cleanFileName(String name) {
+  final trailing = RegExp(r'[.\s]+$');
+  var n = name.replaceAll(_unsafeInName, '').trim().replaceFirst(trailing, '');
+  final runes = n.runes.toList();
+  if (runes.length > maxFileName) {
+    final dot = n.lastIndexOf('.');
+    final ext = dot > 0 ? n.substring(dot).runes.toList() : const <int>[];
+    if (ext.length > 1 && ext.length <= 16) {
+      final base = String.fromCharCodes(runes.take(maxFileName - ext.length)).trimRight();
+      n = '$base${String.fromCharCodes(ext)}';
+    } else {
+      n = String.fromCharCodes(runes.take(maxFileName)).trimRight();
+    }
+  }
+  // Cutting can leave some at the end again.
+  n = n.replaceFirst(trailing, '');
+  return n.isEmpty ? 'file' : n;
 }
 
 /// A GIF from KLIPY (docs/protocol.md "GIFs"). KLIPY's terms have each viewer load it straight from

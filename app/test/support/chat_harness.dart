@@ -1,6 +1,7 @@
 import 'package:famchat/gifs/klipy.dart';
 import 'package:famchat/gifs/providers.dart';
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:io' show File;
 import 'package:material_ui/material_ui.dart' show Size, SizedBox;
 import 'package:meta/meta.dart';
@@ -12,6 +13,7 @@ import 'package:famchat/chat/spelling/providers.dart';
 import 'package:famchat/chat/spelling/speller.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/media/clipboard_media.dart';
+import 'package:famchat/media/file_actions.dart';
 import 'package:famchat/media/media_db.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/media/providers.dart';
@@ -106,6 +108,8 @@ Future<ScriptedHubLink> pumpChatApp(
   KlipyClient? gifs,
   FakeServer? server,
   PushMessaging? push,
+  FilesPicker? filePicker,
+  FileActions? fileActions,
 }) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
@@ -141,6 +145,9 @@ Future<ScriptedHubLink> pumpChatApp(
       // No GIF search unless a test brings a client (the real one needs the server's key).
       gifClientProvider.overrideWith((ref) async => gifs),
       if (push != null) pushMessagingProvider.overrideWithValue(push),
+      // No system file dialogs or other apps in tests.
+      filePickerProvider.overrideWithValue(filePicker ?? () async => const []),
+      fileActionsProvider.overrideWithValue(fileActions ?? FakeFileActions()),
     ],
     child: const FamChatApp(),
   ));
@@ -186,3 +193,25 @@ VideoFiles fakeVideoFiles({List<Uri>? released}) => VideoFiles(
       release: (uri) async => released?.add(uri),
       controllerFor: VideoPlayerController.networkUrl,
     );
+
+/// Files "opened" and "saved" in memory.
+class FakeFileActions implements FileActions {
+  final opened = <({String id, String name, String mime, Uint8List bytes})>[];
+  final saved = <({String name, String mime, Uint8List bytes})>[];
+  OpenOutcome outcome = OpenOutcome.opened;
+
+  /// What save returns (false: the person cancelled).
+  bool saves = true;
+
+  @override
+  Future<OpenOutcome> open({required String id, required String name, required String mime, required Uint8List bytes}) async {
+    opened.add((id: id, name: name, mime: mime, bytes: bytes));
+    return outcome;
+  }
+
+  @override
+  Future<bool> save({required String name, required String mime, required Uint8List bytes}) async {
+    saved.add((name: name, mime: mime, bytes: bytes));
+    return saves;
+  }
+}

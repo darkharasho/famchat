@@ -13,6 +13,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/files.dart' show fileOf;
 import '../../chat/forward.dart';
 import '../../chat/mentions.dart';
 import '../../chat/wire.dart' show FetchedPreview;
@@ -33,6 +34,8 @@ import '../../games/widgets/start_game_sheet.dart';
 import '../../gifs/klipy.dart' show GifResult;
 import '../../gifs/providers.dart';
 import '../../media/clipboard_media.dart';
+import '../../media/file_actions.dart';
+import '../../media/send_files.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/send_media.dart';
@@ -57,6 +60,7 @@ import 'message_bubble.dart';
 import 'album_grid.dart';
 import 'media_pager.dart';
 import 'pin_bar.dart';
+import 'file_bubble.dart' show saveFileMessage;
 import 'poll_bubble.dart';
 import 'poll_sheet.dart';
 import 'staged_tray.dart';
@@ -891,7 +895,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Files are being dragged over the conversation (desktop and web).
   bool _dragging = false;
 
-  /// Photos and videos dropped on the conversation are sent.
+  /// Photos and videos dropped on the conversation wait in the tray; other files are sent as they
+  /// are (folders can't be).
   Widget _dropZone(Widget child) {
     final theme = Theme.of(context);
     return DropTarget(
@@ -899,11 +904,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       onDragExited: (_) => setState(() => _dragging = false),
       onDragDone: (details) async {
         setState(() => _dragging = false);
-        final sorted = await pickedFromFiles(details.files.whereType<DropItemFile>().toList());
-        if (sorted.skipped > 0 || details.files.length > sorted.media.length + sorted.skipped) {
-          _snack('Only photos and videos can be sent here.');
-        }
+        final dropped = details.files.whereType<DropItemFile>().toList();
+        final sorted = await pickedFromFiles(dropped);
+        if (details.files.length > dropped.length) _snack("Folders can't be sent. Drop the files in them.");
         _stage(sorted.media);
+        await _sendFiles([for (final f in sorted.others) OutgoingFile.xfile(f)]);
       },
       child: Stack(children: [
         child,
@@ -922,7 +927,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.file_download_outlined, size: 40, color: theme.colorScheme.onTertiaryContainer),
                     const SizedBox(height: Space.sm),
-                    Text('Drop photos or videos to send',
+                    Text('Drop files to send',
                         style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onTertiaryContainer)),
                   ]),
                 ),
@@ -946,7 +951,36 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
-  /// The "+" menu: the library, the camera where there is one, Poll, and Game where one can start. Phones
+  /// Sends [files] as they are, each its own message; the first replies to the message being replied
+  /// to, if any. Says which were too large.
+  Future<void> _sendFiles(List<OutgoingFile> files) async {
+    final media = ref.read(mediaServiceProvider);
+    if (files.isEmpty || media == null || !mounted) return;
+    final replyTo = _editing == null ? _replyTo : null;
+    setState(() => _preparing++);
+    final FileSendReport report;
+    try {
+      report = await sendFiles(media, widget.chatId, files, replyTo: replyTo?.id);
+    } finally {
+      if (mounted) setState(() => _preparing--);
+    }
+    if (report.sent > 0 && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
+    if (report.problem case final p?) _snack(p);
+  }
+
+  /// Opens the file picker (any type, several at once) and sends what's picked.
+  Future<void> _pickFiles() async {
+    final List<OutgoingFile> picked;
+    try {
+      picked = await ref.read(filePickerProvider)();
+    } catch (_) {
+      _snack("Couldn't open the picker.");
+      return;
+    }
+    await _sendFiles(picked);
+  }
+
+  /// The "+" menu: the library, the camera where there is one, File, Poll, and Game where one can start. Phones
   /// show it as a sheet; desktop and web as a menu by the button ([anchor]'s context).
   Future<void> _attach(BuildContext anchor) async {
     final items = <(IconData, String, Object)>[
@@ -955,10 +989,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         (Icons.photo_camera_outlined, 'Take a photo', PickSource.camera),
         (Icons.videocam_outlined, 'Record a video', PickSource.cameraVideo),
       ],
+      (Icons.attach_file_rounded, 'File', _fileChoice),
       (Icons.poll_outlined, 'Poll', _pollChoice),
       if (_canStartGame) (Icons.casino_outlined, 'Game', _gameChoice),
     ];
-    // A PickSource, [_pollChoice] or [_gameChoice].
+    // A PickSource, [_fileChoice], [_pollChoice] or [_gameChoice].
     final Object? choice;
     if (emojiPopover) {
       final button = anchor.findRenderObject()! as RenderBox;
@@ -999,6 +1034,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
     if (choice == _pollChoice) {
       if (mounted) await _startPoll();
+      return;
+    }
+    if (choice == _fileChoice) {
+      if (mounted) await _pickFiles();
       return;
     }
     if (choice is! PickSource || !mounted) return;
@@ -1352,6 +1391,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                     ? () => _forward(album ?? [m])
                     : null,
                 forwarded: isForwarded(m),
+                onSave: switch (changes.isDeleted(m.id) ? null : fileOf(m)) {
+                  final f? => () => saveFileMessage(context, ref, f),
+                  null => null,
+                },
                 onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(album ?? [m]) : null,
                 // An album counts as pinned when any of its items is; unpinning unpins those.
@@ -1694,10 +1737,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   }
 }
 
-/// The attach menu's Game and Poll entries.
-const _gameChoice = #game, _pollChoice = #poll;
+/// The attach menu's Game, Poll and File entries.
+const _gameChoice = #game, _pollChoice = #poll, _fileChoice = #file;
 
-bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video', 'poll'}.contains(m.kind);
+bool _replyable(MessageRow m) => const {'text', 'photo', 'voice', 'gif', 'video', 'poll', 'file'}.contains(m.kind);
 
 /// Above the composer while replying or editing: what, a snippet, and a close button.
 /// Ctrl/Cmd+V in the composer: a photo or video on the clipboard is offered for sending; anything

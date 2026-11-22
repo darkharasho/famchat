@@ -1,17 +1,21 @@
 // Sharing into FamChat from other apps (the share sheet): what came in, where it comes from, and
 // the share waiting for a chat to be picked.
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../media/photo_picker.dart';
 import 'share_source.dart';
 
-/// Photos, videos and/or text another app shared.
+/// Photos, videos, other files and/or text another app shared.
 class IncomingShare {
-  const IncomingShare({this.media = const [], this.text});
+  const IncomingShare({this.media = const [], this.files = const [], this.text});
   final List<PickedMedia> media;
+
+  /// Anything that isn't a photo or video: sent as files.
+  final List<XFile> files;
   final String? text;
 
-  bool get isEmpty => media.isEmpty && (text == null || text!.trim().isEmpty);
+  bool get isEmpty => media.isEmpty && files.isEmpty && (text == null || text!.trim().isEmpty);
 }
 
 abstract interface class ShareSource {
@@ -51,7 +55,20 @@ class PendingShare extends Notifier<IncomingShare?> {
 
 final pendingShareProvider = NotifierProvider<PendingShare, IncomingShare?>(PendingShare.new);
 
-/// "2 photos and a video", "a message".
+/// Whether a shared file at [path] (absolute, links already resolved) may be sent: not when it's
+/// in one of [privateDirs] (the app's own storage), unless it sits directly in one of [cacheDirs]
+/// (where the share plugin copies shared streams; not in a folder there, such as decrypted files).
+bool sharedPathAllowed(String path, {required List<String> privateDirs, required List<String> cacheDirs}) {
+  String dir(String d) => d.endsWith('/') ? d : '$d/';
+  if (path.split('/').any((part) => part == '..' || part == '.')) return false;
+  // The process's own state (/proc/self/environ, …) and devices aren't the user's files.
+  if (const ['/proc/', '/sys/', '/dev/'].any(path.startsWith)) return false;
+  if (!privateDirs.any((d) => path.startsWith(dir(d)) || path == d)) return true;
+  final parent = path.substring(0, path.lastIndexOf('/') + 1);
+  return cacheDirs.any((c) => parent == dir(c));
+}
+
+/// "2 photos and a video", "a file and a message".
 String shareSummary(IncomingShare s) {
   String count(int n, String one) => n == 1 ? 'a $one' : '$n ${one}s';
   final photos = s.media.whereType<PickedPhoto>().length;
@@ -59,6 +76,7 @@ String shareSummary(IncomingShare s) {
   final parts = [
     if (photos > 0) count(photos, 'photo'),
     if (videos > 0) count(videos, 'video'),
+    if (s.files.isNotEmpty) count(s.files.length, 'file'),
     if (s.text != null && s.text!.trim().isNotEmpty) 'a message',
   ];
   if (parts.isEmpty) return 'nothing';

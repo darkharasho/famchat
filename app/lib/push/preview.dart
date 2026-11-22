@@ -26,6 +26,9 @@ String? mediaLabel(String kind) => switch (kind) {
 /// A poll in a line (the chat list, notifications): "📊 Poll: Pizza or tacos?".
 String pollLabel(PollBody p) => '📊 Poll: ${p.question.replaceAll(RegExp(r'\s+'), ' ')}';
 
+/// A file in a line (the chat list, notifications, replies): "📎 Tax return.pdf".
+String fileLabel(FileBody f) => '📎 ${f.name.replaceAll(RegExp(r'\s+'), ' ')}';
+
 /// A captioned photo or video in a line: its emoji and the caption, e.g. "📷 Beach day".
 String captionLabel(String kind, String caption) {
   final emoji = kind == 'video' ? '🎥' : '📷';
@@ -102,6 +105,10 @@ Future<String?> _previewOf(ChatDb db, Plaintext p, MessageRow row) async {
   if (p is GameBody || p is MoveBody) return gamePushLabel(db, row.chatId, row);
   if (p is PollBody) {
     final chars = pollLabel(p).characters;
+    return chars.length <= maxPreviewChars ? chars.string : '${chars.take(maxPreviewChars)}…';
+  }
+  if (p is FileBody) {
+    final chars = fileLabel(p).characters;
     return chars.length <= maxPreviewChars ? chars.string : '${chars.take(maxPreviewChars)}…';
   }
   if (p case Captioned(:final caption?)) {

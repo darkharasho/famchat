@@ -10,6 +10,7 @@ import '../chat/providers.dart';
 import '../session/session_controller.dart';
 import '../voice/voice_io.dart';
 import 'clipboard_media.dart';
+import 'file_actions.dart' show sweepOpenedFiles;
 import 'http_media_api.dart';
 import 'media_api.dart';
 import 'media_db.dart';
@@ -62,6 +63,7 @@ final mediaServiceProvider = Provider<MediaService?>((ref) {
       unawaited(ref.read(mediaDbProvider).wipe());
       unawaited(sweepVoiceFiles()); // decrypted clips and unsent recordings
       unawaited(sweepVideoFiles());
+      unawaited(sweepOpenedFiles());
     }
   });
   final sync = ref.watch(chatSyncProvider);

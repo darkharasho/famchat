@@ -4,9 +4,9 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 void main() {
   test("an invite link opening the app isn't a share (it's handled as an invite)", () async {
-    final invite = await sharedToIncoming([SharedMediaFile(path: 'https://famchat.dev/join#${'A' * 32}', type: SharedMediaType.url)]);
+    final invite = await sharedToIncoming([SharedMediaFile(path: 'https://famchat.dev/join#${'A' * 32}', type: SharedMediaType.url)], allow: (_) => true);
     expect(invite.isEmpty, isTrue);
-    final link = await sharedToIncoming([SharedMediaFile(path: 'https://example.com/x', type: SharedMediaType.url)]);
+    final link = await sharedToIncoming([SharedMediaFile(path: 'https://example.com/x', type: SharedMediaType.url)], allow: (_) => true);
     expect(link.text, 'https://example.com/x');
   });
 }

@@ -116,7 +116,7 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
 
 /// The id [m] replies to, or null.
 String? replyTargetOf(MessageRow m) =>
-    m.kind == 'text' || m.kind == 'poll' || captionKinds.contains(m.kind) ? _field(m, 'replyTo') : null;
+    m.kind == 'text' || m.kind == 'poll' || m.kind == 'file' || captionKinds.contains(m.kind) ? _field(m, 'replyTo') : null;
 
 /// Whether a preview of [url] belongs with [text]: the text still has that link.
 bool previewFits(String text, String url) => text.contains(url.replaceFirst(RegExp(r'/$'), ''));

@@ -50,6 +50,10 @@ class Node {
         for (final r in await rows(chatId))
           if (r.kind == 'video') Plaintext.decode(utf8.encode(r.body!)) as VideoBody,
       ];
+  Future<List<FileBody>> files(String chatId) async => [
+        for (final r in await rows(chatId))
+          if (r.kind == 'file') Plaintext.decode(utf8.encode(r.body!)) as FileBody,
+      ];
   Future<List<PhotoBody>> photos(String chatId) async => [
         for (final r in await rows(chatId))
           if (r.kind == 'photo') Plaintext.decode(utf8.encode(r.body!)) as PhotoBody,
@@ -310,6 +314,32 @@ void main() {
       expect((c.width, c.height, c.durationMs), (640, 360, 3000));
       expect(await carol.media.load(c.ref), v.bytes);
       expect(await carol.media.load(c.thumbRef!), v.thumb);
+    });
+
+    test('a file forwards under a new key with its name and type', () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final bytes = photoBytes(1200, 6);
+      final id = await bob.media.sendFile(ab, name: 'Tickets.pdf', bytes: bytes, mime: 'application/pdf');
+      await until(() async => (await alice.files(ab)).isNotEmpty, reason: 'alice gets it');
+      final fwd = await forward(alice, ab, id, ac);
+      await until(() async => (await carol.files(ac)).isNotEmpty, reason: 'carol gets the forward');
+      final c = (await carol.files(ac)).single;
+      final first = (await alice.files(ab)).single;
+      expect((c.name, c.mime, c.bytes), ('Tickets.pdf', 'application/pdf', 1200));
+      expect(c.mediaKey, isNot(first.mediaKey));
+      expect(b64url(c.key), isNot(b64url(first.key)));
+      expect(await carol.media.load(c.ref), bytes);
+      expect(isForwarded((await carol.row(fwd))!), isTrue);
+    });
+
+    test('a file whose media expired cannot be forwarded', () async {
+      final (alice, bob, _, ab, ac) = await trio();
+      final id = await bob.media.sendFile(ab, name: 'a.zip', bytes: photoBytes(300));
+      await until(() async => (await alice.files(ab)).isNotEmpty);
+      alice.d.hub.dropEventTypes.add('media_expired');
+      backend.expireMedia([(await alice.files(ab)).single.mediaKey]);
+      await expectLater(forward(alice, ab, id, ac), throwsA(isA<ForwardException>()));
+      expect(await alice.rows(ac), isEmpty);
     });
 
     test('a text forwards its latest edit, without its reply or mentions', () async {
@@ -701,6 +731,58 @@ void main() {
       final (alice, _, chatId) = await pair();
       await expectLater(alice.media.sendVoice(chatId, clip(n: 8 * 1024 * 1024)), throwsArgumentError);
       expect(await alice.rows(chatId), isEmpty);
+    });
+  });
+
+  group('files', () {
+    test('sendFile stages one file blob and Bob gets the file, its name and type', () async {
+      final (alice, bob, chatId) = await pair();
+      final bytes = photoBytes(4000, 8);
+      alice.d.media.hold = Completer<void>();
+      final id = await alice.media.sendFile(chatId, name: 'Flight confirmation.pdf', bytes: bytes, mime: 'application/pdf');
+      final staged = await alice.db.uploadsFor(id);
+      expect(staged.map((u) => u.kind), ['file']);
+      expect((await alice.row(id))!.kind, 'file');
+      alice.d.media.hold!.complete();
+      alice.d.media.hold = null;
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'file sent');
+      expect(alice.d.media.uploads, hasLength(1));
+      await until(() async => (await bob.files(chatId)).isNotEmpty, reason: 'bob gets the file');
+      final f = (await bob.files(chatId)).single;
+      expect((await bob.row(id))!.kind, 'file');
+      expect((f.name, f.bytes, f.mime), ('Flight confirmation.pdf', 4000, 'application/pdf'));
+      expect(alice.d.media.uploads.single, f.mediaKey);
+      expect(backend.mediaBlob(f.mediaKey), isNot(contains(bytes.sublist(0, 32))));
+      expect(await bob.media.load(f.ref), bytes);
+    });
+
+    test('a file can reply; its name is cleaned and an unknown type falls back', () async {
+      final (alice, bob, chatId) = await pair();
+      final first = await alice.sync.sendText(chatId, 'send me the tickets');
+      final id = await bob.media.sendFile(chatId, name: '../../etc/passwd', bytes: photoBytes(50), replyTo: first);
+      await until(() async => (await alice.files(chatId)).isNotEmpty, reason: 'alice gets it');
+      final f = (await alice.files(chatId)).single;
+      expect(f.name, isNot(contains('/')));
+      expect(f.mime, FileBody.defaultMime);
+      expect(f.replyTo, first);
+      expect(replyTargetOf((await alice.row(id))!), first);
+    });
+
+    test('too large or empty is refused before anything is staged', () async {
+      final (alice, _, chatId) = await pair();
+      await expectLater(alice.media.sendFile(chatId, name: 'big.iso', bytes: Uint8List(maxFileBytes + 1)),
+          throwsA(isA<FileTooLargeException>()));
+      await expectLater(alice.media.sendFile(chatId, name: 'empty.txt', bytes: Uint8List(0)), throwsArgumentError);
+      expect(await alice.rows(chatId), isEmpty);
+      expect(await alice.db.uploadMessageIds(), isEmpty);
+    });
+
+    test('a file at the limit sends', () async {
+      final (alice, bob, chatId) = await pair();
+      final id = await alice.media.sendFile(chatId, name: 'max.bin', bytes: Uint8List(maxFileBytes));
+      await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent');
+      await until(() async => (await bob.files(chatId)).isNotEmpty);
+      expect((await bob.files(chatId)).single.bytes, maxFileBytes);
     });
   });
 }

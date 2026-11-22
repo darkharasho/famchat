@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/shortcodes.dart';
+import '../../chat/files.dart' show fileOf;
 import '../../chat/plaintext.dart';
 import '../../chat/polls.dart' show pollOf;
 import '../../gifs/gif_picker.dart';
@@ -16,6 +17,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/link_text.dart';
 import '../../settings/time_format.dart' show clockTime;
 import 'album_grid.dart';
+import 'file_bubble.dart';
 import 'photo_view.dart';
 import 'link_preview_card.dart';
 import 'video_view.dart';
@@ -57,7 +59,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, pin, star, forward, copy, readBy, edit, delete }
+enum MessageAction { reply, pin, star, forward, save, copy, readBy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -113,7 +115,11 @@ class MessageBubble extends StatefulWidget {
     this.album,
     this.onOpenAlbumItem,
     this.custom,
+    this.onSave,
   });
+
+  /// Files: "Save as…" (a copy where the person picks).
+  final VoidCallback? onSave;
 
   /// What the bubble shows for a kind with its own look (a poll), in place of text; not while deleted.
   final Widget? custom;
@@ -211,6 +217,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       _reactable ||
       widget.onReply != null ||
       widget.onForward != null ||
+      widget.onSave != null ||
       widget.onEdit != null ||
       widget.onDelete != null ||
       _copyText != null;
@@ -243,6 +250,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (widget.onPin != null) MessageAction.pin,
         if (widget.onStar != null) MessageAction.star,
         if (widget.onForward != null) MessageAction.forward,
+        if (widget.onSave != null) MessageAction.save,
         if (_copyText != null) MessageAction.copy,
         if (widget.onReadBy != null) MessageAction.readBy,
         if (widget.onEdit != null) MessageAction.edit,
@@ -256,6 +264,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             : (Icons.push_pin_outlined, 'Pin for everyone'),
         MessageAction.star => widget.starred ? (Icons.star_rounded, 'Unstar') : (Icons.star_outline_rounded, 'Star'),
         MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
+        MessageAction.save => (Icons.download_rounded, hoverReactions ? 'Save as…' : 'Save'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
         MessageAction.readBy => (Icons.done_all_rounded, 'Read by'),
         MessageAction.edit => (Icons.edit_outlined, 'Edit'),
@@ -310,6 +319,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onStar?.call();
       case MessageAction.forward:
         widget.onForward?.call();
+      case MessageAction.save:
+        widget.onSave?.call();
       case MessageAction.copy:
         final text = _copyText;
         if (text == null) return;
@@ -386,7 +397,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   bool get _reactable =>
-      !widget.deleted && const {'text', 'photo', 'voice', 'gif', 'video', 'poll'}.contains(widget.message.kind) && widget.message.seq != null;
+      !widget.deleted && const {'text', 'photo', 'voice', 'gif', 'video', 'poll', 'file'}.contains(widget.message.kind) && widget.message.seq != null;
 
   BorderRadius get _radius {
     const big = Radius.circular(Radii.lg), small = Radius.circular(Radii.xs);
@@ -407,9 +418,10 @@ class _MessageBubbleState extends State<MessageBubble> {
     final voice = _voice;
     final gif = _gif;
     final video = _video;
+    final file = widget.deleted ? null : fileOf(m);
     final custom = widget.deleted ? null : widget.custom;
     final special =
-        widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null && custom == null);
+        widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null && file == null && custom == null);
     // Edge-to-edge media: little padding around it.
     final album = widget.deleted ? null : widget.album;
     final visual = photo != null || gif != null || video != null || album != null;
@@ -515,6 +527,11 @@ class _MessageBubbleState extends State<MessageBubble> {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         GifView(body: gif),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
+      ]);
+    } else if (file != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        FileBubble(body: file, messageId: m.id, mine: mine),
+        if (showEdited) edited,
       ]);
     } else if (voice != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [

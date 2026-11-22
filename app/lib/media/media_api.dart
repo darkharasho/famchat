@@ -8,6 +8,8 @@ const mediaKindLimits = {
   'voice': 8 * 1024 * 1024,
   // Under the 100 MB request body limit of Cloudflare's Workers (Free and Pro plans).
   'video': 64 * 1024 * 1024,
+  // Any file type, the same ceiling as videos.
+  'file': 64 * 1024 * 1024,
 };
 
 class MediaUsage {

@@ -106,51 +106,60 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
         }
 
         // Process the shared content from the NSExtensionContext attachments.
-        if let content = extensionContext!.inputItems[0] as? NSExtensionItem {
-            if let contents = content.attachments {
-                for (index, attachment) in (contents).enumerated() {
-                    for type in SharedMediaType.allCases {
-                        if attachment.hasItemConformingToTypeIdentifier(type.toUTTypeIdentifier) {
-                            attachment.loadItem(forTypeIdentifier: type.toUTTypeIdentifier) { [weak self] data, error in
-                                guard let this = self, error == nil else {
-                                    self?.dismissWithError()
-                                    return
-                                }
-                                switch type {
-                                case .text:
-                                    if let text = data as? String {
-                                        this.handleMedia(forLiteral: text,
-                                                         type: type,
-                                                         index: index,
-                                                         content: content)
-                                    }
-                                case .url:
-                                    if let url = data as? URL {
-                                        this.handleMedia(forLiteral: url.absoluteString,
-                                                         type: type,
-                                                         index: index,
-                                                         content: content)
-                                    }
-                                default:
-                                    if let url = data as? URL {
-                                        this.handleMedia(forFile: url,
-                                                         type: type,
-                                                         index: index,
-                                                         content: content)
-                                    }
-                                    else if let image = data as? UIImage {
-                                        this.handleMedia(forUIImage: image,
-                                                         type: type,
-                                                         index: index,
-                                                         content: content)
-                                    }
-                                }
-                            }
-                            break
+        // FamChat: every attachment enters the group once and leaves exactly once (whatever it
+        // turns out to be, or when it fails), and the share completes when all have.
+        let group = DispatchGroup()
+        if let content = extensionContext!.inputItems.first as? NSExtensionItem, let contents = content.attachments {
+            for (index, attachment) in contents.enumerated() {
+                group.enter()
+                guard let type = SharedMediaType.allCases.first(where: { attachment.hasItemConformingToTypeIdentifier($0.toUTTypeIdentifier) }) else {
+                    // Any other file (a PDF, a document from Files) goes as a file.
+                    guard attachment.hasItemConformingToTypeIdentifier("public.data") else {
+                        group.leave()
+                        continue
+                    }
+                    attachment.loadItem(forTypeIdentifier: "public.data") { [weak self] data, error in
+                        defer { group.leave() }
+                        guard let this = self, error == nil else { return }
+                        if let url = data as? URL, url.isFileURL {
+                            this.handleMedia(forFile: url, type: .file, index: index)
+                        } else if let bytes = data as? Data {
+                            this.handleMedia(forData: bytes, name: attachment.suggestedName, type: .file, index: index)
+                        }
+                    }
+                    continue
+                }
+                attachment.loadItem(forTypeIdentifier: type.toUTTypeIdentifier) { [weak self] data, error in
+                    defer { group.leave() }
+                    guard let this = self, error == nil else { return }
+                    switch type {
+                    case .text:
+                        if let text = data as? String {
+                            this.handleMedia(forLiteral: text, type: type, index: index)
+                        } else if let url = data as? URL, url.isFileURL {
+                            // A text file (.txt, .csv) goes as a file.
+                            this.handleMedia(forFile: url, type: .file, index: index)
+                        }
+                    case .url:
+                        if let url = data as? URL {
+                            this.handleMedia(forLiteral: url.absoluteString, type: type, index: index)
+                        } else if let text = data as? String {
+                            this.handleMedia(forLiteral: text, type: type, index: index)
+                        }
+                    default:
+                        if let url = data as? URL {
+                            this.handleMedia(forFile: url, type: type, index: index)
+                        } else if let image = data as? UIImage {
+                            this.handleMedia(forUIImage: image, type: type, index: index)
+                        } else if let bytes = data as? Data {
+                            this.handleMedia(forData: bytes, name: attachment.suggestedName, type: type, index: index)
                         }
                     }
                 }
             }
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.allAttachmentsLoaded()
         }
     }
     
@@ -174,30 +183,63 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
     }
     
     
-    private func handleMedia(forLiteral item: String, type: SharedMediaType, index: Int, content: NSExtensionItem) {
-        sharedMedia.append(SharedMediaFile(
+    /// FamChat: what each attachment gave, by its index; appended from the item providers' threads,
+    /// so only on [mediaQueue].
+    private let mediaQueue = DispatchQueue(label: "dev.famchat.share.media")
+    private var loaded: [(Int, SharedMediaFile)] = []
+
+    private func record(_ file: SharedMediaFile, at index: Int, preview: UIImage? = nil) {
+        mediaQueue.sync {
+            loaded.append((index, file))
+            if pendingPreviewImage == nil, let preview = preview { pendingPreviewImage = preview }
+        }
+    }
+
+    private func handleMedia(forLiteral item: String, type: SharedMediaType, index: Int) {
+        record(SharedMediaFile(
             path: item,
             mimeType: type == .text ? "text/plain": nil,
             type: type
-        ))
-        completeAttachment(index: index, content: content)
+        ), at: index)
     }
 
-    private func handleMedia(forUIImage image: UIImage, type: SharedMediaType, index: Int, content: NSExtensionItem){
-        let tempPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent("TempImage.png")
+    private func handleMedia(forUIImage image: UIImage, type: SharedMediaType, index: Int) {
+        // FamChat: a fresh name each, so several images don't overwrite one another.
+        let tempPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent("\(UUID().uuidString).png")
         if self.writeTempFile(image, to: tempPath) {
             let newPathDecoded = tempPath.absoluteString.removingPercentEncoding!
-            sharedMedia.append(SharedMediaFile(
+            record(SharedMediaFile(
                 path: newPathDecoded,
                 mimeType: type == .image ? "image/png": nil,
                 type: type
-            ))
+            ), at: index, preview: image)
         }
-        if pendingPreviewImage == nil { pendingPreviewImage = image }
-        completeAttachment(index: index, content: content)
     }
-    
-    private func handleMedia(forFile url: URL, type: SharedMediaType, index: Int, content: NSExtensionItem) {
+
+    /// FamChat: an item handed over as bytes, written to a temporary file in the App Group (in a
+    /// folder of its own, under its suggested name).
+    private func handleMedia(forData bytes: Data, name: String?, type: SharedMediaType, index: Int) {
+        let suggested = (name ?? "").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+        let fileName = suggested.isEmpty || suggested.allSatisfy({ $0 == "." }) ? UUID().uuidString : suggested
+        let folder = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let newPath = folder.appendingPathComponent(fileName)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try bytes.write(to: newPath)
+            record(SharedMediaFile(
+                path: newPath.absoluteString.removingPercentEncoding!,
+                mimeType: newPath.mimeType(),
+                type: type
+            ), at: index, preview: type == .image ? UIImage(data: bytes) : nil)
+        } catch {
+            print("Cannot write shared data: \(error)")
+        }
+    }
+
+    private func handleMedia(forFile url: URL, type: SharedMediaType, index: Int) {
+        // FamChat: files from other apps' storage (Files, iCloud Drive) may need their scope opened.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let fileName = getFileName(from: url, type: type)
         let newPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent(fileName)
         
@@ -208,43 +250,36 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
                 // Get video thumbnail and duration
                 if let videoInfo = getVideoInfo(from: url) {
                     let thumbnailPathDecoded = videoInfo.thumbnail?.removingPercentEncoding;
-                    sharedMedia.append(SharedMediaFile(
+                    var thumbImage: UIImage? = nil
+                    if let thumb = videoInfo.thumbnail, let thumbURL = URL(string: thumb) {
+                        thumbImage = UIImage(contentsOfFile: thumbURL.path)
+                    }
+                    record(SharedMediaFile(
                         path: newPathDecoded,
                         mimeType: url.mimeType(),
                         thumbnail: thumbnailPathDecoded,
                         duration: videoInfo.duration,
                         type: type
-                    ))
-                    if pendingPreviewImage == nil, let thumb = videoInfo.thumbnail,
-                       let thumbURL = URL(string: thumb) {
-                        pendingPreviewImage = UIImage(contentsOfFile: thumbURL.path)
-                    }
+                    ), at: index, preview: thumbImage)
                 }
             } else {
-                sharedMedia.append(SharedMediaFile(
+                record(SharedMediaFile(
                     path: newPathDecoded,
                     mimeType: url.mimeType(),
                     type: type
-                ))
-                if type == .image, pendingPreviewImage == nil {
-                    pendingPreviewImage = UIImage(contentsOfFile: newPath.path)
-                }
+                ), at: index, preview: type == .image ? UIImage(contentsOfFile: newPath.path) : nil)
             }
         }
-        
-        completeAttachment(index: index, content: content)
     }
 
-    /// Called after each attachment finishes loading. When the last attachment is
-    /// done we either redirect automatically or hand control to the compose UI.
-    private func completeAttachment(index: Int, content: NSExtensionItem) {
-        guard index == (content.attachments?.count ?? 0) - 1 else { return }
+    /// FamChat: called once, on the main queue, after every attachment finished loading (or
+    /// failed). Then we either redirect automatically or hand control to the compose UI.
+    private func allAttachmentsLoaded() {
+        sharedMedia = mediaQueue.sync { loaded.sorted { $0.0 < $1.0 }.map { $0.1 } }
         if shouldAutoRedirect() {
             saveAndRedirect()
         } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.didFinishLoadingContent()
-            }
+            didFinishLoadingContent()
         }
     }
     
