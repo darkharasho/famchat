@@ -72,3 +72,6 @@ final filePickerProvider = Provider<FilesPicker>((ref) => pickFiles);
 
 /// Removes decrypted files opened in a previous run (or before signing out).
 Future<void> sweepOpenedFiles() => io.sweepOpenedFiles();
+
+/// Deletes the decrypted copy of message [id] left by opening it, if any.
+Future<void> dropOpenedFile(String id) => io.dropOpenedFile(id);

@@ -1,14 +1,15 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import {
-  chatOut, chatsOf, checkCoverage, isUlid, leaveGroupStmts, liveDeviceIds, parseWraps, requireMemberChat, wrapInserts,
+  chatOut, chatsOf, checkCoverage, isMember, isUlid, leaveGroupStmts, liveDeviceIds, parseWraps, requireMemberChat, wrapInserts,
 } from "../lib/chatdb";
 import { ApiError } from "../lib/errors";
 import { groupFamilyFor, shares } from "../lib/family";
 import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
-import { messageOut } from "../lib/messages";
-import { notify } from "../notify";
+import { type MessageRow, messageOut } from "../lib/messages";
+import { notify, timersChanged } from "../notify";
+import { DISAPPEAR_SECS, validAhead } from "../lib/timing";
 import { newId } from "../lib/ids";
 import { readAvatarJpeg } from "./me";
 
@@ -161,6 +162,8 @@ chats.delete("/:id/members/:userId", async (c) => {
   await db.batch(leaveGroupStmts(db, chat.id, target, Date.now()));
   await notify(c.env, [target], { type: "removed", chatId: chat.id });
   await notify(c.env, chat.members.map((m) => m.userId).filter((u) => u !== target), { type: "chat", chatId: chat.id });
+  // Disappearing messages they hadn't read may be due sooner now.
+  await timersChanged(c.env);
   return c.body(null, 204);
 });
 
@@ -239,17 +242,77 @@ for (const method of ["put", "delete"] as const) {
   });
 }
 
-/** Renames a group (any member). Titles aren't end-to-end encrypted (docs/protocol.md "Chats"). */
+/**
+ * Changes a chat (any member): `title` (groups only; titles aren't end-to-end encrypted) and/or
+ * `disappearSecs` (null, 86400, 604800 or 7776000; any chat). Changing the timer records who did it,
+ * when and at which seq, for the line clients show (docs/protocol.md "Disappearing messages").
+ */
 chats.patch("/:id", async (c) => {
   const db = c.env.DB;
-  const chat = await requireMemberChat(db, c.req.param("id"), c.get("userId"));
-  if (chat.kind !== "group") throw new ApiError("invalid_request");
-  const raw = (await readJson(c)).title;
-  if (typeof raw === "string" && /[\u0000-\u001f\u007f]/.test(raw)) throw new ApiError("invalid_request");
-  const title = name(raw, 60);
-  await db.prepare("UPDATE chats SET title = ? WHERE id = ?").bind(title, chat.id).run();
+  const me = c.get("userId");
+  const chat = await requireMemberChat(db, c.req.param("id"), me);
+  const body = await readJson(c);
+  if (body.title === undefined && body.disappearSecs === undefined) throw new ApiError("invalid_request");
+  const stmts: D1PreparedStatement[] = [];
+  if (body.title !== undefined) {
+    if (chat.kind !== "group") throw new ApiError("invalid_request");
+    const raw = body.title;
+    if (typeof raw === "string" && /[\u0000-\u001f\u007f]/.test(raw)) throw new ApiError("invalid_request");
+    stmts.push(db.prepare("UPDATE chats SET title = ? WHERE id = ?").bind(name(raw, 60), chat.id));
+  }
+  if (body.disappearSecs !== undefined) {
+    const secs = body.disappearSecs;
+    if (secs !== null && !(typeof secs === "number" && DISAPPEAR_SECS.has(secs))) throw new ApiError("invalid_request");
+    // Setting the value it already has records nothing (no line).
+    stmts.push(db.prepare(
+      `UPDATE chats SET disappear_secs = ?1, disappear_changed_by = ?2, disappear_changed_at = ?3,
+         disappear_changed_seq = last_seq WHERE id = ?4 AND disappear_secs IS NOT ?1`,
+    ).bind(secs, me, Date.now(), chat.id));
+  }
+  await db.batch(stmts);
   await notify(c.env, chat.members.map((m) => m.userId), { type: "chat", chatId: chat.id });
-  return c.json({ chat: await chatOut(db, chat.id, c.get("userId")) });
+  return c.json({ chat: await chatOut(db, chat.id, me) });
+});
+
+/**
+ * Sets (PUT `{at}`) or clears (DELETE) the caller's reminder for a message (docs/protocol.md
+ * "Reminders"). 404 unless the caller is a member and the message is in that chat.
+ */
+chats.put("/:id/messages/:messageId/reminder", async (c) => {
+  const db = c.env.DB;
+  const me = c.get("userId");
+  const chatId = c.req.param("id");
+  const messageId = c.req.param("messageId");
+  if (!isUlid(messageId)) throw new ApiError("not_found");
+  const at = (await readJson(c)).at;
+  const now = Date.now();
+  if (!validAhead(at, now)) throw new ApiError("invalid_request");
+  const res = await db.prepare(
+    `INSERT INTO reminders (user_id, chat_id, message_id, remind_at, next_at, attempts, created_at)
+     SELECT ?1, m.chat_id, m.id, ?2, ?2, 0, ?3 FROM messages m
+     JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?1
+     WHERE m.chat_id = ?4 AND m.id = ?5
+     ON CONFLICT(user_id, message_id) DO UPDATE SET remind_at = ?2, next_at = ?2, attempts = 0
+     RETURNING remind_at`,
+  ).bind(me, at, now, chatId, messageId).first();
+  if (!res) throw new ApiError("not_found");
+  await timersChanged(c.env);
+  await notify(c.env, [me], { type: "reminders" });
+  return c.body(null, 204);
+});
+
+chats.delete("/:id/messages/:messageId/reminder", async (c) => {
+  const db = c.env.DB;
+  const me = c.get("userId");
+  const chatId = c.req.param("id");
+  if (!(await isMember(db, chatId, me))) throw new ApiError("not_found");
+  const res = await db.prepare("DELETE FROM reminders WHERE user_id = ? AND chat_id = ? AND message_id = ?")
+    .bind(me, chatId, c.req.param("messageId")).run();
+  if (res.meta.changes > 0) {
+    await timersChanged(c.env);
+    await notify(c.env, [me], { type: "reminders" });
+  }
+  return c.body(null, 204);
 });
 
 export const chatAvatarObject = (chatId: string, key: string) => `chat-avatars/${chatId}/${key}`;
@@ -365,15 +428,18 @@ chats.get("/:id/messages", async (c) => {
   if (after !== undefined && before !== undefined) throw new ApiError("invalid_request");
   const limitQ = seqParam(c.req.query("limit"));
   const limit = Math.min(Math.max(limitQ ?? 100, 1), 200);
-  type Row = { chat_id: string; seq: number; id: string; sender_user_id: string; sender_device_id: string; envelope: string; created_at: number };
-  const cols = "chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at";
+  type Row = MessageRow;
+  const cols = "chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at, disappear_secs";
+  // A disappearing message past its time is left out even before the hub deleted it.
+  const live = "(delete_at IS NULL OR delete_at > ?)";
+  const now = Date.now();
   let rows: Row[];
   if (before !== undefined) {
-    rows = (await db.prepare(`SELECT ${cols} FROM messages WHERE chat_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`)
-      .bind(chat.id, before, limit).all<Row>()).results.reverse();
+    rows = (await db.prepare(`SELECT ${cols} FROM messages WHERE chat_id = ? AND seq < ? AND ${live} ORDER BY seq DESC LIMIT ?`)
+      .bind(chat.id, before, now, limit).all<Row>()).results.reverse();
   } else {
-    rows = (await db.prepare(`SELECT ${cols} FROM messages WHERE chat_id = ? AND seq > ? ORDER BY seq LIMIT ?`)
-      .bind(chat.id, after ?? 0, limit).all<Row>()).results;
+    rows = (await db.prepare(`SELECT ${cols} FROM messages WHERE chat_id = ? AND seq > ? AND ${live} ORDER BY seq LIMIT ?`)
+      .bind(chat.id, after ?? 0, now, limit).all<Row>()).results;
   }
   return c.json({ messages: rows.map(messageOut) });
 });

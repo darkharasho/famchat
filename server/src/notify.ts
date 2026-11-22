@@ -10,3 +10,15 @@ export async function notify(env: Env, userIds: string[], event: Record<string, 
     console.error("hub notify failed", e);
   }
 }
+
+/**
+ * Tells the hub that due times may have moved (a reminder set or cleared, a member left): it re-arms
+ * its alarm. Never throws: the alarm still fires at its old time and re-arms then.
+ */
+export async function timersChanged(env: Env): Promise<void> {
+  try {
+    await hubStub(env).timersChanged();
+  } catch (e) {
+    console.error("hub timersChanged failed", e);
+  }
+}

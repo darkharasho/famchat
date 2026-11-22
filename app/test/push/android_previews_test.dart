@@ -95,6 +95,7 @@ void main() {
         ('messages', chatId, NotificationVisibility.private, Importance.high, Priority.high));
     expect(d.number, isNull);
     expect(previewNotificationDetails(chatId, body, badge: 4).number, 4);
+    expect(previewNotificationDetails(chatId, body, tag: 'reminder-x').tag, 'reminder-x', reason: "a reminder doesn't replace the chat's");
   });
 
   test('background pushes set the badge they carry; a badge update does only that', () async {

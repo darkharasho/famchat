@@ -1,6 +1,7 @@
 // Shared queries and checks for chats, members and wrapped chat keys.
 import { b64urlDecode } from "./encoding";
 import { ApiError } from "./errors";
+import { allReadAfterLeaveStmt } from "./timing";
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -34,15 +35,32 @@ export interface ChatOut {
   archivedAt: number | null;
   /** The caller marked the chat as unread. */
   markedUnread: boolean;
+  /**
+   * When the caller's read position last moved (Unix ms), or null. Their copies of disappearing
+   * messages up to it were read by then at the latest (docs/protocol.md "Disappearing messages").
+   */
+  lastReadAt: number | null;
   /** A group's photo (GET /chats/:id/avatar?v=<avatarKey>), or null. */
   avatarKey: string | null;
+  /** The disappearing-message timer in seconds, or null (off). */
+  disappearSecs: number | null;
+  /** The last change of the timer: who, when, and the chat's lastSeq then (null if never changed). */
+  disappearChangedBy: string | null;
+  disappearChangedAt: number | null;
+  disappearChangedSeq: number | null;
   members: MemberOut[];
 }
 
 /** The caller's own state for a chat (mute, pin, archive, marked unread). */
-type Mine = { muted_until: number | null; pinned_at: number | null; archived_at: number | null; marked_unread: number };
+type Mine = {
+  muted_until: number | null;
+  pinned_at: number | null;
+  archived_at: number | null;
+  marked_unread: number;
+  last_read_at: number | null;
+};
 
-const NOT_MINE: Mine = { muted_until: null, pinned_at: null, archived_at: null, marked_unread: 0 };
+const NOT_MINE: Mine = { muted_until: null, pinned_at: null, archived_at: null, marked_unread: 0, last_read_at: null };
 
 type ChatRow = {
   id: string;
@@ -56,9 +74,14 @@ type ChatRow = {
   created_at: number;
   family_id: number | null;
   avatar_key: string | null;
+  disappear_secs: number | null;
+  disappear_changed_by: string | null;
+  disappear_changed_at: number | null;
+  disappear_changed_seq: number | null;
 };
 
 const CHAT_SELECT = `SELECT c.id, c.kind, c.title, c.created_by, c.current_epoch, c.last_seq, c.last_message_at, c.created_at, c.family_id, c.avatar_key,
+  c.disappear_secs, c.disappear_changed_by, c.disappear_changed_at, c.disappear_changed_seq,
   EXISTS (SELECT 1 FROM chat_epochs e WHERE e.chat_id = c.id AND e.epoch = c.current_epoch) AS epoch_ready
   FROM chats c`;
 
@@ -78,7 +101,12 @@ function toOut(r: ChatRow, members: MemberOut[], mine: Mine): ChatOut {
     pinnedAt: mine.pinned_at,
     archivedAt: mine.archived_at,
     markedUnread: mine.marked_unread === 1,
+    lastReadAt: mine.last_read_at,
     avatarKey: r.avatar_key,
+    disappearSecs: r.disappear_secs,
+    disappearChangedBy: r.disappear_changed_by,
+    disappearChangedAt: r.disappear_changed_at,
+    disappearChangedSeq: r.disappear_changed_seq,
     members,
   };
 }
@@ -105,7 +133,7 @@ export async function chatsOf(db: D1Database, userId: string): Promise<ChatOut[]
   return (chats.results as ChatRow[]).map((r) => toOut(r, byChat.get(r.id) ?? [], mine.get(r.id) ?? NOT_MINE));
 }
 
-const MINE_COLS = "muted_until, pinned_at, archived_at, marked_unread";
+const MINE_COLS = "muted_until, pinned_at, archived_at, marked_unread, last_read_at";
 
 type MemberRow = Mine & { chat_id: string; user_id: string; joined_seq: number; last_read_seq: number };
 
@@ -153,6 +181,9 @@ export function leaveGroupStmts(
   return [
     db.prepare(`DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?${and}`).bind(chatId, userId, ...b),
     db.prepare(`DELETE FROM starred_messages WHERE chat_id = ? AND user_id = ?${and}`).bind(chatId, userId, ...b),
+    db.prepare(`DELETE FROM reminders WHERE chat_id = ? AND user_id = ?${and}`).bind(chatId, userId, ...b),
+    // They no longer hold back disappearing messages they hadn't read (the hub re-arms its alarm).
+    allReadAfterLeaveStmt(db, chatId, now, when),
     db.prepare(`UPDATE chats SET current_epoch = current_epoch + 1 WHERE id = ?${and}`).bind(chatId, ...b),
     db.prepare(`INSERT OR REPLACE INTO chat_leavers (chat_id, user_id, left_at) SELECT ?, ?, ? WHERE ${when?.sql ?? "1"}`)
       .bind(chatId, userId, now, ...b),

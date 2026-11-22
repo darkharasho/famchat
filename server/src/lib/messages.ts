@@ -6,6 +6,8 @@ export type MessageRow = {
   sender_device_id: string;
   envelope: string;
   created_at: number;
+  /** The disappearing timer it was stored with (seconds), or null. */
+  disappear_secs?: number | null;
 };
 
 export function messageOut(r: MessageRow) {
@@ -17,5 +19,6 @@ export function messageOut(r: MessageRow) {
     senderDeviceId: r.sender_device_id,
     envelope: JSON.parse(r.envelope) as unknown,
     createdAt: r.created_at,
+    ...(r.disappear_secs ? { disappearSecs: r.disappear_secs } : {}),
   };
 }

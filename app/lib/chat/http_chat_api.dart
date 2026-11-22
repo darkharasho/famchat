@@ -122,6 +122,59 @@ class HttpChatApi implements ChatApi {
       ChatDto.fromJson((await _call('PATCH', '/chats/${_seg(chatId)}', {'title': title}))!['chat'] as Map<String, Object?>);
 
   @override
+  Future<ChatDto> setDisappearing(String chatId, int? secs) async => ChatDto.fromJson(
+      (await _call('PATCH', '/chats/${_seg(chatId)}', {'disappearSecs': secs}))!['chat'] as Map<String, Object?>);
+
+  @override
+  Future<void> setReminder(String chatId, String messageId, int at) =>
+      _call('PUT', '/chats/${_seg(chatId)}/messages/${_seg(messageId)}/reminder', {'at': at});
+
+  @override
+  Future<void> clearReminder(String chatId, String messageId) =>
+      _call('DELETE', '/chats/${_seg(chatId)}/messages/${_seg(messageId)}/reminder');
+
+  @override
+  Future<List<ReminderDto>> reminders() async =>
+      [for (final r in _items(await _get('/me/reminders'), 'reminders')) ReminderDto.fromJson(r)];
+
+  @override
+  Future<ScheduledDto> putScheduled(
+    String id, {
+    required String chatId,
+    required Map<String, Object?> envelope,
+    required int deliverAt,
+    bool silent = false,
+    List<String> mentions = const [],
+  }) async {
+    final j = (await _call('PUT', '/me/scheduled/${_seg(id)}', {
+      'chatId': chatId,
+      'envelope': envelope,
+      'deliverAt': deliverAt,
+      if (silent) 'silent': true,
+      if (mentions.isNotEmpty) 'mentions': mentions,
+    }))!;
+    return ScheduledDto.fromJson(j['scheduled'] as Map<String, Object?>);
+  }
+
+  @override
+  Future<List<ScheduledDto>> scheduled() async =>
+      [for (final s in _items(await _get('/me/scheduled'), 'scheduled')) ScheduledDto.fromJson(s)];
+
+  @override
+  Future<void> deleteScheduled(String id) => _call('DELETE', '/me/scheduled/${_seg(id)}');
+
+  @override
+  Future<void> sendScheduled(String id) => _call('POST', '/me/scheduled/${_seg(id)}/send');
+
+  @override
+  Future<({List<GoneDto> gone, int cursor})> gone({required int after, int limit = 500}) async {
+    final j = await _get('/me/gone', {'after': '$after', 'limit': '$limit'});
+    final cursor = j['cursor'];
+    if (cursor is! int) throw const FormatException('bad cursor');
+    return (gone: [for (final g in _items(j, 'gone')) GoneDto.fromJson(g)], cursor: cursor);
+  }
+
+  @override
   Future<String> setChatAvatar(String chatId, Uint8List jpeg) async {
     final j = await _api.authedUpload('/chats/${_seg(chatId)}/avatar', bytes: jpeg, method: 'PUT', contentType: 'image/jpeg');
     final key = j?['avatarKey'];

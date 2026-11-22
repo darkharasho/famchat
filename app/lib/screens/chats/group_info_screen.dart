@@ -17,6 +17,7 @@ import '../../settings/time_format.dart' show clockTime, lastSeenLabel;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
+import 'disappearing_sheet.dart';
 
 /// "Until I turn it back on": the server's latest accepted mute time (year 9999).
 const muteForever = 253402300799000;
@@ -312,6 +313,14 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                 subtitle: Text(muteLabel(chat.mutedUntil, DateTime.now(), h24: MediaQuery.alwaysUse24HourFormatOf(context))),
                 enabled: !_busy && sync != null,
                 onTap: () => _mute(chat),
+              ),
+              ListTile(
+                key: const Key('disappearing-messages'),
+                leading: TileIcon(chat.disappearSecs == null ? Icons.timer_off_outlined : Icons.timer_outlined),
+                title: const Text('Disappearing messages'),
+                subtitle: Text(disappearLabel(chat.disappearSecs)),
+                enabled: !_busy && sync != null,
+                onTap: () => _run(() => changeDisappearing(context, ref, chat)),
               ),
             ]),
             SettingsGroup(title: membersLabel(members.length), children: [

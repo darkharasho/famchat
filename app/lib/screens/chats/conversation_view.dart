@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../chat/chat_sync.dart' show ReminderAfterExpiry;
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
@@ -61,6 +62,9 @@ import 'album_grid.dart';
 import 'media_pager.dart';
 import 'pin_bar.dart';
 import 'file_bubble.dart' show saveFileMessage;
+import 'disappearing_sheet.dart';
+import 'scheduled_sheet.dart';
+import 'time_picker_sheet.dart';
 import 'poll_bubble.dart';
 import 'poll_sheet.dart';
 import 'staged_tray.dart';
@@ -129,6 +133,72 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
+
+  /// "Schedule message" picked with nothing to send yet: the next thing sent (text, photos, voice,
+  /// a file, a poll, a GIF) is scheduled for this time instead.
+  DateTime? _scheduleAt;
+
+  /// The schedule time for a send now (null: send at once), clearing the schedule mode. Says so
+  /// and returns false when that time has passed meanwhile.
+  bool _takeSchedule(void Function(DateTime? at) send) {
+    final at = _scheduleAt;
+    if (at != null) {
+      final sync = ref.read(chatSyncProvider);
+      setState(() => _scheduleAt = null);
+      if (sync != null && !sync.canScheduleAt(at)) {
+        _snack('That time is too close now. Pick another.');
+        return false;
+      }
+    }
+    send(at);
+    return true;
+  }
+
+  /// "Scheduled for Tomorrow at 9:00 AM".
+  void _scheduledSnack(DateTime at) {
+    if (mounted) _snack('Scheduled for ${whenLabel(at, h24: MediaQuery.alwaysUse24HourFormatOf(context))}');
+  }
+
+  /// Long-press (touch) or right-click (desktop, web) on Send or the mic: "Schedule message".
+  Future<void> _scheduleMenu(Offset? global) async {
+    if (_editing != null) return;
+    final bool picked;
+    if (global != null) {
+      final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+      picked = await showMenu<bool>(
+            context: context,
+            position: RelativeRect.fromRect(global & Size.zero, Offset.zero & overlay.size),
+            items: const [
+              PopupMenuItem(
+                key: Key('schedule-message'),
+                value: true,
+                child: ListTile(leading: Icon(Icons.schedule_send_outlined), title: Text('Schedule message')),
+              ),
+            ],
+          ) ??
+          false;
+    } else {
+      picked = await showModalBottomSheet<bool>(
+            context: context,
+            builder: (context) => SafeArea(
+              child: ListTile(
+                key: const Key('schedule-message'),
+                leading: const Icon(Icons.schedule_send_outlined),
+                title: const Text('Schedule message'),
+                onTap: () => Navigator.pop(context, true),
+              ),
+            ),
+          ) ??
+          false;
+    }
+    if (!picked || !mounted) return;
+    final at = await pickTime(context, title: 'Schedule message');
+    if (at == null || !mounted) return;
+    setState(() => _scheduleAt = at);
+    // Something to send already: it goes (scheduled) now. Otherwise the next send is.
+    final hasContent = _text.text.trim().isNotEmpty || ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty;
+    if (hasContent) await _send();
+  }
 
   /// The link being previewed, what the server found for it (null while loading or nothing), and
   /// a link whose preview was removed (it stays off while that link is in the text).
@@ -679,6 +749,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       return;
     }
     try {
+      final at = _scheduleAt;
+      if (at != null) {
+        if (mounted) setState(() => _scheduleAt = null);
+        if (!media.sync.canScheduleAt(at)) {
+          _snack('That time is too close now. Pick another.');
+          return;
+        }
+        await media.sendVoice(widget.chatId, clip, at: at);
+        _scheduledSnack(at);
+        return;
+      }
       await media.sendVoice(widget.chatId, clip);
     } on ArgumentError {
       _snack("That voice message can't be sent.");
@@ -698,12 +779,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final sync = ref.read(chatSyncProvider);
     final text = replaceTrailingEmoticon(_text.text);
     final editing = _editing, replyTo = _replyTo;
-    if (editing == null && ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty) {
+    final hasStaged = ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty;
+    // Scheduled (see [_scheduleAt]) unless editing; nothing to send keeps the schedule waiting.
+    DateTime? at;
+    if (editing == null && (hasStaged || text.trim().isNotEmpty) && _scheduleAt != null) {
+      if (!_takeSchedule((t) => at = t)) return;
+    }
+    if (editing == null && hasStaged) {
       if (text.trim().runes.length > maxTextLength) {
         _snack('That message is too long.');
         return;
       }
-      await _sendStaged(text, replyTo);
+      await _sendStaged(text, replyTo, at: at);
+      if (at != null) _scheduledSnack(at!);
       if (!_pickerOpen && mounted) _focus.requestFocus();
       return;
     }
@@ -730,13 +818,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         final link = _firstLink(text);
         if (preview != null && media != null && link == _previewUrl) {
           await media.sendTextWithPreview(widget.chatId, text, preview,
-              replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+              replyTo: replyTo?.id, mentions: mentionsIn(text, _people), at: at);
         } else {
           // Its preview may still be on the way (the wait above is short): attach it once it comes.
-          final late = link != null && link == _previewUrl && link != _dismissedPreviewUrl ? _previewFetch : null;
-          final id = await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+          // (Not to a scheduled one: the server holds that one as it is.)
+          final late = at == null && link != null && link == _previewUrl && link != _dismissedPreviewUrl ? _previewFetch : null;
+          final id = await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people), at: at);
           if (late != null && media != null) unawaited(media.attachLatePreview(widget.chatId, id, late));
         }
+        if (at != null) _scheduledSnack(at!);
         _previewTimer?.cancel();
         if (mounted) setState(() => _previewUrl = _preview = _dismissedPreviewUrl = null);
       }
@@ -851,6 +941,62 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  /// "Remind me" on [m] (a time, then set), or with a reminder already at [current]: change or
+  /// clear it.
+  Future<void> _remind(MessageRow m, int? current) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final h24 = MediaQuery.alwaysUse24HourFormatOf(context);
+    if (current != null) {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Reminder'),
+              subtitle: Text(whenLabel(DateTime.fromMillisecondsSinceEpoch(current), h24: h24)),
+            ),
+            ListTile(
+              key: const Key('reminder-change'),
+              leading: const Icon(Icons.schedule_rounded),
+              title: const Text('Change time'),
+              onTap: () => Navigator.pop(context, 'change'),
+            ),
+            ListTile(
+              key: const Key('reminder-clear'),
+              leading: const Icon(Icons.notifications_off_outlined),
+              title: const Text('Clear reminder'),
+              onTap: () => Navigator.pop(context, 'clear'),
+            ),
+          ]),
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == 'clear') {
+        try {
+          await sync.clearReminder(widget.chatId, m.id);
+          _snack('Reminder cleared');
+        } catch (_) {
+          _snack("Couldn't clear the reminder. Check your connection.");
+        }
+        return;
+      }
+    }
+    final at = await pickTime(context, title: current == null ? 'Remind me' : 'Change reminder');
+    if (at == null || !mounted) return;
+    try {
+      await sync.setReminder(widget.chatId, m.id, at);
+      _snack('Reminder set for ${whenLabel(at, h24: h24)}');
+    } on ArgumentError {
+      _snack('That time is too close now. Pick another.');
+    } on ReminderAfterExpiry catch (e) {
+      _snack('This message disappears before then (${whenLabel(e.expiresAt, h24: h24)}). Pick an earlier time.');
+    } catch (_) {
+      _snack("Couldn't set the reminder. Check your connection.");
+    }
+  }
+
   /// Album items other than the last have no bubble of their own: jumps go to their album's.
   Map<String, String> _albumOwner = const {};
 
@@ -885,7 +1031,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final client = ref.read(gifClientProvider).value;
     final sync = ref.read(chatSyncProvider);
     if (sync == null) return;
-    await sync.enqueueMessage(widget.chatId, picked.body);
+    DateTime? at;
+    if (!_takeSchedule((t) => at = t)) return;
+    if (at case final at?) {
+      await sync.scheduleMessage(widget.chatId, picked.body, at);
+      _scheduledSnack(at);
+    } else {
+      await sync.enqueueMessage(widget.chatId, picked.body);
+    }
     if (client != null) unawaited(client.share(picked.slug));
   }
 
@@ -943,8 +1096,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Opens the new-poll sheet; the poll replies to the message being replied to, if any.
   Future<void> _startPoll() async {
     final replyTo = _editing == null ? _replyTo : null;
+    final at = _scheduleAt;
     try {
-      final id = await showNewPollSheet(context, widget.chatId, replyTo: replyTo?.id);
+      final id = await showNewPollSheet(context, widget.chatId, replyTo: replyTo?.id, at: at);
+      if (id != null && at != null && mounted) {
+        setState(() => _scheduleAt = null);
+        _scheduledSnack(at);
+      }
       if (id != null && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
     } catch (_) {
       _snack("Couldn't send the poll.");
@@ -957,13 +1115,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final media = ref.read(mediaServiceProvider);
     if (files.isEmpty || media == null || !mounted) return;
     final replyTo = _editing == null ? _replyTo : null;
+    DateTime? at;
+    if (!_takeSchedule((t) => at = t)) return;
     setState(() => _preparing++);
     final FileSendReport report;
     try {
-      report = await sendFiles(media, widget.chatId, files, replyTo: replyTo?.id);
+      report = await sendFiles(media, widget.chatId, files, replyTo: replyTo?.id, at: at);
     } finally {
       if (mounted) setState(() => _preparing--);
     }
+    if (at != null && report.sent > 0) _scheduledSnack(at!);
     if (report.sent > 0 && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
     if (report.problem case final p?) _snack(p);
   }
@@ -1062,7 +1223,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Sends the staged photos and videos, each its own message, with [caption] (and the reply and
   /// its @mentions) on the last; says which couldn't be sent.
-  Future<void> _sendStaged(String caption, MessageRow? replyTo) async {
+  Future<void> _sendStaged(String caption, MessageRow? replyTo, {DateTime? at}) async {
     final media = ref.read(mediaServiceProvider);
     final staged = ref.read(stagedMediaProvider(widget.chatId).notifier);
     final picked = ref.read(stagedMediaProvider(widget.chatId));
@@ -1079,6 +1240,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       caption: caption,
       replyTo: replyTo?.id,
       mentions: mentionsIn(caption, _people),
+      at: at,
       onStart: () {
         if (mounted) setState(() => _preparing++);
       },
@@ -1204,21 +1366,32 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           onPressed: _send,
         )
       else if (_empty && canRecord && ref.watch(stagedMediaProvider(widget.chatId)).isEmpty)
-        IconButton.filled(
+        _scheduleGestures(IconButton.filled(
           tooltip: 'Record voice message',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
           icon: const Icon(Icons.mic_rounded),
           onPressed: _startRecording,
-        )
+        ))
       else
-        IconButton.filled(
-          tooltip: 'Send',
+        _scheduleGestures(IconButton.filled(
+          tooltip: _scheduleAt == null ? 'Send' : 'Schedule',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-          icon: const Icon(Icons.arrow_upward_rounded),
+          icon: Icon(_scheduleAt == null ? Icons.arrow_upward_rounded : Icons.schedule_send_rounded),
           onPressed: _send,
-        ),
+        )),
     ]);
   }
+
+  /// Send (or the mic) with "Schedule message" on a long-press or right-click. The button's own
+  /// tooltip then shows on hover only: on touch its long-press would win over this one.
+  Widget _scheduleGestures(Widget button) => GestureDetector(
+        onLongPress: () => unawaited(_scheduleMenu(null)),
+        onSecondaryTapUp: (d) => unawaited(_scheduleMenu(d.globalPosition)),
+        child: TooltipTheme(
+          data: TooltipTheme.of(context).copyWith(triggerMode: TooltipTriggerMode.manual),
+          child: button,
+        ),
+      );
 
   /// Ids on screen when the conversation opened: those don't animate in, later ones do.
   Set<String>? _initialIds;
@@ -1303,6 +1476,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final pinNotes = {for (final r in changes.pinEvents) r.id: r};
     final pinnedIds = changes.pinned.toSet();
     final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
+    final reminders = ref.watch(remindersProvider(chatId)).value ?? const <String, int>{};
     final polls = ref.watch(pollsProvider(chatId));
     Widget? pollIn(MessageRow m) {
       final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
@@ -1333,6 +1507,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         .toList();
     final byId = {for (final m in visible) m.id: m};
     final byIdAll = {for (final m in messages) m.id: m};
+    // A message being replied to or edited may disappear meanwhile (its timer, or the server).
+    if (loaded.hasValue && [_replyTo, _editing].any((m) => m != null && !byIdAll.containsKey(m.id))) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_editing != null && !byIdAll.containsKey(_editing!.id)) _endEdit();
+        if (_replyTo != null && !byIdAll.containsKey(_replyTo!.id)) setState(() => _replyTo = null);
+      });
+    }
     QuotedMessage? quoteFor(MessageRow m) {
       final target = replyTargetOf(m);
       if (target == null) return null;
@@ -1354,8 +1536,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
     _findUnread(visible, me);
-    final timeline = buildTimeline(visible, unreadFrom: _unreadFrom, albumOf: (m) => changes.isDeleted(m.id) ? null : albumIdOf(m))
-        ;
+    final noteText = disappearNoteText(chat, nameOf);
+    final timeline = buildTimeline(
+      visible,
+      unreadFrom: _unreadFrom,
+      albumOf: (m) => changes.isDeleted(m.id) ? null : albumIdOf(m),
+      note: noteText == null ? null : NoteEntry(chat.disappearChangedSeq!, noteText),
+    );
     _albumOwner = {
       for (final e in timeline.whereType<AlbumEntry>())
         for (final m in e.items) m.id: e.items.last.id,
@@ -1412,6 +1599,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         }
                       },
                 starred: starred.contains(m.id),
+                reminderAt: reminders[m.id],
+                onRemind: m.seq == null || changes.isDeleted(m.id) ? null : () => unawaited(_remind(m, reminders[m.id])),
                 onStar: m.seq == null || changes.isDeleted(m.id)
                     ? null
                     : () => sync?.star(chatId, m.id, starred: !starred.contains(m.id)),
@@ -1437,6 +1626,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
           UnreadEntry() => KeyedSubtree(key: const ValueKey('unread-line'), child: UnreadDivider(key: _unreadKey)),
+          NoteEntry(:final text) =>
+            DisappearNoteLine(key: const ValueKey('disappear-note'), text: text, on: chat.disappearSecs != null),
           MessageEntry(message: final m) when gameEvents.containsKey(m.id) => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1514,6 +1705,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       semanticLabel: 'Muted',
                     ),
                   ],
+                  if (chat.disappearSecs != null) ...[
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: 'Disappearing messages: ${disappearLabel(chat.disappearSecs)}',
+                      child: Icon(
+                        Icons.timer_outlined,
+                        key: const Key('disappearing-icon'),
+                        size: 16,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        semanticLabel: 'Disappearing messages: ${disappearLabel(chat.disappearSecs)}',
+                      ),
+                    ),
+                  ],
                 ]),
                 if (subtitle != null)
                   Text(
@@ -1535,6 +1739,31 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               tooltip: 'Chat info',
               icon: const Icon(Icons.info_outline_rounded),
               onPressed: () => context.go('/chats/$chatId/info'),
+            ),
+            PopupMenuButton<String>(
+              key: const Key('chat-menu'),
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (v) => switch (v) {
+                'disappearing' => unawaited(changeDisappearing(context, ref, chat)),
+                'media' => context.go('/chats/$chatId/media'),
+                _ => null,
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  key: const Key('chat-menu-disappearing'),
+                  value: 'disappearing',
+                  child: ListTile(
+                    leading: Icon(chat.disappearSecs == null ? Icons.timer_off_outlined : Icons.timer_outlined),
+                    title: const Text('Disappearing messages'),
+                    subtitle: Text(disappearLabel(chat.disappearSecs)),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'media',
+                  child: ListTile(leading: Icon(Icons.photo_library_outlined), title: Text('Media, links and starred')),
+                ),
+              ],
             ),
             const SizedBox(width: Space.xs),
           ],
@@ -1582,7 +1811,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: _touch ? _dismissInput : null,
-                child: visible.isEmpty
+                child: entries.isEmpty
                   ? EmptyState(
                       art: PersonAvatar(
                         label: title,
@@ -1611,6 +1840,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               AlbumEntry(:final items) => items.last.id == id,
                               DayEntry(:final day) => 'day-${day.millisecondsSinceEpoch}' == id,
                               UnreadEntry() => id == 'unread-line',
+                              NoteEntry() => id == 'disappear-note',
                             });
                         return i < 0 ? null : i;
                       },
@@ -1657,6 +1887,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ),
               ),
             if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
+            ScheduledBar(chatId: chatId, mentionsOf: (text) => mentionsIn(text, _people)),
             Material(
               color: theme.colorScheme.surface,
               shape: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
@@ -1690,6 +1921,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
                       child: ComposerPreview(preview: _preview!, onRemove: _removePreview),
+                    ),
+                  if (_scheduleAt case final at? when _editing == null)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
+                      child: _ComposeBanner(
+                        key: const Key('schedule-banner'),
+                        icon: Icons.schedule_send_outlined,
+                        title: 'Scheduling for ${whenLabel(at, h24: MediaQuery.alwaysUse24HourFormatOf(context))}',
+                        snippet: _recording.active ? 'This voice message waits until then.' : 'What you send next waits until then.',
+                        cancelTooltip: 'Cancel scheduling',
+                        onCancel: () => setState(() => _scheduleAt = null),
+                      ),
                     ),
                   if ((_replyTo != null || _editing != null) && !_recording.active)
                     Padding(
@@ -1766,6 +2009,7 @@ class _PasteMediaAction extends ContextAction<PasteTextIntent> {
 
 class _ComposeBanner extends StatelessWidget {
   const _ComposeBanner({
+    super.key,
     required this.icon,
     required this.title,
     required this.snippet,

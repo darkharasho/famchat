@@ -208,6 +208,48 @@ class $LocalChatsTable extends LocalChats
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _disappearSecsMeta = const VerificationMeta(
+    'disappearSecs',
+  );
+  @override
+  late final GeneratedColumn<int> disappearSecs = GeneratedColumn<int>(
+    'disappear_secs',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _disappearChangedByMeta =
+      const VerificationMeta('disappearChangedBy');
+  @override
+  late final GeneratedColumn<String> disappearChangedBy =
+      GeneratedColumn<String>(
+        'disappear_changed_by',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _disappearChangedAtMeta =
+      const VerificationMeta('disappearChangedAt');
+  @override
+  late final GeneratedColumn<int> disappearChangedAt = GeneratedColumn<int>(
+    'disappear_changed_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _disappearChangedSeqMeta =
+      const VerificationMeta('disappearChangedSeq');
+  @override
+  late final GeneratedColumn<int> disappearChangedSeq = GeneratedColumn<int>(
+    'disappear_changed_seq',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -228,6 +270,10 @@ class $LocalChatsTable extends LocalChats
     archivedAt,
     markedUnread,
     avatarKey,
+    disappearSecs,
+    disappearChangedBy,
+    disappearChangedAt,
+    disappearChangedSeq,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -372,6 +418,42 @@ class $LocalChatsTable extends LocalChats
         avatarKey.isAcceptableOrUnknown(data['avatar_key']!, _avatarKeyMeta),
       );
     }
+    if (data.containsKey('disappear_secs')) {
+      context.handle(
+        _disappearSecsMeta,
+        disappearSecs.isAcceptableOrUnknown(
+          data['disappear_secs']!,
+          _disappearSecsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_by')) {
+      context.handle(
+        _disappearChangedByMeta,
+        disappearChangedBy.isAcceptableOrUnknown(
+          data['disappear_changed_by']!,
+          _disappearChangedByMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_at')) {
+      context.handle(
+        _disappearChangedAtMeta,
+        disappearChangedAt.isAcceptableOrUnknown(
+          data['disappear_changed_at']!,
+          _disappearChangedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_seq')) {
+      context.handle(
+        _disappearChangedSeqMeta,
+        disappearChangedSeq.isAcceptableOrUnknown(
+          data['disappear_changed_seq']!,
+          _disappearChangedSeqMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -453,6 +535,22 @@ class $LocalChatsTable extends LocalChats
         DriftSqlType.string,
         data['${effectivePrefix}avatar_key'],
       ),
+      disappearSecs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_secs'],
+      ),
+      disappearChangedBy: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}disappear_changed_by'],
+      ),
+      disappearChangedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_changed_at'],
+      ),
+      disappearChangedSeq: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_changed_seq'],
+      ),
     );
   }
 
@@ -497,6 +595,14 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
 
   /// A group's photo key (see [ChatDto.avatarKey]), or null.
   final String? avatarKey;
+
+  /// The disappearing-message timer in seconds (see [ChatDto.disappearSecs]), or null when off.
+  final int? disappearSecs;
+
+  /// The latest timer change: who, when (Unix ms) and after which seq its line goes; null before any.
+  final String? disappearChangedBy;
+  final int? disappearChangedAt;
+  final int? disappearChangedSeq;
   const ChatRow({
     required this.id,
     required this.kind,
@@ -516,6 +622,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     this.archivedAt,
     required this.markedUnread,
     this.avatarKey,
+    this.disappearSecs,
+    this.disappearChangedBy,
+    this.disappearChangedAt,
+    this.disappearChangedSeq,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -553,6 +663,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     map['marked_unread'] = Variable<bool>(markedUnread);
     if (!nullToAbsent || avatarKey != null) {
       map['avatar_key'] = Variable<String>(avatarKey);
+    }
+    if (!nullToAbsent || disappearSecs != null) {
+      map['disappear_secs'] = Variable<int>(disappearSecs);
+    }
+    if (!nullToAbsent || disappearChangedBy != null) {
+      map['disappear_changed_by'] = Variable<String>(disappearChangedBy);
+    }
+    if (!nullToAbsent || disappearChangedAt != null) {
+      map['disappear_changed_at'] = Variable<int>(disappearChangedAt);
+    }
+    if (!nullToAbsent || disappearChangedSeq != null) {
+      map['disappear_changed_seq'] = Variable<int>(disappearChangedSeq);
     }
     return map;
   }
@@ -593,6 +715,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       avatarKey: avatarKey == null && nullToAbsent
           ? const Value.absent()
           : Value(avatarKey),
+      disappearSecs: disappearSecs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearSecs),
+      disappearChangedBy: disappearChangedBy == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedBy),
+      disappearChangedAt: disappearChangedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedAt),
+      disappearChangedSeq: disappearChangedSeq == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedSeq),
     );
   }
 
@@ -620,6 +754,14 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       archivedAt: serializer.fromJson<int?>(json['archivedAt']),
       markedUnread: serializer.fromJson<bool>(json['markedUnread']),
       avatarKey: serializer.fromJson<String?>(json['avatarKey']),
+      disappearSecs: serializer.fromJson<int?>(json['disappearSecs']),
+      disappearChangedBy: serializer.fromJson<String?>(
+        json['disappearChangedBy'],
+      ),
+      disappearChangedAt: serializer.fromJson<int?>(json['disappearChangedAt']),
+      disappearChangedSeq: serializer.fromJson<int?>(
+        json['disappearChangedSeq'],
+      ),
     );
   }
   @override
@@ -644,6 +786,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       'archivedAt': serializer.toJson<int?>(archivedAt),
       'markedUnread': serializer.toJson<bool>(markedUnread),
       'avatarKey': serializer.toJson<String?>(avatarKey),
+      'disappearSecs': serializer.toJson<int?>(disappearSecs),
+      'disappearChangedBy': serializer.toJson<String?>(disappearChangedBy),
+      'disappearChangedAt': serializer.toJson<int?>(disappearChangedAt),
+      'disappearChangedSeq': serializer.toJson<int?>(disappearChangedSeq),
     };
   }
 
@@ -666,6 +812,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     Value<int?> archivedAt = const Value.absent(),
     bool? markedUnread,
     Value<String?> avatarKey = const Value.absent(),
+    Value<int?> disappearSecs = const Value.absent(),
+    Value<String?> disappearChangedBy = const Value.absent(),
+    Value<int?> disappearChangedAt = const Value.absent(),
+    Value<int?> disappearChangedSeq = const Value.absent(),
   }) => ChatRow(
     id: id ?? this.id,
     kind: kind ?? this.kind,
@@ -687,6 +837,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     archivedAt: archivedAt.present ? archivedAt.value : this.archivedAt,
     markedUnread: markedUnread ?? this.markedUnread,
     avatarKey: avatarKey.present ? avatarKey.value : this.avatarKey,
+    disappearSecs: disappearSecs.present
+        ? disappearSecs.value
+        : this.disappearSecs,
+    disappearChangedBy: disappearChangedBy.present
+        ? disappearChangedBy.value
+        : this.disappearChangedBy,
+    disappearChangedAt: disappearChangedAt.present
+        ? disappearChangedAt.value
+        : this.disappearChangedAt,
+    disappearChangedSeq: disappearChangedSeq.present
+        ? disappearChangedSeq.value
+        : this.disappearChangedSeq,
   );
   ChatRow copyWithCompanion(LocalChatsCompanion data) {
     return ChatRow(
@@ -722,6 +884,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ? data.markedUnread.value
           : this.markedUnread,
       avatarKey: data.avatarKey.present ? data.avatarKey.value : this.avatarKey,
+      disappearSecs: data.disappearSecs.present
+          ? data.disappearSecs.value
+          : this.disappearSecs,
+      disappearChangedBy: data.disappearChangedBy.present
+          ? data.disappearChangedBy.value
+          : this.disappearChangedBy,
+      disappearChangedAt: data.disappearChangedAt.present
+          ? data.disappearChangedAt.value
+          : this.disappearChangedAt,
+      disappearChangedSeq: data.disappearChangedSeq.present
+          ? data.disappearChangedSeq.value
+          : this.disappearChangedSeq,
     );
   }
 
@@ -745,13 +919,17 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ..write('pinnedAt: $pinnedAt, ')
           ..write('archivedAt: $archivedAt, ')
           ..write('markedUnread: $markedUnread, ')
-          ..write('avatarKey: $avatarKey')
+          ..write('avatarKey: $avatarKey, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('disappearChangedBy: $disappearChangedBy, ')
+          ..write('disappearChangedAt: $disappearChangedAt, ')
+          ..write('disappearChangedSeq: $disappearChangedSeq')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     kind,
     title,
@@ -770,7 +948,11 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     archivedAt,
     markedUnread,
     avatarKey,
-  );
+    disappearSecs,
+    disappearChangedBy,
+    disappearChangedAt,
+    disappearChangedSeq,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -792,7 +974,11 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           other.pinnedAt == this.pinnedAt &&
           other.archivedAt == this.archivedAt &&
           other.markedUnread == this.markedUnread &&
-          other.avatarKey == this.avatarKey);
+          other.avatarKey == this.avatarKey &&
+          other.disappearSecs == this.disappearSecs &&
+          other.disappearChangedBy == this.disappearChangedBy &&
+          other.disappearChangedAt == this.disappearChangedAt &&
+          other.disappearChangedSeq == this.disappearChangedSeq);
 }
 
 class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
@@ -814,6 +1000,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
   final Value<int?> archivedAt;
   final Value<bool> markedUnread;
   final Value<String?> avatarKey;
+  final Value<int?> disappearSecs;
+  final Value<String?> disappearChangedBy;
+  final Value<int?> disappearChangedAt;
+  final Value<int?> disappearChangedSeq;
   final Value<int> rowid;
   const LocalChatsCompanion({
     this.id = const Value.absent(),
@@ -834,6 +1024,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.archivedAt = const Value.absent(),
     this.markedUnread = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.disappearChangedBy = const Value.absent(),
+    this.disappearChangedAt = const Value.absent(),
+    this.disappearChangedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalChatsCompanion.insert({
@@ -855,6 +1049,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.archivedAt = const Value.absent(),
     this.markedUnread = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.disappearChangedBy = const Value.absent(),
+    this.disappearChangedAt = const Value.absent(),
+    this.disappearChangedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        kind = Value(kind),
@@ -882,6 +1080,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Expression<int>? archivedAt,
     Expression<bool>? markedUnread,
     Expression<String>? avatarKey,
+    Expression<int>? disappearSecs,
+    Expression<String>? disappearChangedBy,
+    Expression<int>? disappearChangedAt,
+    Expression<int>? disappearChangedSeq,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -903,6 +1105,13 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       if (archivedAt != null) 'archived_at': archivedAt,
       if (markedUnread != null) 'marked_unread': markedUnread,
       if (avatarKey != null) 'avatar_key': avatarKey,
+      if (disappearSecs != null) 'disappear_secs': disappearSecs,
+      if (disappearChangedBy != null)
+        'disappear_changed_by': disappearChangedBy,
+      if (disappearChangedAt != null)
+        'disappear_changed_at': disappearChangedAt,
+      if (disappearChangedSeq != null)
+        'disappear_changed_seq': disappearChangedSeq,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -926,6 +1135,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Value<int?>? archivedAt,
     Value<bool>? markedUnread,
     Value<String?>? avatarKey,
+    Value<int?>? disappearSecs,
+    Value<String?>? disappearChangedBy,
+    Value<int?>? disappearChangedAt,
+    Value<int?>? disappearChangedSeq,
     Value<int>? rowid,
   }) {
     return LocalChatsCompanion(
@@ -947,6 +1160,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       archivedAt: archivedAt ?? this.archivedAt,
       markedUnread: markedUnread ?? this.markedUnread,
       avatarKey: avatarKey ?? this.avatarKey,
+      disappearSecs: disappearSecs ?? this.disappearSecs,
+      disappearChangedBy: disappearChangedBy ?? this.disappearChangedBy,
+      disappearChangedAt: disappearChangedAt ?? this.disappearChangedAt,
+      disappearChangedSeq: disappearChangedSeq ?? this.disappearChangedSeq,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1008,6 +1225,18 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     if (avatarKey.present) {
       map['avatar_key'] = Variable<String>(avatarKey.value);
     }
+    if (disappearSecs.present) {
+      map['disappear_secs'] = Variable<int>(disappearSecs.value);
+    }
+    if (disappearChangedBy.present) {
+      map['disappear_changed_by'] = Variable<String>(disappearChangedBy.value);
+    }
+    if (disappearChangedAt.present) {
+      map['disappear_changed_at'] = Variable<int>(disappearChangedAt.value);
+    }
+    if (disappearChangedSeq.present) {
+      map['disappear_changed_seq'] = Variable<int>(disappearChangedSeq.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1035,6 +1264,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
           ..write('archivedAt: $archivedAt, ')
           ..write('markedUnread: $markedUnread, ')
           ..write('avatarKey: $avatarKey, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('disappearChangedBy: $disappearChangedBy, ')
+          ..write('disappearChangedAt: $disappearChangedAt, ')
+          ..write('disappearChangedSeq: $disappearChangedSeq, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1477,6 +1710,39 @@ class $LocalMessagesTable extends LocalMessages
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _disappearSecsMeta = const VerificationMeta(
+    'disappearSecs',
+  );
+  @override
+  late final GeneratedColumn<int> disappearSecs = GeneratedColumn<int>(
+    'disappear_secs',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _expiresAtMeta = const VerificationMeta(
+    'expiresAt',
+  );
+  @override
+  late final GeneratedColumn<int> expiresAt = GeneratedColumn<int>(
+    'expires_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _scheduledForMeta = const VerificationMeta(
+    'scheduledFor',
+  );
+  @override
+  late final GeneratedColumn<int> scheduledFor = GeneratedColumn<int>(
+    'scheduled_for',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1490,6 +1756,9 @@ class $LocalMessagesTable extends LocalMessages
     envelope,
     createdAt,
     state,
+    disappearSecs,
+    expiresAt,
+    scheduledFor,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1586,6 +1855,30 @@ class $LocalMessagesTable extends LocalMessages
     } else if (isInserting) {
       context.missing(_stateMeta);
     }
+    if (data.containsKey('disappear_secs')) {
+      context.handle(
+        _disappearSecsMeta,
+        disappearSecs.isAcceptableOrUnknown(
+          data['disappear_secs']!,
+          _disappearSecsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('expires_at')) {
+      context.handle(
+        _expiresAtMeta,
+        expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta),
+      );
+    }
+    if (data.containsKey('scheduled_for')) {
+      context.handle(
+        _scheduledForMeta,
+        scheduledFor.isAcceptableOrUnknown(
+          data['scheduled_for']!,
+          _scheduledForMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1639,6 +1932,18 @@ class $LocalMessagesTable extends LocalMessages
         DriftSqlType.string,
         data['${effectivePrefix}state'],
       )!,
+      disappearSecs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_secs'],
+      ),
+      expiresAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}expires_at'],
+      ),
+      scheduledFor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}scheduled_for'],
+      ),
     );
   }
 
@@ -1670,6 +1975,18 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
 
   /// pending | sent | failed
   final String state;
+
+  /// The disappearing timer the server stamped on it (seconds), or null for none.
+  final int? disappearSecs;
+
+  /// When this device deletes it (Unix ms; docs/protocol.md "Disappearing messages"): my own message
+  /// at sent + timer; someone else's at my read time + timer, or at the backstop (sent + timer +
+  /// 30 days) while I haven't read it. Null for messages without a timer.
+  final int? expiresAt;
+
+  /// My scheduled message that went out late (re-encrypted after the chat's key changed): the time
+  /// it was scheduled for, so it shows "sent late" to me. Null for every other message.
+  final int? scheduledFor;
   const MessageRow({
     required this.id,
     required this.chatId,
@@ -1682,6 +1999,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     this.envelope,
     required this.createdAt,
     required this.state,
+    this.disappearSecs,
+    this.expiresAt,
+    this.scheduledFor,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1705,6 +2025,15 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     }
     map['created_at'] = Variable<int>(createdAt);
     map['state'] = Variable<String>(state);
+    if (!nullToAbsent || disappearSecs != null) {
+      map['disappear_secs'] = Variable<int>(disappearSecs);
+    }
+    if (!nullToAbsent || expiresAt != null) {
+      map['expires_at'] = Variable<int>(expiresAt);
+    }
+    if (!nullToAbsent || scheduledFor != null) {
+      map['scheduled_for'] = Variable<int>(scheduledFor);
+    }
     return map;
   }
 
@@ -1725,6 +2054,15 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           : Value(envelope),
       createdAt: Value(createdAt),
       state: Value(state),
+      disappearSecs: disappearSecs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearSecs),
+      expiresAt: expiresAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(expiresAt),
+      scheduledFor: scheduledFor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(scheduledFor),
     );
   }
 
@@ -1745,6 +2083,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       envelope: serializer.fromJson<String?>(json['envelope']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       state: serializer.fromJson<String>(json['state']),
+      disappearSecs: serializer.fromJson<int?>(json['disappearSecs']),
+      expiresAt: serializer.fromJson<int?>(json['expiresAt']),
+      scheduledFor: serializer.fromJson<int?>(json['scheduledFor']),
     );
   }
   @override
@@ -1762,6 +2103,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       'envelope': serializer.toJson<String?>(envelope),
       'createdAt': serializer.toJson<int>(createdAt),
       'state': serializer.toJson<String>(state),
+      'disappearSecs': serializer.toJson<int?>(disappearSecs),
+      'expiresAt': serializer.toJson<int?>(expiresAt),
+      'scheduledFor': serializer.toJson<int?>(scheduledFor),
     };
   }
 
@@ -1777,6 +2121,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     Value<String?> envelope = const Value.absent(),
     int? createdAt,
     String? state,
+    Value<int?> disappearSecs = const Value.absent(),
+    Value<int?> expiresAt = const Value.absent(),
+    Value<int?> scheduledFor = const Value.absent(),
   }) => MessageRow(
     id: id ?? this.id,
     chatId: chatId ?? this.chatId,
@@ -1789,6 +2136,11 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     envelope: envelope.present ? envelope.value : this.envelope,
     createdAt: createdAt ?? this.createdAt,
     state: state ?? this.state,
+    disappearSecs: disappearSecs.present
+        ? disappearSecs.value
+        : this.disappearSecs,
+    expiresAt: expiresAt.present ? expiresAt.value : this.expiresAt,
+    scheduledFor: scheduledFor.present ? scheduledFor.value : this.scheduledFor,
   );
   MessageRow copyWithCompanion(LocalMessagesCompanion data) {
     return MessageRow(
@@ -1807,6 +2159,13 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       envelope: data.envelope.present ? data.envelope.value : this.envelope,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       state: data.state.present ? data.state.value : this.state,
+      disappearSecs: data.disappearSecs.present
+          ? data.disappearSecs.value
+          : this.disappearSecs,
+      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
+      scheduledFor: data.scheduledFor.present
+          ? data.scheduledFor.value
+          : this.scheduledFor,
     );
   }
 
@@ -1823,7 +2182,10 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           ..write('targetId: $targetId, ')
           ..write('envelope: $envelope, ')
           ..write('createdAt: $createdAt, ')
-          ..write('state: $state')
+          ..write('state: $state, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('scheduledFor: $scheduledFor')
           ..write(')'))
         .toString();
   }
@@ -1841,6 +2203,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     envelope,
     createdAt,
     state,
+    disappearSecs,
+    expiresAt,
+    scheduledFor,
   );
   @override
   bool operator ==(Object other) =>
@@ -1856,7 +2221,10 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           other.targetId == this.targetId &&
           other.envelope == this.envelope &&
           other.createdAt == this.createdAt &&
-          other.state == this.state);
+          other.state == this.state &&
+          other.disappearSecs == this.disappearSecs &&
+          other.expiresAt == this.expiresAt &&
+          other.scheduledFor == this.scheduledFor);
 }
 
 class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
@@ -1871,6 +2239,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
   final Value<String?> envelope;
   final Value<int> createdAt;
   final Value<String> state;
+  final Value<int?> disappearSecs;
+  final Value<int?> expiresAt;
+  final Value<int?> scheduledFor;
   final Value<int> rowid;
   const LocalMessagesCompanion({
     this.id = const Value.absent(),
@@ -1884,6 +2255,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     this.envelope = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.state = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.expiresAt = const Value.absent(),
+    this.scheduledFor = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalMessagesCompanion.insert({
@@ -1898,6 +2272,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     this.envelope = const Value.absent(),
     required int createdAt,
     required String state,
+    this.disappearSecs = const Value.absent(),
+    this.expiresAt = const Value.absent(),
+    this.scheduledFor = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        chatId = Value(chatId),
@@ -1918,6 +2295,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     Expression<String>? envelope,
     Expression<int>? createdAt,
     Expression<String>? state,
+    Expression<int>? disappearSecs,
+    Expression<int>? expiresAt,
+    Expression<int>? scheduledFor,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1932,6 +2312,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
       if (envelope != null) 'envelope': envelope,
       if (createdAt != null) 'created_at': createdAt,
       if (state != null) 'state': state,
+      if (disappearSecs != null) 'disappear_secs': disappearSecs,
+      if (expiresAt != null) 'expires_at': expiresAt,
+      if (scheduledFor != null) 'scheduled_for': scheduledFor,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1948,6 +2331,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     Value<String?>? envelope,
     Value<int>? createdAt,
     Value<String>? state,
+    Value<int?>? disappearSecs,
+    Value<int?>? expiresAt,
+    Value<int?>? scheduledFor,
     Value<int>? rowid,
   }) {
     return LocalMessagesCompanion(
@@ -1962,6 +2348,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
       envelope: envelope ?? this.envelope,
       createdAt: createdAt ?? this.createdAt,
       state: state ?? this.state,
+      disappearSecs: disappearSecs ?? this.disappearSecs,
+      expiresAt: expiresAt ?? this.expiresAt,
+      scheduledFor: scheduledFor ?? this.scheduledFor,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2002,6 +2391,15 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     if (state.present) {
       map['state'] = Variable<String>(state.value);
     }
+    if (disappearSecs.present) {
+      map['disappear_secs'] = Variable<int>(disappearSecs.value);
+    }
+    if (expiresAt.present) {
+      map['expires_at'] = Variable<int>(expiresAt.value);
+    }
+    if (scheduledFor.present) {
+      map['scheduled_for'] = Variable<int>(scheduledFor.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2022,6 +2420,9 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
           ..write('envelope: $envelope, ')
           ..write('createdAt: $createdAt, ')
           ..write('state: $state, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('scheduledFor: $scheduledFor, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5069,6 +5470,940 @@ class LocalStarsCompanion extends UpdateCompanion<StarRow> {
   }
 }
 
+class $LocalScheduledTable extends LocalScheduled
+    with TableInfo<$LocalScheduledTable, ScheduledRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalScheduledTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
+  @override
+  late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
+    'chat_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'body',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _envelopeMeta = const VerificationMeta(
+    'envelope',
+  );
+  @override
+  late final GeneratedColumn<String> envelope = GeneratedColumn<String>(
+    'envelope',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _deliverAtMeta = const VerificationMeta(
+    'deliverAt',
+  );
+  @override
+  late final GeneratedColumn<int> deliverAt = GeneratedColumn<int>(
+    'deliver_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _onServerMeta = const VerificationMeta(
+    'onServer',
+  );
+  @override
+  late final GeneratedColumn<bool> onServer = GeneratedColumn<bool>(
+    'on_server',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("on_server" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _senderDeviceIdMeta = const VerificationMeta(
+    'senderDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> senderDeviceId = GeneratedColumn<String>(
+    'sender_device_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    chatId,
+    kind,
+    body,
+    envelope,
+    deliverAt,
+    state,
+    onServer,
+    senderDeviceId,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_scheduled';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ScheduledRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('chat_id')) {
+      context.handle(
+        _chatIdMeta,
+        chatId.isAcceptableOrUnknown(data['chat_id']!, _chatIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chatIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('body')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['body']!, _bodyMeta),
+      );
+    }
+    if (data.containsKey('envelope')) {
+      context.handle(
+        _envelopeMeta,
+        envelope.isAcceptableOrUnknown(data['envelope']!, _envelopeMeta),
+      );
+    }
+    if (data.containsKey('deliver_at')) {
+      context.handle(
+        _deliverAtMeta,
+        deliverAt.isAcceptableOrUnknown(data['deliver_at']!, _deliverAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deliverAtMeta);
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stateMeta);
+    }
+    if (data.containsKey('on_server')) {
+      context.handle(
+        _onServerMeta,
+        onServer.isAcceptableOrUnknown(data['on_server']!, _onServerMeta),
+      );
+    }
+    if (data.containsKey('sender_device_id')) {
+      context.handle(
+        _senderDeviceIdMeta,
+        senderDeviceId.isAcceptableOrUnknown(
+          data['sender_device_id']!,
+          _senderDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ScheduledRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ScheduledRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      chatId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chat_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      ),
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}body'],
+      ),
+      envelope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}envelope'],
+      ),
+      deliverAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}deliver_at'],
+      )!,
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      onServer: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}on_server'],
+      )!,
+      senderDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sender_device_id'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalScheduledTable createAlias(String alias) {
+    return $LocalScheduledTable(attachedDatabase, alias);
+  }
+}
+
+class ScheduledRow extends DataClass implements Insertable<ScheduledRow> {
+  /// The message id it will be delivered as.
+  final String id;
+  final String chatId;
+
+  /// The plaintext's kind; null while a message scheduled on another device can't be decrypted.
+  final String? kind;
+
+  /// The plaintext JSON: kept from scheduling, or decrypted from [envelope]; null if neither.
+  final String? body;
+
+  /// The envelope JSON the server holds, or null before the server has it.
+  final String? envelope;
+
+  /// When it goes out (Unix ms).
+  final int deliverAt;
+
+  /// `local` (not on the server yet: uploading or waiting to be sent there), or the server's
+  /// `pending`, `needs_resend` or `failed`. A `failed` row that isn't [onServer] was refused before
+  /// the server took it (an upload or the schedule call).
+  final String state;
+
+  /// The server holds it.
+  final bool onServer;
+
+  /// The device that encrypted what the server holds (it signed the envelope).
+  final String? senderDeviceId;
+  final int createdAt;
+  final int updatedAt;
+  const ScheduledRow({
+    required this.id,
+    required this.chatId,
+    this.kind,
+    this.body,
+    this.envelope,
+    required this.deliverAt,
+    required this.state,
+    required this.onServer,
+    this.senderDeviceId,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['chat_id'] = Variable<String>(chatId);
+    if (!nullToAbsent || kind != null) {
+      map['kind'] = Variable<String>(kind);
+    }
+    if (!nullToAbsent || body != null) {
+      map['body'] = Variable<String>(body);
+    }
+    if (!nullToAbsent || envelope != null) {
+      map['envelope'] = Variable<String>(envelope);
+    }
+    map['deliver_at'] = Variable<int>(deliverAt);
+    map['state'] = Variable<String>(state);
+    map['on_server'] = Variable<bool>(onServer);
+    if (!nullToAbsent || senderDeviceId != null) {
+      map['sender_device_id'] = Variable<String>(senderDeviceId);
+    }
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  LocalScheduledCompanion toCompanion(bool nullToAbsent) {
+    return LocalScheduledCompanion(
+      id: Value(id),
+      chatId: Value(chatId),
+      kind: kind == null && nullToAbsent ? const Value.absent() : Value(kind),
+      body: body == null && nullToAbsent ? const Value.absent() : Value(body),
+      envelope: envelope == null && nullToAbsent
+          ? const Value.absent()
+          : Value(envelope),
+      deliverAt: Value(deliverAt),
+      state: Value(state),
+      onServer: Value(onServer),
+      senderDeviceId: senderDeviceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(senderDeviceId),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory ScheduledRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ScheduledRow(
+      id: serializer.fromJson<String>(json['id']),
+      chatId: serializer.fromJson<String>(json['chatId']),
+      kind: serializer.fromJson<String?>(json['kind']),
+      body: serializer.fromJson<String?>(json['body']),
+      envelope: serializer.fromJson<String?>(json['envelope']),
+      deliverAt: serializer.fromJson<int>(json['deliverAt']),
+      state: serializer.fromJson<String>(json['state']),
+      onServer: serializer.fromJson<bool>(json['onServer']),
+      senderDeviceId: serializer.fromJson<String?>(json['senderDeviceId']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'chatId': serializer.toJson<String>(chatId),
+      'kind': serializer.toJson<String?>(kind),
+      'body': serializer.toJson<String?>(body),
+      'envelope': serializer.toJson<String?>(envelope),
+      'deliverAt': serializer.toJson<int>(deliverAt),
+      'state': serializer.toJson<String>(state),
+      'onServer': serializer.toJson<bool>(onServer),
+      'senderDeviceId': serializer.toJson<String?>(senderDeviceId),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  ScheduledRow copyWith({
+    String? id,
+    String? chatId,
+    Value<String?> kind = const Value.absent(),
+    Value<String?> body = const Value.absent(),
+    Value<String?> envelope = const Value.absent(),
+    int? deliverAt,
+    String? state,
+    bool? onServer,
+    Value<String?> senderDeviceId = const Value.absent(),
+    int? createdAt,
+    int? updatedAt,
+  }) => ScheduledRow(
+    id: id ?? this.id,
+    chatId: chatId ?? this.chatId,
+    kind: kind.present ? kind.value : this.kind,
+    body: body.present ? body.value : this.body,
+    envelope: envelope.present ? envelope.value : this.envelope,
+    deliverAt: deliverAt ?? this.deliverAt,
+    state: state ?? this.state,
+    onServer: onServer ?? this.onServer,
+    senderDeviceId: senderDeviceId.present
+        ? senderDeviceId.value
+        : this.senderDeviceId,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  ScheduledRow copyWithCompanion(LocalScheduledCompanion data) {
+    return ScheduledRow(
+      id: data.id.present ? data.id.value : this.id,
+      chatId: data.chatId.present ? data.chatId.value : this.chatId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      body: data.body.present ? data.body.value : this.body,
+      envelope: data.envelope.present ? data.envelope.value : this.envelope,
+      deliverAt: data.deliverAt.present ? data.deliverAt.value : this.deliverAt,
+      state: data.state.present ? data.state.value : this.state,
+      onServer: data.onServer.present ? data.onServer.value : this.onServer,
+      senderDeviceId: data.senderDeviceId.present
+          ? data.senderDeviceId.value
+          : this.senderDeviceId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ScheduledRow(')
+          ..write('id: $id, ')
+          ..write('chatId: $chatId, ')
+          ..write('kind: $kind, ')
+          ..write('body: $body, ')
+          ..write('envelope: $envelope, ')
+          ..write('deliverAt: $deliverAt, ')
+          ..write('state: $state, ')
+          ..write('onServer: $onServer, ')
+          ..write('senderDeviceId: $senderDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    chatId,
+    kind,
+    body,
+    envelope,
+    deliverAt,
+    state,
+    onServer,
+    senderDeviceId,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ScheduledRow &&
+          other.id == this.id &&
+          other.chatId == this.chatId &&
+          other.kind == this.kind &&
+          other.body == this.body &&
+          other.envelope == this.envelope &&
+          other.deliverAt == this.deliverAt &&
+          other.state == this.state &&
+          other.onServer == this.onServer &&
+          other.senderDeviceId == this.senderDeviceId &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class LocalScheduledCompanion extends UpdateCompanion<ScheduledRow> {
+  final Value<String> id;
+  final Value<String> chatId;
+  final Value<String?> kind;
+  final Value<String?> body;
+  final Value<String?> envelope;
+  final Value<int> deliverAt;
+  final Value<String> state;
+  final Value<bool> onServer;
+  final Value<String?> senderDeviceId;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const LocalScheduledCompanion({
+    this.id = const Value.absent(),
+    this.chatId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.body = const Value.absent(),
+    this.envelope = const Value.absent(),
+    this.deliverAt = const Value.absent(),
+    this.state = const Value.absent(),
+    this.onServer = const Value.absent(),
+    this.senderDeviceId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalScheduledCompanion.insert({
+    required String id,
+    required String chatId,
+    this.kind = const Value.absent(),
+    this.body = const Value.absent(),
+    this.envelope = const Value.absent(),
+    required int deliverAt,
+    required String state,
+    this.onServer = const Value.absent(),
+    this.senderDeviceId = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       chatId = Value(chatId),
+       deliverAt = Value(deliverAt),
+       state = Value(state),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<ScheduledRow> custom({
+    Expression<String>? id,
+    Expression<String>? chatId,
+    Expression<String>? kind,
+    Expression<String>? body,
+    Expression<String>? envelope,
+    Expression<int>? deliverAt,
+    Expression<String>? state,
+    Expression<bool>? onServer,
+    Expression<String>? senderDeviceId,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (chatId != null) 'chat_id': chatId,
+      if (kind != null) 'kind': kind,
+      if (body != null) 'body': body,
+      if (envelope != null) 'envelope': envelope,
+      if (deliverAt != null) 'deliver_at': deliverAt,
+      if (state != null) 'state': state,
+      if (onServer != null) 'on_server': onServer,
+      if (senderDeviceId != null) 'sender_device_id': senderDeviceId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalScheduledCompanion copyWith({
+    Value<String>? id,
+    Value<String>? chatId,
+    Value<String?>? kind,
+    Value<String?>? body,
+    Value<String?>? envelope,
+    Value<int>? deliverAt,
+    Value<String>? state,
+    Value<bool>? onServer,
+    Value<String?>? senderDeviceId,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return LocalScheduledCompanion(
+      id: id ?? this.id,
+      chatId: chatId ?? this.chatId,
+      kind: kind ?? this.kind,
+      body: body ?? this.body,
+      envelope: envelope ?? this.envelope,
+      deliverAt: deliverAt ?? this.deliverAt,
+      state: state ?? this.state,
+      onServer: onServer ?? this.onServer,
+      senderDeviceId: senderDeviceId ?? this.senderDeviceId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (chatId.present) {
+      map['chat_id'] = Variable<String>(chatId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (body.present) {
+      map['body'] = Variable<String>(body.value);
+    }
+    if (envelope.present) {
+      map['envelope'] = Variable<String>(envelope.value);
+    }
+    if (deliverAt.present) {
+      map['deliver_at'] = Variable<int>(deliverAt.value);
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (onServer.present) {
+      map['on_server'] = Variable<bool>(onServer.value);
+    }
+    if (senderDeviceId.present) {
+      map['sender_device_id'] = Variable<String>(senderDeviceId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalScheduledCompanion(')
+          ..write('id: $id, ')
+          ..write('chatId: $chatId, ')
+          ..write('kind: $kind, ')
+          ..write('body: $body, ')
+          ..write('envelope: $envelope, ')
+          ..write('deliverAt: $deliverAt, ')
+          ..write('state: $state, ')
+          ..write('onServer: $onServer, ')
+          ..write('senderDeviceId: $senderDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalRemindersTable extends LocalReminders
+    with TableInfo<$LocalRemindersTable, ReminderRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalRemindersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
+  @override
+  late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
+    'chat_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<int> at = GeneratedColumn<int>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [messageId, chatId, at];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_reminders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReminderRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('chat_id')) {
+      context.handle(
+        _chatIdMeta,
+        chatId.isAcceptableOrUnknown(data['chat_id']!, _chatIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chatIdMeta);
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {messageId};
+  @override
+  ReminderRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReminderRow(
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      chatId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chat_id'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalRemindersTable createAlias(String alias) {
+    return $LocalRemindersTable(attachedDatabase, alias);
+  }
+}
+
+class ReminderRow extends DataClass implements Insertable<ReminderRow> {
+  final String messageId;
+  final String chatId;
+
+  /// When it comes (Unix ms).
+  final int at;
+  const ReminderRow({
+    required this.messageId,
+    required this.chatId,
+    required this.at,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['message_id'] = Variable<String>(messageId);
+    map['chat_id'] = Variable<String>(chatId);
+    map['at'] = Variable<int>(at);
+    return map;
+  }
+
+  LocalRemindersCompanion toCompanion(bool nullToAbsent) {
+    return LocalRemindersCompanion(
+      messageId: Value(messageId),
+      chatId: Value(chatId),
+      at: Value(at),
+    );
+  }
+
+  factory ReminderRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReminderRow(
+      messageId: serializer.fromJson<String>(json['messageId']),
+      chatId: serializer.fromJson<String>(json['chatId']),
+      at: serializer.fromJson<int>(json['at']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'messageId': serializer.toJson<String>(messageId),
+      'chatId': serializer.toJson<String>(chatId),
+      'at': serializer.toJson<int>(at),
+    };
+  }
+
+  ReminderRow copyWith({String? messageId, String? chatId, int? at}) =>
+      ReminderRow(
+        messageId: messageId ?? this.messageId,
+        chatId: chatId ?? this.chatId,
+        at: at ?? this.at,
+      );
+  ReminderRow copyWithCompanion(LocalRemindersCompanion data) {
+    return ReminderRow(
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      chatId: data.chatId.present ? data.chatId.value : this.chatId,
+      at: data.at.present ? data.at.value : this.at,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReminderRow(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('at: $at')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(messageId, chatId, at);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReminderRow &&
+          other.messageId == this.messageId &&
+          other.chatId == this.chatId &&
+          other.at == this.at);
+}
+
+class LocalRemindersCompanion extends UpdateCompanion<ReminderRow> {
+  final Value<String> messageId;
+  final Value<String> chatId;
+  final Value<int> at;
+  final Value<int> rowid;
+  const LocalRemindersCompanion({
+    this.messageId = const Value.absent(),
+    this.chatId = const Value.absent(),
+    this.at = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalRemindersCompanion.insert({
+    required String messageId,
+    required String chatId,
+    required int at,
+    this.rowid = const Value.absent(),
+  }) : messageId = Value(messageId),
+       chatId = Value(chatId),
+       at = Value(at);
+  static Insertable<ReminderRow> custom({
+    Expression<String>? messageId,
+    Expression<String>? chatId,
+    Expression<int>? at,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (messageId != null) 'message_id': messageId,
+      if (chatId != null) 'chat_id': chatId,
+      if (at != null) 'at': at,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalRemindersCompanion copyWith({
+    Value<String>? messageId,
+    Value<String>? chatId,
+    Value<int>? at,
+    Value<int>? rowid,
+  }) {
+    return LocalRemindersCompanion(
+      messageId: messageId ?? this.messageId,
+      chatId: chatId ?? this.chatId,
+      at: at ?? this.at,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (chatId.present) {
+      map['chat_id'] = Variable<String>(chatId.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<int>(at.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalRemindersCompanion(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('at: $at, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -5290,10 +6625,16 @@ abstract class _$ChatDb extends GeneratedDatabase {
   late final $LocalRevokedProofsTable localRevokedProofs =
       $LocalRevokedProofsTable(this);
   late final $LocalStarsTable localStars = $LocalStarsTable(this);
+  late final $LocalScheduledTable localScheduled = $LocalScheduledTable(this);
+  late final $LocalRemindersTable localReminders = $LocalRemindersTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
     'CREATE INDEX local_messages_chat_seq ON local_messages (chat_id, seq)',
+  );
+  late final Index localMessagesExpiresAt = Index(
+    'local_messages_expires_at',
+    'CREATE INDEX local_messages_expires_at ON local_messages (expires_at)',
   );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
@@ -5311,8 +6652,11 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localFamilyAdmins,
     localRevokedProofs,
     localStars,
+    localScheduled,
+    localReminders,
     meta,
     localMessagesChatSeq,
+    localMessagesExpiresAt,
   ];
 }
 
@@ -5335,6 +6679,10 @@ typedef $$LocalChatsTableCreateCompanionBuilder = LocalChatsCompanion Function({
   Value<int?> archivedAt,
   Value<bool> markedUnread,
   Value<String?> avatarKey,
+  Value<int?> disappearSecs,
+  Value<String?> disappearChangedBy,
+  Value<int?> disappearChangedAt,
+  Value<int?> disappearChangedSeq,
   Value<int> rowid,
 });
 typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
@@ -5356,6 +6704,10 @@ typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
   Value<int?> archivedAt,
   Value<bool> markedUnread,
   Value<String?> avatarKey,
+  Value<int?> disappearSecs,
+  Value<String?> disappearChangedBy,
+  Value<int?> disappearChangedAt,
+  Value<int?> disappearChangedSeq,
   Value<int> rowid,
 });
 
@@ -5455,6 +6807,26 @@ class $$LocalChatsTableFilterComposer
 
   ColumnFilters<String> get avatarKey => $composableBuilder(
     column: $table.avatarKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5557,6 +6929,26 @@ class $$LocalChatsTableOrderingComposer
     column: $table.avatarKey,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalChatsTableAnnotationComposer
@@ -5635,6 +7027,26 @@ class $$LocalChatsTableAnnotationComposer
 
   GeneratedColumn<String> get avatarKey =>
       $composableBuilder(column: $table.avatarKey, builder: (column) => column);
+
+  GeneratedColumn<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
+    builder: (column) => column,
+  );
 }
 
 class $$LocalChatsTableTableManager
@@ -5683,6 +7095,10 @@ class $$LocalChatsTableTableManager
                 Value<int?> archivedAt = const Value.absent(),
                 Value<bool> markedUnread = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<String?> disappearChangedBy = const Value.absent(),
+                Value<int?> disappearChangedAt = const Value.absent(),
+                Value<int?> disappearChangedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion(
                 id: id,
@@ -5703,6 +7119,10 @@ class $$LocalChatsTableTableManager
                 archivedAt: archivedAt,
                 markedUnread: markedUnread,
                 avatarKey: avatarKey,
+                disappearSecs: disappearSecs,
+                disappearChangedBy: disappearChangedBy,
+                disappearChangedAt: disappearChangedAt,
+                disappearChangedSeq: disappearChangedSeq,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5725,6 +7145,10 @@ class $$LocalChatsTableTableManager
                 Value<int?> archivedAt = const Value.absent(),
                 Value<bool> markedUnread = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<String?> disappearChangedBy = const Value.absent(),
+                Value<int?> disappearChangedAt = const Value.absent(),
+                Value<int?> disappearChangedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion.insert(
                 id: id,
@@ -5745,6 +7169,10 @@ class $$LocalChatsTableTableManager
                 archivedAt: archivedAt,
                 markedUnread: markedUnread,
                 avatarKey: avatarKey,
+                disappearSecs: disappearSecs,
+                disappearChangedBy: disappearChangedBy,
+                disappearChangedAt: disappearChangedAt,
+                disappearChangedSeq: disappearChangedSeq,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5977,6 +7405,9 @@ typedef $$LocalMessagesTableCreateCompanionBuilder =
       Value<String?> envelope,
       required int createdAt,
       required String state,
+      Value<int?> disappearSecs,
+      Value<int?> expiresAt,
+      Value<int?> scheduledFor,
       Value<int> rowid,
     });
 typedef $$LocalMessagesTableUpdateCompanionBuilder =
@@ -5992,6 +7423,9 @@ typedef $$LocalMessagesTableUpdateCompanionBuilder =
       Value<String?> envelope,
       Value<int> createdAt,
       Value<String> state,
+      Value<int?> disappearSecs,
+      Value<int?> expiresAt,
+      Value<int?> scheduledFor,
       Value<int> rowid,
     });
 
@@ -6056,6 +7490,21 @@ class $$LocalMessagesTableFilterComposer
 
   ColumnFilters<String> get state => $composableBuilder(
     column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get scheduledFor => $composableBuilder(
+    column: $table.scheduledFor,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6123,6 +7572,21 @@ class $$LocalMessagesTableOrderingComposer
     column: $table.state,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get scheduledFor => $composableBuilder(
+    column: $table.scheduledFor,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalMessagesTableAnnotationComposer
@@ -6170,6 +7634,19 @@ class $$LocalMessagesTableAnnotationComposer
 
   GeneratedColumn<String> get state =>
       $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get expiresAt =>
+      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
+
+  GeneratedColumn<int> get scheduledFor => $composableBuilder(
+    column: $table.scheduledFor,
+    builder: (column) => column,
+  );
 }
 
 class $$LocalMessagesTableTableManager
@@ -6214,6 +7691,9 @@ class $$LocalMessagesTableTableManager
                 Value<String?> envelope = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<String> state = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<int?> expiresAt = const Value.absent(),
+                Value<int?> scheduledFor = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalMessagesCompanion(
                 id: id,
@@ -6227,6 +7707,9 @@ class $$LocalMessagesTableTableManager
                 envelope: envelope,
                 createdAt: createdAt,
                 state: state,
+                disappearSecs: disappearSecs,
+                expiresAt: expiresAt,
+                scheduledFor: scheduledFor,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6242,6 +7725,9 @@ class $$LocalMessagesTableTableManager
                 Value<String?> envelope = const Value.absent(),
                 required int createdAt,
                 required String state,
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<int?> expiresAt = const Value.absent(),
+                Value<int?> scheduledFor = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalMessagesCompanion.insert(
                 id: id,
@@ -6255,6 +7741,9 @@ class $$LocalMessagesTableTableManager
                 envelope: envelope,
                 createdAt: createdAt,
                 state: state,
+                disappearSecs: disappearSecs,
+                expiresAt: expiresAt,
+                scheduledFor: scheduledFor,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -7964,6 +9453,502 @@ typedef $$LocalStarsTableProcessedTableManager =
       StarRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalScheduledTableCreateCompanionBuilder =
+    LocalScheduledCompanion Function({
+      required String id,
+      required String chatId,
+      Value<String?> kind,
+      Value<String?> body,
+      Value<String?> envelope,
+      required int deliverAt,
+      required String state,
+      Value<bool> onServer,
+      Value<String?> senderDeviceId,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$LocalScheduledTableUpdateCompanionBuilder =
+    LocalScheduledCompanion Function({
+      Value<String> id,
+      Value<String> chatId,
+      Value<String?> kind,
+      Value<String?> body,
+      Value<String?> envelope,
+      Value<int> deliverAt,
+      Value<String> state,
+      Value<bool> onServer,
+      Value<String?> senderDeviceId,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$LocalScheduledTableFilterComposer
+    extends Composer<_$ChatDb, $LocalScheduledTable> {
+  $$LocalScheduledTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get envelope => $composableBuilder(
+    column: $table.envelope,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get deliverAt => $composableBuilder(
+    column: $table.deliverAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get onServer => $composableBuilder(
+    column: $table.onServer,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalScheduledTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalScheduledTable> {
+  $$LocalScheduledTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get envelope => $composableBuilder(
+    column: $table.envelope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get deliverAt => $composableBuilder(
+    column: $table.deliverAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get onServer => $composableBuilder(
+    column: $table.onServer,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalScheduledTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalScheduledTable> {
+  $$LocalScheduledTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get chatId =>
+      $composableBuilder(column: $table.chatId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
+
+  GeneratedColumn<String> get envelope =>
+      $composableBuilder(column: $table.envelope, builder: (column) => column);
+
+  GeneratedColumn<int> get deliverAt =>
+      $composableBuilder(column: $table.deliverAt, builder: (column) => column);
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<bool> get onServer =>
+      $composableBuilder(column: $table.onServer, builder: (column) => column);
+
+  GeneratedColumn<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$LocalScheduledTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalScheduledTable,
+          ScheduledRow,
+          $$LocalScheduledTableFilterComposer,
+          $$LocalScheduledTableOrderingComposer,
+          $$LocalScheduledTableAnnotationComposer,
+          $$LocalScheduledTableCreateCompanionBuilder,
+          $$LocalScheduledTableUpdateCompanionBuilder,
+          (
+            ScheduledRow,
+            BaseReferences<_$ChatDb, $LocalScheduledTable, ScheduledRow>,
+          ),
+          ScheduledRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalScheduledTableTableManager(_$ChatDb db, $LocalScheduledTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalScheduledTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalScheduledTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalScheduledTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> chatId = const Value.absent(),
+                Value<String?> kind = const Value.absent(),
+                Value<String?> body = const Value.absent(),
+                Value<String?> envelope = const Value.absent(),
+                Value<int> deliverAt = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<bool> onServer = const Value.absent(),
+                Value<String?> senderDeviceId = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalScheduledCompanion(
+                id: id,
+                chatId: chatId,
+                kind: kind,
+                body: body,
+                envelope: envelope,
+                deliverAt: deliverAt,
+                state: state,
+                onServer: onServer,
+                senderDeviceId: senderDeviceId,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String chatId,
+                Value<String?> kind = const Value.absent(),
+                Value<String?> body = const Value.absent(),
+                Value<String?> envelope = const Value.absent(),
+                required int deliverAt,
+                required String state,
+                Value<bool> onServer = const Value.absent(),
+                Value<String?> senderDeviceId = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalScheduledCompanion.insert(
+                id: id,
+                chatId: chatId,
+                kind: kind,
+                body: body,
+                envelope: envelope,
+                deliverAt: deliverAt,
+                state: state,
+                onServer: onServer,
+                senderDeviceId: senderDeviceId,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalScheduledTable, ScheduledRow>(table),
+                  BaseReferences<_$ChatDb, $LocalScheduledTable, ScheduledRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalScheduledTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalScheduledTable,
+      ScheduledRow,
+      $$LocalScheduledTableFilterComposer,
+      $$LocalScheduledTableOrderingComposer,
+      $$LocalScheduledTableAnnotationComposer,
+      $$LocalScheduledTableCreateCompanionBuilder,
+      $$LocalScheduledTableUpdateCompanionBuilder,
+      (
+        ScheduledRow,
+        BaseReferences<_$ChatDb, $LocalScheduledTable, ScheduledRow>,
+      ),
+      ScheduledRow,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalRemindersTableCreateCompanionBuilder =
+    LocalRemindersCompanion Function({
+      required String messageId,
+      required String chatId,
+      required int at,
+      Value<int> rowid,
+    });
+typedef $$LocalRemindersTableUpdateCompanionBuilder =
+    LocalRemindersCompanion Function({
+      Value<String> messageId,
+      Value<String> chatId,
+      Value<int> at,
+      Value<int> rowid,
+    });
+
+class $$LocalRemindersTableFilterComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalRemindersTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalRemindersTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get chatId =>
+      $composableBuilder(column: $table.chatId, builder: (column) => column);
+
+  GeneratedColumn<int> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+}
+
+class $$LocalRemindersTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalRemindersTable,
+          ReminderRow,
+          $$LocalRemindersTableFilterComposer,
+          $$LocalRemindersTableOrderingComposer,
+          $$LocalRemindersTableAnnotationComposer,
+          $$LocalRemindersTableCreateCompanionBuilder,
+          $$LocalRemindersTableUpdateCompanionBuilder,
+          (
+            ReminderRow,
+            BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>,
+          ),
+          ReminderRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalRemindersTableTableManager(_$ChatDb db, $LocalRemindersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalRemindersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalRemindersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalRemindersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> messageId = const Value.absent(),
+                Value<String> chatId = const Value.absent(),
+                Value<int> at = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRemindersCompanion(
+                messageId: messageId,
+                chatId: chatId,
+                at: at,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String messageId,
+                required String chatId,
+                required int at,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRemindersCompanion.insert(
+                messageId: messageId,
+                chatId: chatId,
+                at: at,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalRemindersTable, ReminderRow>(table),
+                  BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalRemindersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalRemindersTable,
+      ReminderRow,
+      $$LocalRemindersTableFilterComposer,
+      $$LocalRemindersTableOrderingComposer,
+      $$LocalRemindersTableAnnotationComposer,
+      $$LocalRemindersTableCreateCompanionBuilder,
+      $$LocalRemindersTableUpdateCompanionBuilder,
+      (
+        ReminderRow,
+        BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>,
+      ),
+      ReminderRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -8117,5 +10102,9 @@ class $ChatDbManager {
       $$LocalRevokedProofsTableTableManager(_db, _db.localRevokedProofs);
   $$LocalStarsTableTableManager get localStars =>
       $$LocalStarsTableTableManager(_db, _db.localStars);
+  $$LocalScheduledTableTableManager get localScheduled =>
+      $$LocalScheduledTableTableManager(_db, _db.localScheduled);
+  $$LocalRemindersTableTableManager get localReminders =>
+      $$LocalRemindersTableTableManager(_db, _db.localReminders);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }

@@ -9,6 +9,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'chat_route.dart';
 import 'firebase_options.dart';
 
 /// What a push carried: the visible text and the chat it's about (null for a test push). A preview
@@ -25,7 +26,15 @@ class PushMessage {
     this.isPreview = false,
     this.badge,
     this.isBadgeUpdate = false,
+    this.isReminder = false,
   });
+
+  /// A reminder of mine that came (`type: "reminder"`, docs/protocol.md "Push"): [messageId] is the
+  /// message it's about.
+  final bool isReminder;
+
+  /// Where tapping it goes: the chat, or for a reminder the chat at its message.
+  String? get route => isReminder ? messageRoute(chatId, messageId) ?? chatRoute(chatId) : chatRoute(chatId);
 
   final String? chatId;
   final String? title;
@@ -60,6 +69,7 @@ class PushMessage {
       isPreview: data['preview'] == '1',
       badge: int.tryParse(str('badge') ?? ''),
       isBadgeUpdate: data['type'] == 'badge',
+      isReminder: data['type'] == 'reminder',
     );
   }
 
@@ -75,6 +85,7 @@ class PushMessage {
         isPreview: isPreview,
         badge: badge,
         isBadgeUpdate: isBadgeUpdate,
+        isReminder: isReminder,
       );
 
   static Map<String, Object?>? _envelope(String? json) {

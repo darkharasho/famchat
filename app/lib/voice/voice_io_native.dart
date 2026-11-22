@@ -54,3 +54,13 @@ Future<void> sweepVoiceFiles() async {
     // best effort
   }
 }
+
+/// Deletes the decrypted clip of message [id] (a disappearing message that went), if one is left.
+Future<void> dropVoiceFiles(String id) async {
+  try {
+    final f = File('${(await getApplicationCacheDirectory()).path}/voice/play_${_safe(id)}.m4a');
+    if (await f.exists()) await f.delete();
+  } catch (_) {
+    // best effort; swept at the next start
+  }
+}

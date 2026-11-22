@@ -37,7 +37,8 @@ class SendReport {
 /// Sends each of [items] to [chatId] in order; [onStart]/[onEnd] bracket each one (progress UI).
 ///
 /// [caption] (when not blank), [replyTo] and [mentions] go with the last item. When that one can't
-/// be sent they go as a text instead, so what was typed is never lost.
+/// be sent they go as a text instead, so what was typed is never lost. [at]: all of it is scheduled
+/// for then instead.
 Future<SendReport> sendMedia(
   MediaService media,
   VideoProcessor videos,
@@ -48,6 +49,7 @@ Future<SendReport> sendMedia(
   List<String> mentions = const [],
   void Function()? onStart,
   void Function()? onEnd,
+  DateTime? at,
 }) async {
   final report = SendReport();
   final text = caption == null ? null : validMessageText(caption);
@@ -65,10 +67,10 @@ Future<SendReport> sendMedia(
       switch (item) {
         case PickedPhoto(:final bytes):
           await media.sendPhoto(chatId, bytes,
-              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album);
+              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album, at: at);
         case PickedVideo(:final file):
           await media.sendVideo(chatId, await videos.process(file),
-              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album);
+              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album, at: at);
       }
       sent = true;
     } on VideoTooLargeException {
@@ -83,7 +85,7 @@ Future<SendReport> sendMedia(
       onEnd?.call();
     }
     if (withCaption && !sent) {
-      await media.sync.sendText(chatId, text, replyTo: replyTo, mentions: mentions);
+      await media.sync.sendText(chatId, text, replyTo: replyTo, mentions: mentions, at: at);
       report.captionSentAsText = true;
     }
   }

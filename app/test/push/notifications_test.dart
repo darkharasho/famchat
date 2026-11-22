@@ -3,13 +3,14 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
-import 'package:famchat/chat/chat_sync.dart' show CaughtUp;
+import 'package:famchat/chat/chat_sync.dart' show CaughtUp, FiredReminder;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/crypto/encoding.dart';
 import 'package:famchat/crypto/envelope.dart';
 import 'package:famchat/crypto/keys.dart';
+import 'package:famchat/push/chat_route.dart';
 import 'package:famchat/push/firebase_options.dart';
 import 'package:famchat/push/notification_settings.dart' show pushTestSummary, runNotificationTest;
 import 'package:famchat/push/local_notifier.dart';
@@ -655,6 +656,114 @@ void main() {
       final text = await runNotificationTest(push: null, local: notifier, sendServerTest: () async => null);
       expect(notifier.shown, isEmpty);
       expect(text, startsWith("This device can't show notifications"));
+    });
+  });
+
+  group('reminders', () {
+    const msgId = '01CX5ZZKBKACTAV9WEVGEMMVRZ';
+    late ChatDb db;
+
+    MessageRow message(String chatId, String from, String text) => MessageRow(
+          id: msgId,
+          chatId: chatId,
+          seq: 1,
+          senderUserId: from,
+          senderDeviceId: 'd',
+          kind: 'text',
+          body: jsonEncode({'kind': 'text', 'text': text}),
+          targetId: null,
+          envelope: null,
+          createdAt: 1,
+          state: 'sent',
+        );
+
+    setUp(() async {
+      driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+      db = ChatDb(NativeDatabase.memory());
+      await db.putUser(user('mom', 'Mom'));
+      await db.upsertChat(chat(chatA, 'direct'));
+      await db.upsertChat(chat(chatB, 'group', title: 'Parents', members: ['me', 'mom']));
+    });
+    tearDown(() => db.close());
+
+    test('routes open the chat at the message; junk is refused', () {
+      expect(messageRoute(chatA, msgId), '/chats/$chatA?m=$msgId');
+      expect(messageRoute(chatA, '../x'), isNull);
+      expect(messageRoute('nope', msgId), isNull);
+      expect(isChatRoute('/chats/$chatA?m=$msgId'), isTrue);
+      expect(isChatRoute('/chats/$chatA'), isTrue);
+      expect(isChatRoute('/chats/$chatA?m=../devices'), isFalse);
+      expect(isChatRoute('/chats/$chatA?x=$msgId'), isFalse);
+    });
+
+    test('a reminder push is read as one, and opens its message', () async {
+      final m = PushMessage.fromData({'type': 'reminder', 'chatId': chatA, 'messageId': msgId, 'at': '5'}, title: 'Reminder', body: 'Message from Mom');
+      expect((m.isReminder, m.route), (true, '/chats/$chatA?m=$msgId'));
+      expect(PushMessage.fromData({'chatId': chatA, 'messageId': msgId}).route, '/chats/$chatA', reason: 'a message push opens the chat');
+      expect(m.withBody('x').isReminder, isTrue);
+
+      final h = Harness(visible: chatA);
+      await h.controller.start();
+      h.messaging.opened.add(m);
+      h.messaging.foreground.add(m);
+      await settle();
+      expect(h.routes, ['/chats/$chatA?m=$msgId']);
+      expect(h.shown.map((s) => (s.$1.title, s.$2)), [('Reminder', '/chats/$chatA?m=$msgId')],
+          reason: 'shown even over its own chat');
+    });
+
+    test('the body: who and where with previews off, the text with them on', () async {
+      Future<bool> off() async => false;
+      Future<bool> on() async => true;
+      await db.insertMessageIfAbsent(message(chatA, 'mom', 'call the dentist'));
+      expect(await reminderBody(db, chatA, msgId, myUserId: 'me', previewsOn: off), 'Message from Mom');
+      expect(await reminderBody(db, chatA, msgId, myUserId: 'me', previewsOn: on), 'call the dentist');
+      expect(await reminderBody(db, chatA, msgId, myUserId: 'mom', previewsOn: off), 'Your message');
+      await db.deleteMessages([msgId]);
+      await db.insertMessageIfAbsent(message(chatB, 'mom', 'bring chairs'));
+      expect(await reminderBody(db, chatB, msgId, myUserId: 'me', previewsOn: off), 'Parents: message from Mom');
+      expect(await reminderBody(db, chatB, msgId, myUserId: 'me', previewsOn: on), 'Mom: bring chairs');
+      expect(await reminderBody(db, chatB, msgId, myUserId: 'mom', previewsOn: off), 'Parents: your message');
+      expect(await reminderBody(db, chatB, msgId, myUserId: 'me', previewsOn: () => throw StateError('x')),
+          'Parents: message from Mom');
+    });
+
+    test('desktop and web: a "Reminder" notification that opens the message', () async {
+      await db.insertMessageIfAbsent(message(chatA, 'mom', 'call the dentist'));
+      final local = FakeNotifier();
+      final inApp = <(String, String, String)>[];
+      final n = ReminderNotifier(
+        db: db,
+        myUserId: 'me',
+        notifier: local,
+        showInApp: (t, b, r) => inApp.add((t, b, r)),
+        previewsOn: () async => true,
+      );
+      await n.show(const FiredReminder(chatId: chatA, messageId: msgId, at: 5));
+      expect(local.shown, [(reminderNotificationId(msgId), 'Reminder', 'call the dentist', '/chats/$chatA?m=$msgId')]);
+      expect(reminderNotificationId(msgId), isNot(chatA.hashCode & 0x7fffffff), reason: "doesn't replace the chat's");
+      expect(inApp, isEmpty);
+    });
+
+    test('phones: the in-app note; a missed one already pushed here is not shown again', () async {
+      await db.insertMessageIfAbsent(message(chatA, 'mom', 'call the dentist'));
+      final inApp = <(String, String, String)>[];
+      var pushed = true;
+      final n = ReminderNotifier(
+        db: db,
+        myUserId: 'me',
+        notifier: null,
+        showInApp: (t, b, r) => inApp.add((t, b, r)),
+        previewsOn: () async => false,
+        pushedHere: () => pushed,
+      );
+      await n.show(const FiredReminder(chatId: chatA, messageId: msgId, at: 5));
+      expect(inApp, [('Reminder', 'Message from Mom', '/chats/$chatA?m=$msgId')]);
+      await n.show(const FiredReminder(chatId: chatA, messageId: msgId, at: 5, missed: true));
+      expect(inApp, hasLength(1));
+      pushed = false;
+      await n.show(const FiredReminder(chatId: chatA, messageId: msgId, at: 5, missed: true));
+      expect(inApp, hasLength(2), reason: 'no push reached this device, so it shows at open');
     });
   });
 }

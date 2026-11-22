@@ -44,6 +44,8 @@ void main() {
     expect(find.text('Cousins'), findsWidgets);
     expect(find.text('Alice (you)'), findsOneWidget);
     expect(find.text('Bob'), findsOneWidget);
+    await tester.ensureVisible(find.byTooltip('Remove Carol'));
+    await settle(tester);
     await tester.tap(find.byTooltip('Remove Carol'));
     await settle(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
@@ -80,7 +82,7 @@ void main() {
     await tester.tap(find.text('Unmute'));
     await settle(tester);
     expect((await inApp(tester, () => alice.db.chatById(id)))!.mutedUntil, isNull);
-    expect(find.text('Off'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('mute-chat')), matching: find.text('Off')), findsOneWidget);
   });
 
   chatTestWidgets('leaving returns to the chat list', (tester) async {

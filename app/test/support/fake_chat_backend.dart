@@ -76,10 +76,39 @@ class _Device {
   bool revoked = false;
 }
 
+/// A scheduled message (server/src/hub.ts `putScheduled`).
+class _Scheduled {
+  _Scheduled(this.id, this.chatId, this.userId, this.createdAt);
+  final String id, chatId, userId;
+  final int createdAt;
+  late String senderDeviceId;
+  late Map<String, Object?> envelope;
+  late int deliverAt, updatedAt;
+  String state = 'pending';
+  bool silent = false;
+  List<String> mentions = const [];
+
+  ScheduledDto dto() => ScheduledDto(
+        id: id,
+        chatId: chatId,
+        senderDeviceId: senderDeviceId,
+        envelope: envelope,
+        deliverAt: deliverAt,
+        state: state,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        silent: silent,
+        mentions: mentions,
+      );
+}
+
 class _Member {
   _Member(this.joinedSeq, this.joinedAt);
   final int joinedSeq, joinedAt;
   int lastReadSeq = 0;
+
+  /// When [lastReadSeq] last moved (the server's `last_read_at`).
+  int? lastReadAt;
   int? mutedUntil, pinnedAt, archivedAt;
   bool markedUnread = false;
 }
@@ -93,6 +122,10 @@ class _Chat {
   final int createdAt;
   int currentEpoch = 1, lastSeq = 0;
   int? lastMessageAt;
+
+  /// The disappearing timer (server/src/routes/chats.ts PATCH) and its latest change.
+  int? disappearSecs, disappearChangedAt, disappearChangedSeq;
+  String? disappearChangedBy;
 
   /// A group's family (the server's default, family 1, unless a test moves it); null for direct chats.
   int? familyId;
@@ -114,8 +147,13 @@ class _Chat {
         pinnedAt: members[viewer]?.pinnedAt,
         archivedAt: members[viewer]?.archivedAt,
         markedUnread: members[viewer]?.markedUnread ?? false,
+        lastReadAt: members[viewer]?.lastReadAt,
         avatarKey: avatarKey,
         familyId: familyId,
+        disappearSecs: disappearSecs,
+        disappearChangedBy: disappearChangedBy,
+        disappearChangedAt: disappearChangedAt,
+        disappearChangedSeq: disappearChangedSeq,
         members: [
           for (final e in members.entries)
             MemberDto(userId: e.key, joinedSeq: e.value.joinedSeq, lastReadSeq: e.value.lastReadSeq),
@@ -174,6 +212,9 @@ class FakeChatBackend {
   final calls = <String>[];
 
   int now() => _clock += 10;
+
+  /// The time a `read` is recorded at (`Chat.lastReadAt`); [now] unless a test sets its own clock.
+  int Function()? readClock;
 
   String _id(String p) => '01J$p${(_ids++).toString().padLeft(22, '0')}';
 
@@ -359,6 +400,7 @@ class FakeChatBackend {
       senderDeviceId: senderDeviceId,
       envelope: envelope,
       createdAt: now(),
+      disappearSecs: c.disappearSecs,
     );
     c.messages.add(m);
     c.lastMessageAt = m.createdAt;
@@ -368,6 +410,84 @@ class FakeChatBackend {
       }
     }
     return m;
+  }
+
+  // --- scheduled messages (server/src/hub.ts, docs/protocol.md "Scheduled messages") ---
+
+  /// Scheduled messages by id.
+  final scheduled = <String, _Scheduled>{};
+
+  /// Delivered scheduled ids → their sender: a `send` of one from any of their devices acks again.
+  final _deliveredScheduled = <String, String>{};
+
+  /// The server's clock for the scheduling window (the message clock [now] runs from 2023).
+  int Function() wallClock = () => DateTime.now().millisecondsSinceEpoch;
+
+  ScheduledDto? scheduledDto(String id) => scheduled[id]?.dto();
+
+  /// The hub's alarm reaching [id]'s time: delivered like a send (an `ack` to every socket of the
+  /// sender, `msg` to every member socket), or, when the chat's epoch moved on, `needs_resend`.
+  void runScheduled(String id) {
+    final s = scheduled[id]!;
+    final c = _chats[s.chatId]!;
+    if (s.envelope['epoch'] != c.currentEpoch) {
+      s
+        ..state = 'needs_resend'
+        ..updatedAt = now();
+      _toUser(s.userId, {'type': 'needs_resend', 'chatId': s.chatId, 'id': id});
+      _toUser(s.userId, {'type': 'scheduled'});
+      return;
+    }
+    _deliverScheduled(s);
+  }
+
+  MessageDto _deliverScheduled(_Scheduled s) {
+    scheduled.remove(s.id);
+    _deliveredScheduled[s.id] = s.userId;
+    final c = _chats[s.chatId]!;
+    final msg = MessageDto(
+      chatId: s.chatId,
+      seq: ++c.lastSeq,
+      id: s.id,
+      senderUserId: s.userId,
+      senderDeviceId: s.senderDeviceId,
+      envelope: s.envelope,
+      createdAt: now(),
+      disappearSecs: c.disappearSecs,
+    );
+    c.messages.add(msg);
+    c.lastMessageAt = msg.createdAt;
+    if (s.mentions.isNotEmpty) sentMentions[s.id] = s.mentions;
+    _toUser(s.userId, {'type': 'ack', 'id': s.id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': msg.disappearSecs});
+    for (final u in c.members.keys) {
+      _toUser(u, {'type': 'msg', 'message': _msgJson(msg)});
+    }
+    _toUser(s.userId, {'type': 'scheduled'});
+    return msg;
+  }
+
+  /// Moves [chatId] to a new epoch (someone left, a device was revoked) without the rest of it.
+  void rotateEpoch(String chatId) {
+    _chats[chatId]!.currentEpoch++;
+    _notify(_chats[chatId]!.members.keys, {'type': 'chat', 'chatId': chatId});
+  }
+
+  // --- reminders (server/src/routes/chats.ts, hub.ts) ---
+
+  /// Reminders by user, then message id.
+  final reminders = <String, Map<String, ReminderDto>>{};
+
+  /// Reminder pushes sent, as (device id, message id): to the owner's devices without an open socket.
+  final reminderPushes = <(String, String)>[];
+
+  /// The hub's alarm reaching [userId]'s reminder on [messageId]: a `reminder` frame to every socket
+  /// of theirs, a push to their devices without one, and the row is gone.
+  void fireReminder(String userId, String messageId) {
+    final r = reminders[userId]!.remove(messageId)!;
+    _toUser(userId, {'type': 'reminder', 'chatId': r.chatId, 'messageId': messageId, 'at': r.at});
+    for (final d in _devices.values) {
+      if (d.userId == userId && !d.revoked && !(_hubs[d.id]?.connected ?? false)) reminderPushes.add((d.id, messageId));
+    }
   }
 
   // --- media (server/src/routes/media.ts) ---
@@ -391,6 +511,28 @@ class FakeChatBackend {
     for (final e in byChat.entries) {
       _notify(_chats[e.key]!.members.keys, {'type': 'media_expired', 'chatId': e.key, 'keys': e.value});
     }
+  }
+
+  /// Tombstones of deleted disappearing messages (server/src/hub.ts), oldest first, by cursor.
+  final tombstones = <({int cursor, String chatId, String messageId, int seq})>[];
+  int _tombstoneCursor = 0;
+
+  /// Deletes disappearing messages as the hub's alarm does: the rows go, a tombstone is kept for
+  /// each, and members' open sockets get `gone`.
+  void serverDelete(String chatId, List<String> ids) {
+    final c = _chats[chatId]!;
+    final deleted = <String>[];
+    for (final id in ids) {
+      final m = c.messages.where((x) => x.id == id).firstOrNull;
+      if (m == null) continue;
+      c.messages.remove(m);
+      tombstones.add((cursor: ++_tombstoneCursor, chatId: chatId, messageId: id, seq: m.seq));
+      for (final st in stars.values) {
+        st.remove(id);
+      }
+      deleted.add(id);
+    }
+    if (deleted.isNotEmpty) _notify(c.members.keys, {'type': 'gone', 'chatId': chatId, 'ids': deleted});
   }
 
   ChatDto chatDto(String id, [String? viewer]) => _chats[id]!.dto(viewer);
@@ -423,7 +565,7 @@ class FakeChatBackend {
           'invalid_request' => 400,
           'forbidden' => 403,
           'not_found' => 404,
-          'wraps_mismatch' || 'epoch_exists' || 'stale_epoch' => 409,
+          'wraps_mismatch' || 'epoch_exists' || 'stale_epoch' || 'conflict' => 409,
           _ => 500,
         },
         code,
@@ -462,6 +604,7 @@ class FakeChatBackend {
         'senderDeviceId': m.senderDeviceId,
         'envelope': m.envelope,
         'createdAt': m.createdAt,
+        'disappearSecs': ?m.disappearSecs,
       };
 
   Iterable<FakeHubLink> _socketsOf(String userId) => _hubs.values.where((h) => h.connected && h.userId == userId);
@@ -507,12 +650,18 @@ class FakeChatBackend {
         final env = m['envelope'] as Map<String, Object?>;
         final prior = _chats.values.expand((c) => c.messages).where((x) => x.id == id).firstOrNull;
         if (prior != null) {
-          if (prior.chatId == chatId && prior.senderDeviceId == h.deviceId) {
-            h._deliver({'type': 'ack', 'id': id, 'seq': prior.seq, 'createdAt': prior.createdAt});
+          // A delivered scheduled message acks again for any device of its sender.
+          if (prior.chatId == chatId && (prior.senderDeviceId == h.deviceId || _deliveredScheduled[id] == h.userId)) {
+            h._deliver({'type': 'ack', 'id': id, 'seq': prior.seq, 'createdAt': prior.createdAt, 'disappearSecs': prior.disappearSecs});
           } else {
             h._deliver({'type': 'error', 'id': id, 'error': 'conflict'});
           }
           return;
+        }
+        // My scheduled message's id: deliver it now with this envelope. Someone else's: conflict.
+        final sch = scheduled[id];
+        if (sch != null && (sch.userId != h.userId || sch.chatId != chatId)) {
+          return h._deliver({'type': 'error', 'id': id, 'error': 'conflict'});
         }
         final c = _chats[chatId];
         if (c == null || !c.members.containsKey(h.userId)) {
@@ -524,6 +673,11 @@ class FakeChatBackend {
         if (env['epoch'] != c.currentEpoch || !c.epochs.contains(c.currentEpoch)) {
           return h._deliver({'type': 'error', 'id': id, 'error': 'stale_epoch'});
         }
+        if (sch != null) {
+          scheduled.remove(id);
+          _deliveredScheduled[id] = h.userId;
+          _toUser(h.userId, {'type': 'scheduled'});
+        }
         final msg = MessageDto(
           chatId: chatId,
           seq: ++c.lastSeq,
@@ -532,6 +686,8 @@ class FakeChatBackend {
           senderDeviceId: h.deviceId,
           envelope: env,
           createdAt: now(),
+          // A silent change may carry its target's timer (null for none) instead of the chat's.
+          disappearSecs: m['silent'] == true && m.containsKey('disappearSecs') ? m['disappearSecs'] as int? : c.disappearSecs,
         );
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
@@ -541,7 +697,7 @@ class FakeChatBackend {
           h.dropNextAck = false;
           h.drop();
         } else {
-          h._deliver({'type': 'ack', 'id': id, 'seq': msg.seq, 'createdAt': msg.createdAt});
+          h._deliver({'type': 'ack', 'id': id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': msg.disappearSecs});
         }
         if (h.holdFanOut) return;
         for (final u in c.members.keys) {
@@ -560,6 +716,7 @@ class FakeChatBackend {
         final seq = (m['seq'] as int) < c.lastSeq ? m['seq'] as int : c.lastSeq;
         if (seq <= mem.lastReadSeq) return;
         mem.lastReadSeq = seq;
+        mem.lastReadAt = (readClock ?? now)();
         _notify(c.members.keys, {'type': 'read', 'chatId': c.id, 'userId': h.userId, 'seq': seq});
     }
   }
@@ -787,6 +944,126 @@ class FakeChatApi implements ChatApi {
         c.title = title.trim();
         b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
         return c.dto(userId);
+      });
+
+  @override
+  Future<ChatDto> setDisappearing(String chatId, int? secs) => _run('PATCH /chats/$chatId', () {
+        final c = b._memberChat(chatId, userId);
+        if (secs != null && ![86400, 604800, 7776000].contains(secs)) throw ApiException(400, 'invalid_request');
+        if (c.disappearSecs != secs) {
+          c
+            ..disappearSecs = secs
+            ..disappearChangedBy = userId
+            ..disappearChangedAt = b.now()
+            ..disappearChangedSeq = c.lastSeq;
+        }
+        b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+        return c.dto(userId);
+      });
+
+  @override
+  Future<void> setReminder(String chatId, String messageId, int at) =>
+      _run('PUT /chats/$chatId/messages/$messageId/reminder', () {
+        final c = b._memberChat(chatId, userId);
+        final ahead = at - b.wallClock();
+        if (ahead < 60000 || ahead > 366 * 86400000) b._err('invalid_request');
+        if (!c.messages.any((m) => m.id == messageId)) b._err('not_found');
+        (b.reminders[userId] ??= {})[messageId] = ReminderDto(chatId: chatId, messageId: messageId, at: at);
+        b._notify([userId], {'type': 'reminders'});
+      });
+
+  @override
+  Future<void> clearReminder(String chatId, String messageId) =>
+      _run('DELETE /chats/$chatId/messages/$messageId/reminder', () {
+        b._memberChat(chatId, userId);
+        if (b.reminders[userId]?.remove(messageId) != null) b._notify([userId], {'type': 'reminders'});
+      });
+
+  @override
+  Future<List<ReminderDto>> reminders() => _run('GET /me/reminders', () {
+        final mine = [
+          for (final r in (b.reminders[userId] ?? const <String, ReminderDto>{}).values)
+            if (b._chats[r.chatId]?.members.containsKey(userId) ?? false) r,
+        ]..sort((x, y) => x.at.compareTo(y.at));
+        return mine;
+      });
+
+  @override
+  Future<ScheduledDto> putScheduled(
+    String id, {
+    required String chatId,
+    required Map<String, Object?> envelope,
+    required int deliverAt,
+    bool silent = false,
+    List<String> mentions = const [],
+  }) =>
+      _run('PUT /me/scheduled/$id', () {
+        final c = b._memberChat(chatId, userId);
+        final ahead = deliverAt - b.wallClock();
+        if (ahead < 60000 || ahead > 366 * 86400000) b._err('invalid_request');
+        if (envelope['epoch'] != c.currentEpoch) b._err('stale_epoch');
+        final prior = b.scheduled[id];
+        if ((prior != null && (prior.userId != userId || prior.chatId != chatId)) ||
+            b._chats.values.expand((x) => x.messages).any((m) => m.id == id)) {
+          b._err('conflict');
+        }
+        final t = b.now();
+        final s = (prior ?? _Scheduled(id, chatId, userId, t))
+          ..senderDeviceId = deviceId
+          ..envelope = envelope
+          ..deliverAt = deliverAt
+          ..silent = silent
+          ..mentions = List.of(mentions)
+          ..state = 'pending'
+          ..updatedAt = t;
+        b.scheduled[id] = s;
+        b._notify([userId], {'type': 'scheduled'});
+        return s.dto();
+      });
+
+  @override
+  Future<List<ScheduledDto>> scheduled() => _run('GET /me/scheduled', () {
+        final mine = [
+          for (final s in b.scheduled.values)
+            if (s.userId == userId && (b._chats[s.chatId]?.members.containsKey(userId) ?? false)) s,
+        ]..sort((x, y) => x.deliverAt != y.deliverAt ? x.deliverAt.compareTo(y.deliverAt) : x.id.compareTo(y.id));
+        return [for (final s in mine) s.dto()];
+      });
+
+  _Scheduled _mine(String id) {
+    final s = b.scheduled[id];
+    if (s == null || s.userId != userId) b._err('not_found');
+    return s;
+  }
+
+  @override
+  Future<void> deleteScheduled(String id) => _run('DELETE /me/scheduled/$id', () {
+        _mine(id);
+        b.scheduled.remove(id);
+        b._notify([userId], {'type': 'scheduled'});
+      });
+
+  @override
+  Future<void> sendScheduled(String id) => _run('POST /me/scheduled/$id/send', () {
+        final s = _mine(id);
+        if (s.envelope['epoch'] != b._chats[s.chatId]!.currentEpoch) {
+          s.state = 'needs_resend';
+          b._notify([userId], {'type': 'scheduled'});
+          b._err('stale_epoch');
+        }
+        b._deliverScheduled(s);
+      });
+
+  @override
+  Future<({List<GoneDto> gone, int cursor})> gone({required int after, int limit = 500}) => _run('GET /me/gone', () {
+        final page = [
+          for (final t in b.tombstones)
+            if (t.cursor > after && (b._chats[t.chatId]?.members.containsKey(userId) ?? false)) t,
+        ].take(limit).toList();
+        return (
+          gone: [for (final t in page) GoneDto(chatId: t.chatId, messageId: t.messageId, seq: t.seq)],
+          cursor: page.isEmpty ? after : page.last.cursor,
+        );
       });
 
   @override
