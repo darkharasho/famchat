@@ -20,7 +20,7 @@ MessageRow row(String sender, Plaintext p, {String? id, String state = 'sent'}) 
     kind: p.kind,
     body: jsonEncode(p.toJson()),
     targetId: switch (p) {
-      EditBody(:final target) || DeleteBody(:final target) || ReactionBody(:final target) || PinBody(:final target) =>
+      EditBody(:final target) || DeleteBody(:final target) || ReactionBody(:final target) || PinBody(:final target) || TranscriptBody(:final target) =>
         target,
       _ => null,
     },
@@ -324,5 +324,57 @@ void main() {
     expect(p.album, album);
     final bad = Plaintext.decode(utf8.encode(jsonEncode({...p.toJson(), 'album': 'x'}))) as PhotoBody;
     expect(bad.album, isNull);
+  });
+
+  group('transcripts', () {
+    VoiceBody clip() => VoiceBody(
+          mediaKey: '01JC0000000000000000000000',
+          key: Uint8List(32),
+          sha256: Uint8List(32),
+          durationMs: 1000,
+          waveform: const [],
+          bytes: 10,
+        );
+
+    test("a transcript from the clip's sender shows", () {
+      final v = row('a', clip(), id: 'v');
+      expect(messageChanges([v, row('a', const TranscriptBody('v', 'hello'))]).transcriptOf(v), 'hello');
+      expect(messageChanges([v]).transcriptOf(v), isNull);
+    });
+
+    test('the latest transcript wins, failed ones skipped', () {
+      final v = row('a', clip(), id: 'v');
+      final c = messageChanges([
+        v,
+        row('a', const TranscriptBody('v', 'a')),
+        row('a', const TranscriptBody('v', 'b')),
+        row('a', const TranscriptBody('v', 'c'), state: 'failed'),
+      ]);
+      expect(c.transcriptOf(v), 'b');
+    });
+
+    test('a transcript stored before its clip still counts', () {
+      final t = row('a', const TranscriptBody('v', 'hello'));
+      final v = row('a', clip(), id: 'v');
+      expect(messageChanges([t, v]).transcriptOf(v), 'hello');
+    });
+
+    test("others' transcripts and non-voice targets are ignored", () {
+      final v = row('a', clip(), id: 'v');
+      expect(messageChanges([v, row('b', const TranscriptBody('v', 'hacked'))]).transcriptOf(v), isNull);
+      final t = row('a', const TextBody('hi'), id: 't');
+      final c = messageChanges([t, row('a', const TranscriptBody('t', 'nope'))]);
+      expect(c.transcriptOf(t), isNull);
+      expect(c.textOf(t), 'hi');
+      expect(c.edited, isEmpty);
+    });
+
+    test('a deleted clip has no transcript', () {
+      final v = row('a', clip(), id: 'v');
+      final c = messageChanges([v, row('a', const TranscriptBody('v', 'hello')), row('a', const DeleteBody('v'))]);
+      expect(c.transcriptOf(v), isNull);
+      final late = messageChanges([v, row('a', const DeleteBody('v')), row('a', const TranscriptBody('v', 'hello'))]);
+      expect(late.transcriptOf(v), isNull);
+    });
   });
 }
