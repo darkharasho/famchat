@@ -172,6 +172,17 @@ void main() {
     expect(summary(tester), 'Pick one or more · 1 voted');
   });
 
+  chatTestWidgets("multiple choice: a quick second tap keeps the first pick", (tester) async {
+    await open(tester, [poll('p1', 1, bob.userId, 'Which days work?', ['Thu', 'Fri', 'Sat'], multi: true)]);
+    await tester.tap(find.byKey(const Key('poll-option-0')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('poll-option-2')));
+    await settle(tester);
+    final votes = [for (final r in await rows(tester)) if (r.kind == 'vote') jsonDecode(r.body!)['choices']];
+    expect(votes.last, [0, 2]);
+    expect([for (var i = 0; i < 3; i++) count(tester, i)], ['1', '0', '1']);
+  });
+
   chatTestWidgets("See votes lists who picked what, then who hasn't voted", (tester) async {
     await open(tester, [
       poll('p1', 1, bob.userId, 'Pizza or tacos?', ['Pizza', 'Tacos']),

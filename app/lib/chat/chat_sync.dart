@@ -548,7 +548,8 @@ class ChatSync {
     if (chat == null) return;
     if (seq == chat.syncedSeq + 1) {
       await db.setSyncedSeq(row.chatId, seq);
-      await db.noteActivity(row.chatId, seq, at);
+      // My own change to another message (a vote, reaction, pin, …) isn't chat activity either.
+      await db.noteActivity(row.chatId, seq, changeKinds.contains(row.kind) ? 0 : at);
     } else if (seq > chat.syncedSeq + 1) {
       await _catchUp(row.chatId);
     }

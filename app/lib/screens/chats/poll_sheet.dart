@@ -82,11 +82,14 @@ class _NewPollSheetState extends State<NewPollSheet> {
     });
   }
 
-  /// Why Send is off, when it isn't obvious: two options alike.
+  /// Why Send is off, when it isn't obvious: two options alike, or text too long (emoji can count
+  /// as several characters on the wire though the field shows one).
   String? get _problem {
+    if (_question.text.trim().runes.length > maxPollQuestion) return 'The question is too long.';
     final seen = <String>{};
     for (final c in _options) {
       final t = c.text.trim().toLowerCase();
+      if (t.runes.length > maxPollOption) return 'An option is too long.';
       if (t.isNotEmpty && !seen.add(t)) return 'Two options are the same.';
     }
     return null;

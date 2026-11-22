@@ -1,9 +1,11 @@
 // A poll inside its message bubble (docs/protocol.md "Polls"): the question, each option with a bar,
 // the faces of who picked it and a count; tapping an option votes at once.
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../chat/db/chat_db.dart';
 import '../../chat/polls.dart';
+import '../../chat/providers.dart';
 import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/person_avatar.dart';
@@ -15,9 +17,10 @@ const _maxFaces = 3;
 const _trophy = '🏆';
 
 /// The choices to send when [me] taps option [i] of [state]: single choice moves the vote there (or
-/// takes it back when [i] is already the pick), multiple choice toggles [i].
-List<int> pollTap(PollState state, String me, int i) {
-  final mine = state.mine(me);
+/// takes it back when [i] is already the pick), multiple choice toggles [i]. [current] (a vote sent
+/// but not folded yet) stands in for what [state] says [me] picked.
+List<int> pollTap(PollState state, String me, int i, {List<int>? current}) {
+  final mine = current ?? state.mine(me);
   if (!state.poll.multi) return mine.length == 1 && mine.first == i ? const [] : [i];
   return mine.contains(i) ? [for (final c in mine) if (c != i) c] : ([...mine, i]..sort());
 }
@@ -35,6 +38,7 @@ class PollBubble extends StatelessWidget {
     this.onVote,
     this.onEnd,
     this.onSeeVotes,
+    this.picked,
   });
 
   final MessageRow row;
@@ -48,6 +52,9 @@ class PollBubble extends StatelessWidget {
   final String Function(String userId) nameOf;
   final ValueChanged<List<int>>? onVote;
   final VoidCallback? onEnd, onSeeVotes;
+
+  /// My last vote while it isn't in [state] yet (quick taps build on it, not on the stale fold).
+  final List<int>? picked;
 
   Future<void> _confirmEnd(BuildContext context) async {
     final ok = await showDialog<bool>(
@@ -76,7 +83,7 @@ class PollBubble extends StatelessWidget {
     final meta = mine ? t.mineMeta : t.theirsMeta;
     final poll = state.poll;
     final ended = state.ended;
-    final picked = me == null ? const <int>[] : state.mine(me!);
+    final picked = me == null ? const <int>[] : this.picked ?? state.mine(me!);
     final voters = state.votes.length;
     final canVote = !ended && onVote != null && me != null;
     final hint = ended || !canVote
@@ -128,7 +135,7 @@ class PollBubble extends StatelessWidget {
       return InkWell(
         key: Key('poll-option-$i'),
         borderRadius: BorderRadius.circular(Radii.xs),
-        onTap: canVote ? () => onVote!(pollTap(state, me!, i)) : null,
+        onTap: canVote ? () => onVote!(pollTap(state, me!, i, current: this.picked)) : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -246,10 +253,13 @@ class PollBubble extends StatelessWidget {
   }
 }
 
-/// Who picked each option of [state], then "Hasn't voted:" with the [members] who haven't.
+/// Who picked each option of poll [pollId] in [chatId] (kept up to date while open; [state] until the
+/// fold has it: [initial]), then "Hasn't voted:" with the [members] who haven't.
 Future<void> showPollVotesSheet(
   BuildContext context, {
-  required PollState state,
+  required String chatId,
+  required String pollId,
+  required PollState initial,
   required List<MemberRow> members,
   required Map<String, UserRow> users,
   required String? me,
@@ -257,7 +267,8 @@ Future<void> showPollVotesSheet(
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
+      builder: (context) => Consumer(builder: (context, ref, _) {
+        final state = ref.watch(pollsProvider(chatId))[pollId] ?? initial;
         final theme = Theme.of(context);
         String nameOf(String id) => id == me ? 'You' : users[id]?.name ?? 'Someone';
         Widget heading(String text, {Key? key, String? trailing}) => Padding(
@@ -304,5 +315,5 @@ Future<void> showPollVotesSheet(
             ]),
           ),
         );
-      },
+      }),
     );

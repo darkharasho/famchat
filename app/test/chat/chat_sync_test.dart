@@ -483,6 +483,18 @@ void main() {
     expect(() => alice.sync.sendPoll(chatId, const PollBody('Q', ['a', 'a'])), throwsArgumentError);
   });
 
+  test("my own vote isn't chat activity when it's acked", () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final pollId = await alice.sync.sendPoll(chatId, const PollBody('Lunch?', ['Pizza', 'Tacos']));
+    await until(() async => (await bob.d.db.messageById(pollId))?.seq != null);
+    final before = (await bob.d.db.chatById(chatId))!.lastMessageAt;
+    final vote = await bob.sync.vote(chatId, pollId, [1]);
+    await until(() async => (await bob.d.db.messageById(vote))?.seq != null);
+    expect((await bob.d.db.chatById(chatId))!.lastMessageAt, before);
+  });
+
   test("muting is per user and reaches the user's other devices", () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

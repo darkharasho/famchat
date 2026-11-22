@@ -98,6 +98,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Desktop and web: the emoji popover.
   final _emojiPopover = EmojiPopoverHandle();
 
+  /// Poll id → (my picks as the fold showed them when I tapped, the picks I sent): until the fold
+  /// moves off the former, quick taps build on what was sent rather than on the stale fold.
+  final _sentVotes = <String, (List<int>, List<int>)>{};
+
   /// The `:partial` being typed, its matches and the highlighted one.
   ShortcodeQuery? _query;
   List<ShortcodeMatch> _matches = const [];
@@ -1265,15 +1269,24 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
       if (state == null) return null;
       final open = m.state != 'failed' && !readOnly && !state.ended;
+      final folded = me == null ? const <int>[] : state.mine(me);
+      final sent = _sentVotes[m.id];
+      if (sent != null && !listEquals(sent.$1, folded)) _sentVotes.remove(m.id);
       return PollBubble(
         row: m,
         state: state,
         me: me,
         mine: m.senderUserId == me,
         nameOf: (u) => users[u]?.name ?? '?',
-        onVote: open ? (choices) => ref.read(chatSyncProvider)?.vote(chatId, m.id, choices) : null,
+        picked: _sentVotes[m.id]?.$2,
+        onVote: open
+            ? (choices) {
+                setState(() => _sentVotes[m.id] = (_sentVotes[m.id]?.$1 ?? folded, choices));
+                ref.read(chatSyncProvider)?.vote(chatId, m.id, choices);
+              }
+            : null,
         onEnd: open && m.senderUserId == me && m.seq != null ? () => ref.read(chatSyncProvider)?.endPoll(chatId, m.id) : null,
-        onSeeVotes: () => showPollVotesSheet(context, state: state, members: members, users: users, me: me),
+        onSeeVotes: () => showPollVotesSheet(context, chatId: chatId, pollId: m.id, initial: state, members: members, users: users, me: me),
       );
     }
     final visible = messages
