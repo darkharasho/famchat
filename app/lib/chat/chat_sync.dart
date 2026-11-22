@@ -143,6 +143,7 @@ class ChatSync {
       if (up) {
         // Waiting messages go out now; the sync after them can take a while on a slow network.
         unawaited(_flushOutbox().catchError((_) {}));
+        unawaited(_flushScheduled().catchError((_) {}));
         _enqueue(_connectSync);
       } else {
         _syncRetry?.cancel();
@@ -266,6 +267,12 @@ class ChatSync {
     } on ApiException {
       // Someone else's device state changed meanwhile; next sync.
     }
+    try {
+      // After the keys: it decrypts what other devices scheduled and re-encrypts what needs it.
+      await refreshScheduled();
+    } catch (_) {
+      // The list waits for the next sync or `scheduled` event; messages don't wait for it.
+    }
     await _flushOutbox();
   }
 
@@ -319,9 +326,16 @@ class ChatSync {
       _inflight.remove(m.id);
       row = existing;
     } else {
-      row = (decrypted ?? await _decrypt(m)).copyWith(expiresAt: Value(_expiryOf(m, chat.myLastReadSeq)));
+      // One of my scheduled messages arriving: delivered at its time, or re-sent late by another of
+      // my devices after a key change (then it shows "sent late" here too).
+      final sched = m.senderUserId == me.userId ? await db.scheduledById(m.id) : null;
+      row = (decrypted ?? await _decrypt(m)).copyWith(
+        expiresAt: Value(_expiryOf(m, chat.myLastReadSeq)),
+        scheduledFor: Value(sched?.state == 'needs_resend' ? sched!.deliverAt : null),
+      );
       await db.insertMessageIfAbsent(row);
     }
+    if (m.senderUserId == me.userId) await db.deleteScheduled(m.id);
     await db.setSyncedSeq(m.chatId, m.seq);
     // A change to another message isn't chat activity (0 leaves last_message_at as it is).
     await db.noteActivity(m.chatId, m.seq, changeKinds.contains(row.kind) ? 0 : m.createdAt);
@@ -511,6 +525,11 @@ class ChatSync {
         await _flushOutbox();
       case 'stars':
         await refreshStars();
+      case 'scheduled':
+        await refreshScheduled();
+      case 'needs_resend':
+        // My scheduled message's key changed before it went out: re-encrypt it and send it now.
+        if (e['id'] case final String id) await _onSchedLane(() => _needsResend(id));
       case 'gone':
         // The server deleted these disappearing messages (everyone read them, or the backstop).
         final ids = [...?(e['ids'] as List?)?.whereType<String>()];
@@ -545,6 +564,7 @@ class ChatSync {
       case 'keys':
         await keys.fetch(chatId: e['chatId'] as String?);
         await _retryUndecryptable();
+        await _onSchedLane(_openWaitingScheduled);
         await _flushOutbox();
       case 'read':
         final chatId = e['chatId'] as String, userId = e['userId'] as String, seq = e['seq'] as int;
@@ -574,6 +594,8 @@ class ChatSync {
     final id = e['id'] as String, seq = e['seq'] as int, at = e['createdAt'] as int;
     _inflight.remove(id);
     _staleRetries.remove(id);
+    // A scheduled message of mine was delivered (at its time, or sent now).
+    await db.deleteScheduled(id);
     final row = await db.messageById(id);
     if (row != null && row.seq == null) {
       // The ack doesn't say which timer the server stamped: it took the chat's at delivery, which
@@ -686,7 +708,9 @@ class ChatSync {
     if (row.state != 'pending' || !hub.connected) return;
     final gate = beforeSend;
     try {
-      if (gate == null ? mediaKinds.contains(row.kind) : !await gate(row)) return; // media not uploaded yet
+      // A scheduled message re-sent late uploaded its blobs when it was scheduled (here or on
+      // another of my devices); the server keeps them under its id.
+      if (row.scheduledFor == null && (gate == null ? mediaKinds.contains(row.kind) : !await gate(row))) return; // media not uploaded yet
     } catch (_) {
       return; // the gate's storage failed: keep the row pending, don't stall the rest of the outbox
     }
@@ -697,16 +721,7 @@ class ChatSync {
       return;
     }
     if (!ok) return; // waits for the epoch's key (a keys/chat event or the next sync retries)
-    final key = (await keys.key(row.chatId, chat.currentEpoch))!;
-    final env = await encryptEnvelope(
-      chatKey: key,
-      epoch: chat.currentEpoch,
-      chatId: row.chatId,
-      messageId: row.id,
-      senderDeviceId: me.deviceId,
-      signKey: me.keys.sign,
-      plaintext: utf8.encode(row.body!),
-    );
+    final env = await _encrypt(chat, row.id, row.body!);
     if (hub.send({
       'type': 'send',
       'id': row.id,
@@ -721,6 +736,18 @@ class ChatSync {
       _handedToHub.add(row.id);
     }
   }
+
+  /// [body] encrypted under [chat]'s current epoch as message [id] from this device (the epoch's key
+  /// must be here: see [ChatKeys.ensureCurrentEpoch]).
+  Future<Envelope> _encrypt(ChatRow chat, String id, String body) async => encryptEnvelope(
+        chatKey: (await keys.key(chat.id, chat.currentEpoch))!,
+        epoch: chat.currentEpoch,
+        chatId: chat.id,
+        messageId: id,
+        senderDeviceId: me.deviceId,
+        signKey: me.keys.sign,
+        plaintext: utf8.encode(body),
+      );
 
   static List<String> _mentionsOf(MessageRow row) {
     if ((row.kind != 'text' && !captionKinds.contains(row.kind)) || row.body == null) return const [];
@@ -746,8 +773,19 @@ class ChatSync {
   /// for a connection or an upload).
   Future<bool> hasUnsent() async => (await db.pendingOutbox(me.deviceId)).isNotEmpty;
 
-  /// Queues an outbox flush (on the send lane).
-  void flushSoon() => unawaited(_flushOutbox().catchError((_) {}));
+  /// Queues an outbox flush (on the send lane) and hands waiting scheduled messages to the server.
+  void flushSoon() {
+    unawaited(_flushOutbox().catchError((_) {}));
+    unawaited(_flushScheduled().catchError((_) {}));
+  }
+
+  /// A media message whose blobs can't be uploaded (refused, or lost here): it fails, in the outbox
+  /// or, not yet on the server, among the scheduled ones.
+  Future<void> failUnsendable(String id) async {
+    await db.setMessageState(id, 'failed');
+    final s = await db.scheduledById(id);
+    if (s != null && !s.onServer) await db.setScheduledState(id, 'failed');
+  }
 
   /// Queues any plaintext kind (media messages; [id] lets the caller tie uploads to the message).
   /// [forwarded] marks a copy of another message (`"forwarded": true`).
@@ -776,10 +814,12 @@ class ChatSync {
   /// Queues a text message (optionally a reply to [replyTo]) and returns its id. Throws
   /// [ArgumentError] for empty or too-long text.
   /// [mentions]: users @mentioned in it (see `lib/chat/mentions.dart`).
-  Future<String> sendText(String chatId, String text, {String? replyTo, List<String> mentions = const []}) {
+  /// [at]: schedule it for then instead (see [scheduleMessage]).
+  Future<String> sendText(String chatId, String text, {String? replyTo, List<String> mentions = const [], DateTime? at}) {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
-    return _enqueueMessage(chatId, TextBody(t, replyTo: replyTo, mentions: mentions.take(maxMentions).toList()));
+    final body = TextBody(t, replyTo: replyTo, mentions: mentions.take(maxMentions).toList());
+    return at == null ? _enqueueMessage(chatId, body) : scheduleMessage(chatId, body, at);
   }
 
   /// Replaces the text of this user's text message [messageId]. Throws [ArgumentError] for empty or
@@ -940,6 +980,422 @@ class ChatSync {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Scheduled messages (docs/protocol.md "Scheduled messages")
+
+  /// How far ahead a message can be scheduled (or a reminder set): the server's window.
+  static const scheduleMin = Duration(minutes: 1), scheduleMax = Duration(days: 366);
+
+  /// Whether [at] is between [scheduleMin] and [scheduleMax] from now.
+  bool canScheduleAt(DateTime at) {
+    final ahead = at.difference(_now());
+    return ahead >= scheduleMin && ahead <= scheduleMax;
+  }
+
+  /// Scheduled-message work runs here, one job at a time (handing them to the server, refreshes,
+  /// re-sends, cancels), so a refresh never lands in the middle of an edit. A failure is logged,
+  /// not propagated to the lane; the returned future does carry it.
+  Future<void> _schedLane = Future.value();
+  Future<T> _onSchedLane<T>(Future<T> Function() f) {
+    final run = _schedLane.then((_) => f());
+    _schedLane = run.then((_) {}, onError: (Object e, StackTrace st) {
+      // The caller gets its own errors (API refusals, bad input); only surprises are logged.
+      if (e is! NetworkException && e is! SignedOutException && e is! ApiException && e is! StateError && e is! ArgumentError) {
+        // ignore: avoid_print
+        print('chat schedule: $e\n$st');
+      }
+    });
+    return run;
+  }
+
+  /// Schedules [p] in [chatId] for [at] and returns its id ([id] lets the media layer tie the
+  /// blobs it staged to it). The plaintext stays here; once its blobs are uploaded it's encrypted
+  /// under the current epoch and handed to the server, which delivers it at [at] even if every
+  /// device of mine is off. Throws [ArgumentError] when [at] isn't [scheduleMin] to [scheduleMax]
+  /// ahead.
+  Future<String> scheduleMessage(String chatId, Plaintext p, DateTime at, {String? id}) async {
+    if (!canScheduleAt(at)) throw ArgumentError.value(at, 'at', 'not between a minute and 366 days ahead');
+    id ??= newUlid(_now());
+    final now = _now().millisecondsSinceEpoch;
+    await db.putScheduled(ScheduledRow(
+      id: id,
+      chatId: chatId,
+      kind: p.kind,
+      body: jsonEncode(p.toJson()),
+      envelope: null,
+      deliverAt: at.millisecondsSinceEpoch,
+      state: 'local',
+      onServer: false,
+      senderDeviceId: me.deviceId,
+      createdAt: now,
+      updatedAt: now,
+    ));
+    unawaited(_flushScheduled().catchError((_) {}));
+    return id;
+  }
+
+  /// Hands every scheduled message made here and not on the server yet to it (on the lane).
+  Future<void> _flushScheduled() => _onSchedLane(() async {
+        for (final s in await db.scheduledToSubmit()) {
+          try {
+            await _submit(s);
+          } on NetworkException {
+            return; // offline: the next connect or flush
+          } on ApiException {
+            // Stays as it is; the next flush tries again.
+          }
+        }
+      });
+
+  /// [s] as the outbox gate and the mention list see a message.
+  MessageRow _probe(ScheduledRow s, String body) => MessageRow(
+        id: s.id,
+        chatId: s.chatId,
+        seq: null,
+        senderUserId: me.userId,
+        senderDeviceId: me.deviceId,
+        kind: s.kind ?? _kindOf(body),
+        body: body,
+        targetId: null,
+        envelope: null,
+        createdAt: s.createdAt,
+        state: 'pending',
+      );
+
+  static String _kindOf(String body) {
+    try {
+      return Plaintext.decode(utf8.encode(body)).kind;
+    } on FormatException {
+      return 'unknown';
+    }
+  }
+
+  Future<void> _submit(ScheduledRow s) async {
+    final body = s.body;
+    if (body == null) return;
+    final probe = _probe(s, body);
+    final gate = beforeSend;
+    try {
+      // The same gate as the outbox: media is uploaded under the message id first.
+      if (gate == null ? mediaKinds.contains(probe.kind) : !await gate(probe)) return;
+    } catch (_) {
+      return;
+    }
+    final fresh = await db.scheduledById(s.id);
+    if (fresh == null || fresh.state != 'local' || fresh.onServer) return; // cancelled or failed meanwhile
+    if (fresh.deliverAt - _now().millisecondsSinceEpoch < scheduleMin.inMilliseconds) {
+      // Its time came while it waited (for an upload or a connection): it goes now, as a message.
+      await _toOutbox(fresh, body);
+      return;
+    }
+    for (var attempt = 0;; attempt++) {
+      final ok = await keys.ensureCurrentEpoch(s.chatId);
+      final chat = await db.chatById(s.chatId);
+      if (chat == null) {
+        await db.setScheduledState(s.id, 'failed');
+        return;
+      }
+      if (!ok) return; // waits for the epoch's key, like the outbox
+      final env = await _encrypt(chat, s.id, body);
+      try {
+        final d = await api.putScheduled(
+          s.id,
+          chatId: s.chatId,
+          envelope: env.toJson(),
+          deliverAt: fresh.deliverAt,
+          mentions: _mentionsOf(probe),
+        );
+        await db.putScheduled(_rowOf(d, body: body));
+        return;
+      } on ApiException catch (e) {
+        if (e.code == 'stale_epoch' && attempt < maxStaleRetries) {
+          // The key changed: refresh the chat, get the new epoch's key and encrypt again.
+          await _refreshChat(s.chatId);
+          continue;
+        }
+        if (e.status >= 500 || e.status == 408 || e.status == 429) rethrow;
+        if (e.status == 400 && fresh.deliverAt - _now().millisecondsSinceEpoch < 2 * scheduleMin.inMilliseconds) {
+          await _toOutbox(fresh, body); // too close to its time now
+          return;
+        }
+        await db.setScheduledState(s.id, 'failed');
+        return;
+      }
+    }
+  }
+
+  /// [d] as stored here, with its plaintext [body] (null when it can't be read here).
+  ScheduledRow _rowOf(ScheduledDto d, {String? body}) => ScheduledRow(
+        id: d.id,
+        chatId: d.chatId,
+        kind: body == null ? null : _kindOf(body),
+        body: body,
+        envelope: jsonEncode(d.envelope),
+        deliverAt: d.deliverAt,
+        state: d.state,
+        onServer: true,
+        senderDeviceId: d.senderDeviceId,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+      );
+
+  /// Moves [s] into the outbox, to go now with a normal `send` under the same id: the server
+  /// delivers a scheduled message of mine that way exactly once, whichever of my devices sends it.
+  /// [scheduledFor] marks a late one (see [LocalMessages.scheduledFor]).
+  Future<void> _toOutbox(ScheduledRow s, String body, {int? scheduledFor}) async {
+    await db.transaction(() async {
+      await db.insertMessageIfAbsent(MessageRow(
+        id: s.id,
+        chatId: s.chatId,
+        seq: null,
+        senderUserId: me.userId,
+        senderDeviceId: me.deviceId,
+        kind: _kindOf(body),
+        body: body,
+        targetId: null,
+        envelope: null,
+        createdAt: _now().millisecondsSinceEpoch,
+        state: 'pending',
+        scheduledFor: scheduledFor,
+      ));
+      await db.deleteScheduled(s.id);
+    });
+    unawaited(_flushOutbox().catchError((_) {}));
+  }
+
+  /// A `needs_resend` frame for [id].
+  Future<void> _needsResend(String id) async {
+    final s = await db.scheduledById(id);
+    if (s == null || !s.onServer) {
+      await _refreshScheduledNow(); // brings it, and re-sends it
+      return;
+    }
+    await _resend(s.copyWith(state: 'needs_resend'));
+  }
+
+  /// Re-encrypts [s] under the current epoch and sends it now (late), from its plaintext here or,
+  /// when this device has none (scheduled on a device since wiped), from what the server holds,
+  /// decrypted with the key of the epoch it was encrypted under. Left listed when neither works.
+  Future<void> _resend(ScheduledRow s) async {
+    if (await db.messageById(s.id) != null) {
+      await db.deleteScheduled(s.id); // already on its way from here (or delivered)
+      return;
+    }
+    final env = s.envelope;
+    final body = s.body ??
+        (env == null || s.senderDeviceId == null
+            ? null
+            : await _openScheduled(s.id, s.chatId, s.senderDeviceId!, (jsonDecode(env) as Map).cast<String, Object?>()));
+    if (body == null) {
+      await db.putScheduled(s);
+      return;
+    }
+    await _toOutbox(s, body, scheduledFor: s.deliverAt);
+  }
+
+  /// The plaintext JSON of my scheduled message [id] as the server holds it ([envelope], signed by
+  /// my device [senderDeviceId]), decrypted with the key of its epoch (older epochs' keys stay
+  /// here), or null when it can't be.
+  Future<String?> _openScheduled(String id, String chatId, String senderDeviceId, Map<String, Object?> envelope) async {
+    try {
+      final env = Envelope.fromJson(envelope);
+      final device = await directory.device(senderDeviceId);
+      if (device == null || device.userId != me.userId || !device.trusted) return null;
+      var key = await keys.key(chatId, env.epoch);
+      if (key == null) {
+        await keys.fetch(chatId: chatId);
+        key = await keys.key(chatId, env.epoch);
+      }
+      if (key == null) return null;
+      final raw = await decryptEnvelope(
+        envelope: env,
+        chatKey: key,
+        chatId: chatId,
+        messageId: id,
+        senderDeviceId: senderDeviceId,
+        senderSignPub: device.signPub,
+      );
+      final p = Plaintext.decode(raw);
+      if (changeKinds.contains(p.kind)) return null;
+      return jsonEncode({..._fields(raw), ...p.toJson()});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Takes the server's list of my scheduled messages (`GET /me/scheduled`): ones gone from it
+  /// were delivered, cancelled or dropped; ones scheduled or edited on another device are decrypted
+  /// for showing; `needs_resend` ones are re-encrypted and sent.
+  Future<void> refreshScheduled() => _onSchedLane(_refreshScheduledNow);
+
+  Future<void> _refreshScheduledNow() async {
+    final list = await api.scheduled();
+    final ids = {for (final d in list) d.id};
+    for (final local in await db.allScheduled()) {
+      if (local.onServer && !ids.contains(local.id)) await db.deleteScheduled(local.id);
+    }
+    final resend = <ScheduledRow>[];
+    for (final d in list) {
+      // In this device's outbox (being re-sent or sent now) or already delivered.
+      if (await db.messageById(d.id) != null) {
+        await db.deleteScheduled(d.id);
+        continue;
+      }
+      final local = await db.scheduledById(d.id);
+      final env = jsonEncode(d.envelope);
+      // Unchanged since this device last saw it (or this device's own hand-off whose answer was
+      // lost): the plaintext here is still what the server holds.
+      var body = local != null && (local.envelope == env || !local.onServer) ? local.body : null;
+      body ??= await _openScheduled(d.id, d.chatId, d.senderDeviceId, d.envelope);
+      final row = _rowOf(d, body: body);
+      await db.putScheduled(row);
+      if (d.state == 'needs_resend') resend.add(row);
+    }
+    for (final r in resend) {
+      await _resend(r);
+    }
+  }
+
+  /// Scheduled messages listed without their plaintext (their epoch's key wasn't here yet):
+  /// decrypted now if they can be.
+  Future<void> _openWaitingScheduled() async {
+    for (final s in await db.allScheduled()) {
+      final env = s.envelope, device = s.senderDeviceId;
+      if (s.body != null || env == null || device == null) continue;
+      final body = await _openScheduled(s.id, s.chatId, device, (jsonDecode(env) as Map).cast<String, Object?>());
+      if (body != null) await db.putScheduled(s.copyWith(body: Value(body), kind: Value(_kindOf(body))));
+    }
+  }
+
+  /// Cancels my scheduled message [id] everywhere (the server deletes the media uploaded for it).
+  Future<void> cancelScheduled(String id) => _onSchedLane(() async {
+        final s = await db.scheduledById(id);
+        if (s == null) return;
+        try {
+          await api.deleteScheduled(id);
+        } on ApiException catch (e) {
+          if (e.status != 404) rethrow; // 404: gone already, or never handed over
+        } catch (_) {
+          if (s.onServer) rethrow; // offline: the server would still send it
+        }
+        await db.deleteScheduled(id);
+      });
+
+  /// Sends my scheduled message [id] now.
+  Future<void> sendScheduledNow(String id) => _onSchedLane(() async {
+        final s = await db.scheduledById(id);
+        if (s == null) return;
+        if (!s.onServer) {
+          // Not on the server yet: it goes like any message (its blobs upload first).
+          if (s.body case final body?) await _toOutbox(s, body);
+          return;
+        }
+        if (s.state == 'needs_resend') return _resend(s);
+        try {
+          await api.sendScheduled(id);
+          await db.deleteScheduled(id); // its `msg` and `ack` are on their way
+        } on ApiException catch (e) {
+          switch (e.code) {
+            case 'stale_epoch':
+              await _resend(s.copyWith(state: 'needs_resend'));
+            case 'not_found':
+              await db.deleteScheduled(id); // delivered or cancelled meanwhile
+            default:
+              rethrow;
+          }
+        }
+      });
+
+  /// Tries a failed scheduled message again: one the server refused or couldn't take is handed to
+  /// it again; one the server failed to deliver goes now.
+  Future<void> retryScheduled(String id) async {
+    final s = await db.scheduledById(id);
+    if (s == null) return;
+    if (s.onServer) return sendScheduledNow(id);
+    await db.setScheduledState(id, 'local');
+    await _flushScheduled();
+  }
+
+  /// Changes my scheduled message [id]: its text or caption ([text]; for a caption, blank removes
+  /// it) with its @[mentions], and/or its time [at]. The server's copy is replaced under the same
+  /// id (re-encrypted under the current epoch). Throws [ArgumentError] for a bad time or text, and
+  /// [StateError] when it's gone or can't be read here.
+  Future<void> editScheduled(String id, {String? text, List<String>? mentions, DateTime? at}) => _onSchedLane(() async {
+        final s = await db.scheduledById(id);
+        if (s == null) throw StateError('no scheduled message $id');
+        if (at != null && !canScheduleAt(at)) throw ArgumentError.value(at, 'at', 'not between a minute and 366 days ahead');
+        final env = s.envelope;
+        var body = s.body ??
+            (env == null || s.senderDeviceId == null
+                ? null
+                : await _openScheduled(id, s.chatId, s.senderDeviceId!, (jsonDecode(env) as Map).cast<String, Object?>()));
+        if (body == null) throw StateError("scheduled message $id can't be read here");
+        if (text != null) body = _withText(body, text, mentions);
+        final deliverAt = at?.millisecondsSinceEpoch ?? s.deliverAt;
+        if (!s.onServer) {
+          await db.putScheduled(s.copyWith(
+            body: Value(body),
+            deliverAt: deliverAt,
+            state: 'local',
+            updatedAt: _now().millisecondsSinceEpoch,
+          ));
+          unawaited(_flushScheduled().catchError((_) {}));
+          return;
+        }
+        final probe = _probe(s, body);
+        for (var attempt = 0;; attempt++) {
+          final ok = await keys.ensureCurrentEpoch(s.chatId);
+          final chat = await db.chatById(s.chatId);
+          if (chat == null || !ok) throw StateError('no key for chat ${s.chatId}');
+          final envelope = await _encrypt(chat, id, body);
+          try {
+            final d = await api.putScheduled(
+              id,
+              chatId: s.chatId,
+              envelope: envelope.toJson(),
+              deliverAt: deliverAt,
+              mentions: _mentionsOf(probe),
+            );
+            await db.putScheduled(_rowOf(d, body: body));
+            return;
+          } on ApiException catch (e) {
+            if (e.code != 'stale_epoch' || attempt >= maxStaleRetries) rethrow;
+            await _refreshChat(s.chatId);
+          }
+        }
+      });
+
+  /// [body] with its text (a text) or caption (a photo or video) replaced.
+  static String _withText(String body, String text, List<String>? mentions) {
+    final j = Map<String, Object?>.from(jsonDecode(body) as Map);
+    final t = validMessageText(text);
+    switch (j['kind']) {
+      case 'text':
+        if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
+        j['text'] = t;
+      case final String k when captionKinds.contains(k):
+        if (text.trim().isEmpty) {
+          j.remove('caption');
+        } else if (t == null) {
+          throw ArgumentError.value(text, 'text', 'longer than $maxTextLength characters');
+        } else {
+          j['caption'] = t;
+        }
+      default:
+        throw ArgumentError.value(text, 'text', 'this message has no text');
+    }
+    if (mentions != null) {
+      if (mentions.isEmpty) {
+        j.remove('mentions');
+      } else {
+        j['mentions'] = mentions.take(maxMentions).toList();
+      }
+    }
+    final out = jsonEncode(j);
+    Plaintext.decode(utf8.encode(out)); // still a valid message
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Disappearing messages
 
   Timer? _sweepTimer;
@@ -1078,12 +1534,13 @@ class ChatSync {
 
   /// Sends [poll] to [chatId]; the returned id (the message's) is the poll's id. Throws
   /// [ArgumentError] for a poll receivers would drop (see [validPoll]).
-  Future<String> sendPoll(String chatId, PollBody poll) {
+  /// [at]: schedule it for then instead (see [scheduleMessage]).
+  Future<String> sendPoll(String chatId, PollBody poll, {DateTime? at}) {
     final p = validPoll(poll.question, poll.options, multi: poll.multi, replyTo: poll.replyTo);
     if (p == null || p.options.length != poll.options.length) {
       throw ArgumentError.value(poll, 'poll', 'question or options out of limits');
     }
-    return _enqueueMessage(chatId, p);
+    return at == null ? _enqueueMessage(chatId, p) : scheduleMessage(chatId, p, at);
   }
 
   /// Sets this user's choices on poll [pollId] (option indexes); empty takes the vote back. Sent silent.

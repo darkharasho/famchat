@@ -104,6 +104,48 @@ class LocalMessages extends Table {
   /// 30 days) while I haven't read it. Null for messages without a timer.
   IntColumn get expiresAt => integer().nullable()();
 
+  /// My scheduled message that went out late (re-encrypted after the chat's key changed): the time
+  /// it was scheduled for, so it shows "sent late" to me. Null for every other message.
+  IntColumn get scheduledFor => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// My scheduled messages (docs/protocol.md "Scheduled messages"), mirrored from `GET /me/scheduled`
+/// plus the ones this device made and hasn't handed to the server yet. The plaintext stays here so a
+/// key change can be answered by re-encrypting it.
+@DataClassName('ScheduledRow')
+class LocalScheduled extends Table {
+  /// The message id it will be delivered as.
+  TextColumn get id => text()();
+  TextColumn get chatId => text()();
+
+  /// The plaintext's kind; null while a message scheduled on another device can't be decrypted.
+  TextColumn get kind => text().nullable()();
+
+  /// The plaintext JSON: kept from scheduling, or decrypted from [envelope]; null if neither.
+  TextColumn get body => text().nullable()();
+
+  /// The envelope JSON the server holds, or null before the server has it.
+  TextColumn get envelope => text().nullable()();
+
+  /// When it goes out (Unix ms).
+  IntColumn get deliverAt => integer()();
+
+  /// `local` (not on the server yet: uploading or waiting to be sent there), or the server's
+  /// `pending`, `needs_resend` or `failed`. A `failed` row that isn't [onServer] was refused before
+  /// the server took it (an upload or the schedule call).
+  TextColumn get state => text()();
+
+  /// The server holds it.
+  BoolColumn get onServer => boolean().withDefault(const Constant(false))();
+
+  /// The device that encrypted what the server holds (it signed the envelope).
+  TextColumn get senderDeviceId => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -317,13 +359,14 @@ int compareChatListItems(ChatListItem a, ChatListItem b) {
   LocalFamilyAdmins,
   LocalRevokedProofs,
   LocalStars,
+  LocalScheduled,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -377,6 +420,11 @@ class ChatDb extends _$ChatDb {
             await m.addColumn(localMessages, localMessages.disappearSecs);
             await m.addColumn(localMessages, localMessages.expiresAt);
             await m.createIndex(localMessagesExpiresAt);
+          }
+          if (from < 13) {
+            // Scheduled messages come with the next sync.
+            await m.addColumn(localMessages, localMessages.scheduledFor);
+            await m.createTable(localScheduled);
           }
         },
       );
@@ -526,6 +574,7 @@ class ChatDb extends _$ChatDb {
 
   Future<void> deleteChat(String id) => transaction(() async {
         await (delete(localMessages)..where((m) => m.chatId.equals(id))).go();
+        await (delete(localScheduled)..where((m) => m.chatId.equals(id))).go();
         await (delete(localMembers)..where((m) => m.chatId.equals(id))).go();
         await (delete(localKeys)..where((m) => m.chatId.equals(id))).go();
         await (delete(localChats)..where((m) => m.id.equals(id))).go();
@@ -789,6 +838,37 @@ class ChatDb extends _$ChatDb {
     items.sort(compareChatListItems);
     return items;
   }
+
+  // --- scheduled messages ---
+
+  /// Writes every column of [s].
+  Future<void> putScheduled(ScheduledRow s) => into(localScheduled).insertOnConflictUpdate(s.toCompanion(false));
+
+  Future<ScheduledRow?> scheduledById(String id) =>
+      (select(localScheduled)..where((s) => s.id.equals(id))).getSingleOrNull();
+
+  Future<List<ScheduledRow>> allScheduled() => select(localScheduled).get();
+
+  /// Made here and not on the server yet, oldest first.
+  Future<List<ScheduledRow>> scheduledToSubmit() => (select(localScheduled)
+        ..where((s) => s.onServer.equals(false) & s.state.equals('local'))
+        ..orderBy([(s) => OrderingTerm(expression: s.id)]))
+      .get();
+
+  /// [chatId]'s scheduled messages, soonest first.
+  Stream<List<ScheduledRow>> watchScheduled(String chatId) => (select(localScheduled)
+        ..where((s) => s.chatId.equals(chatId))
+        ..orderBy([(s) => OrderingTerm(expression: s.deliverAt), (s) => OrderingTerm(expression: s.id)]))
+      .watch();
+
+  Future<void> deleteScheduled(String id) => (delete(localScheduled)..where((s) => s.id.equals(id))).go();
+
+  Future<void> setScheduledState(String id, String state) => (update(localScheduled)..where((s) => s.id.equals(id)))
+      .write(LocalScheduledCompanion(state: Value(state), updatedAt: Value(clock())));
+
+  /// Marks my message [id] as a scheduled one that went out late (see [LocalMessages.scheduledFor]).
+  Future<void> setScheduledFor(String id, int at) =>
+      (update(localMessages)..where((m) => m.id.equals(id))).write(LocalMessagesCompanion(scheduledFor: Value(at)));
 
   // --- keys ---
 

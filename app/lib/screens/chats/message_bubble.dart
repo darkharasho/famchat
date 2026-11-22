@@ -432,7 +432,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     final pending = m.state == 'pending';
     // My sent messages each carry their ticks (with the time), as Telegram does; others' runs show
     // the time once, under the last bubble.
-    final showTime = widget.lastInGroup || widget.starred || pending || m.state == 'failed' || widget.receipt != null;
+    final showTime = widget.lastInGroup || widget.starred || pending || m.state == 'failed' || widget.receipt != null ||
+        m.scheduledFor != null;
 
     // "edited" stays in the bubble; the time goes under it (below).
     final showEdited = widget.edited && !widget.deleted;
@@ -457,6 +458,11 @@ class _MessageBubbleState extends State<MessageBubble> {
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
+        // My scheduled message that went out late (the chat's key changed before its time).
+        if (mine && m.scheduledFor != null && m.seq != null && m.createdAt - m.scheduledFor! > 60000) ...[
+          const SizedBox(width: 4),
+          Text('sent late', key: Key('sent-late-${m.id}'), style: theme.textTheme.labelSmall?.copyWith(color: dim, fontStyle: FontStyle.italic)),
+        ],
         if (pending) ...[
           const SizedBox(width: 4),
           Icon(Icons.schedule_rounded, key: const Key('pending-icon'), size: 13, color: dim, semanticLabel: 'Sending'),

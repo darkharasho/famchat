@@ -359,7 +359,66 @@ class StarDto {
       StarDto(chatId: j['chatId'] as String, messageId: j['messageId'] as String, starredAt: (j['starredAt'] as num).toInt());
 }
 
+/// One of my scheduled messages as the server holds it (docs/protocol.md "Scheduled messages").
+class ScheduledDto {
+  const ScheduledDto({
+    required this.id,
+    required this.chatId,
+    required this.senderDeviceId,
+    required this.envelope,
+    required this.deliverAt,
+    required this.state,
+    required this.createdAt,
+    required this.updatedAt,
+    this.silent = false,
+    this.mentions = const [],
+  });
+
+  final String id, chatId, senderDeviceId;
+  final Map<String, Object?> envelope;
+  final int deliverAt, createdAt, updatedAt;
+
+  /// `pending`, `needs_resend` or `failed`.
+  final String state;
+  final bool silent;
+  final List<String> mentions;
+
+  factory ScheduledDto.fromJson(Map<String, Object?> j) => ScheduledDto(
+        id: _f(j, 'id'),
+        chatId: _f(j, 'chatId'),
+        senderDeviceId: _f(j, 'senderDeviceId'),
+        envelope: _f(j, 'envelope'),
+        deliverAt: _f(j, 'deliverAt'),
+        state: _f(j, 'state'),
+        createdAt: _f(j, 'createdAt'),
+        updatedAt: _f(j, 'updatedAt'),
+        silent: j['silent'] == true,
+        mentions: [...?(j['mentions'] as List?)?.whereType<String>()],
+      );
+}
+
 abstract interface class ChatApi {
+  /// Schedules message [id] (or replaces my scheduled message [id]) to go out at [deliverAt] (Unix
+  /// ms, 1 minute to 366 days ahead), encrypted under the chat's current epoch.
+  Future<ScheduledDto> putScheduled(
+    String id, {
+    required String chatId,
+    required Map<String, Object?> envelope,
+    required int deliverAt,
+    bool silent = false,
+    List<String> mentions = const [],
+  });
+
+  /// My scheduled messages, soonest first.
+  Future<List<ScheduledDto>> scheduled();
+
+  /// Cancels my scheduled message [id] (and the media uploaded for it).
+  Future<void> deleteScheduled(String id);
+
+  /// Delivers my scheduled message [id] now, with the envelope the server holds.
+  Future<void> sendScheduled(String id);
+
+
   /// Stars or unstars a message for this user only.
   Future<void> setStar(String chatId, String messageId, bool starred);
 

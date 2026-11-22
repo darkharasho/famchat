@@ -62,6 +62,8 @@ import 'media_pager.dart';
 import 'pin_bar.dart';
 import 'file_bubble.dart' show saveFileMessage;
 import 'disappearing_sheet.dart';
+import 'scheduled_sheet.dart';
+import 'time_picker_sheet.dart';
 import 'poll_bubble.dart';
 import 'poll_sheet.dart';
 import 'staged_tray.dart';
@@ -130,6 +132,72 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// The message the next send replies to, or the one being edited (at most one of the two).
   MessageRow? _replyTo, _editing;
+
+  /// "Schedule message" picked with nothing to send yet: the next thing sent (text, photos, voice,
+  /// a file, a poll, a GIF) is scheduled for this time instead.
+  DateTime? _scheduleAt;
+
+  /// The schedule time for a send now (null: send at once), clearing the schedule mode. Says so
+  /// and returns false when that time has passed meanwhile.
+  bool _takeSchedule(void Function(DateTime? at) send) {
+    final at = _scheduleAt;
+    if (at != null) {
+      final sync = ref.read(chatSyncProvider);
+      setState(() => _scheduleAt = null);
+      if (sync != null && !sync.canScheduleAt(at)) {
+        _snack('That time is too close now. Pick another.');
+        return false;
+      }
+    }
+    send(at);
+    return true;
+  }
+
+  /// "Scheduled for Tomorrow at 9:00 AM".
+  void _scheduledSnack(DateTime at) {
+    if (mounted) _snack('Scheduled for ${whenLabel(at, h24: MediaQuery.alwaysUse24HourFormatOf(context))}');
+  }
+
+  /// Long-press (touch) or right-click (desktop, web) on Send or the mic: "Schedule message".
+  Future<void> _scheduleMenu(Offset? global) async {
+    if (_editing != null) return;
+    final bool picked;
+    if (global != null) {
+      final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+      picked = await showMenu<bool>(
+            context: context,
+            position: RelativeRect.fromRect(global & Size.zero, Offset.zero & overlay.size),
+            items: const [
+              PopupMenuItem(
+                key: Key('schedule-message'),
+                value: true,
+                child: ListTile(leading: Icon(Icons.schedule_send_outlined), title: Text('Schedule message')),
+              ),
+            ],
+          ) ??
+          false;
+    } else {
+      picked = await showModalBottomSheet<bool>(
+            context: context,
+            builder: (context) => SafeArea(
+              child: ListTile(
+                key: const Key('schedule-message'),
+                leading: const Icon(Icons.schedule_send_outlined),
+                title: const Text('Schedule message'),
+                onTap: () => Navigator.pop(context, true),
+              ),
+            ),
+          ) ??
+          false;
+    }
+    if (!picked || !mounted) return;
+    final at = await pickTime(context, title: 'Schedule message');
+    if (at == null || !mounted) return;
+    setState(() => _scheduleAt = at);
+    // Something to send already: it goes (scheduled) now. Otherwise the next send is.
+    final hasContent = _text.text.trim().isNotEmpty || ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty;
+    if (hasContent) await _send();
+  }
 
   /// The link being previewed, what the server found for it (null while loading or nothing), and
   /// a link whose preview was removed (it stays off while that link is in the text).
@@ -680,6 +748,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       return;
     }
     try {
+      final at = _scheduleAt;
+      if (at != null) {
+        if (mounted) setState(() => _scheduleAt = null);
+        if (!media.sync.canScheduleAt(at)) {
+          _snack('That time is too close now. Pick another.');
+          return;
+        }
+        await media.sendVoice(widget.chatId, clip, at: at);
+        _scheduledSnack(at);
+        return;
+      }
       await media.sendVoice(widget.chatId, clip);
     } on ArgumentError {
       _snack("That voice message can't be sent.");
@@ -699,12 +778,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final sync = ref.read(chatSyncProvider);
     final text = replaceTrailingEmoticon(_text.text);
     final editing = _editing, replyTo = _replyTo;
-    if (editing == null && ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty) {
+    final hasStaged = ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty;
+    // Scheduled (see [_scheduleAt]) unless editing; nothing to send keeps the schedule waiting.
+    DateTime? at;
+    if (editing == null && (hasStaged || text.trim().isNotEmpty) && _scheduleAt != null) {
+      if (!_takeSchedule((t) => at = t)) return;
+    }
+    if (editing == null && hasStaged) {
       if (text.trim().runes.length > maxTextLength) {
         _snack('That message is too long.');
         return;
       }
-      await _sendStaged(text, replyTo);
+      await _sendStaged(text, replyTo, at: at);
+      if (at != null) _scheduledSnack(at!);
       if (!_pickerOpen && mounted) _focus.requestFocus();
       return;
     }
@@ -731,13 +817,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         final link = _firstLink(text);
         if (preview != null && media != null && link == _previewUrl) {
           await media.sendTextWithPreview(widget.chatId, text, preview,
-              replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+              replyTo: replyTo?.id, mentions: mentionsIn(text, _people), at: at);
         } else {
           // Its preview may still be on the way (the wait above is short): attach it once it comes.
-          final late = link != null && link == _previewUrl && link != _dismissedPreviewUrl ? _previewFetch : null;
-          final id = await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people));
+          // (Not to a scheduled one: the server holds that one as it is.)
+          final late = at == null && link != null && link == _previewUrl && link != _dismissedPreviewUrl ? _previewFetch : null;
+          final id = await sync.sendText(widget.chatId, text, replyTo: replyTo?.id, mentions: mentionsIn(text, _people), at: at);
           if (late != null && media != null) unawaited(media.attachLatePreview(widget.chatId, id, late));
         }
+        if (at != null) _scheduledSnack(at!);
         _previewTimer?.cancel();
         if (mounted) setState(() => _previewUrl = _preview = _dismissedPreviewUrl = null);
       }
@@ -886,7 +974,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final client = ref.read(gifClientProvider).value;
     final sync = ref.read(chatSyncProvider);
     if (sync == null) return;
-    await sync.enqueueMessage(widget.chatId, picked.body);
+    DateTime? at;
+    if (!_takeSchedule((t) => at = t)) return;
+    if (at case final at?) {
+      await sync.scheduleMessage(widget.chatId, picked.body, at);
+      _scheduledSnack(at);
+    } else {
+      await sync.enqueueMessage(widget.chatId, picked.body);
+    }
     if (client != null) unawaited(client.share(picked.slug));
   }
 
@@ -944,8 +1039,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Opens the new-poll sheet; the poll replies to the message being replied to, if any.
   Future<void> _startPoll() async {
     final replyTo = _editing == null ? _replyTo : null;
+    final at = _scheduleAt;
     try {
-      final id = await showNewPollSheet(context, widget.chatId, replyTo: replyTo?.id);
+      final id = await showNewPollSheet(context, widget.chatId, replyTo: replyTo?.id, at: at);
+      if (id != null && at != null && mounted) {
+        setState(() => _scheduleAt = null);
+        _scheduledSnack(at);
+      }
       if (id != null && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
     } catch (_) {
       _snack("Couldn't send the poll.");
@@ -958,13 +1058,16 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final media = ref.read(mediaServiceProvider);
     if (files.isEmpty || media == null || !mounted) return;
     final replyTo = _editing == null ? _replyTo : null;
+    DateTime? at;
+    if (!_takeSchedule((t) => at = t)) return;
     setState(() => _preparing++);
     final FileSendReport report;
     try {
-      report = await sendFiles(media, widget.chatId, files, replyTo: replyTo?.id);
+      report = await sendFiles(media, widget.chatId, files, replyTo: replyTo?.id, at: at);
     } finally {
       if (mounted) setState(() => _preparing--);
     }
+    if (at != null && report.sent > 0) _scheduledSnack(at!);
     if (report.sent > 0 && mounted && replyTo != null && _replyTo?.id == replyTo.id) setState(() => _replyTo = null);
     if (report.problem case final p?) _snack(p);
   }
@@ -1063,7 +1166,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   /// Sends the staged photos and videos, each its own message, with [caption] (and the reply and
   /// its @mentions) on the last; says which couldn't be sent.
-  Future<void> _sendStaged(String caption, MessageRow? replyTo) async {
+  Future<void> _sendStaged(String caption, MessageRow? replyTo, {DateTime? at}) async {
     final media = ref.read(mediaServiceProvider);
     final staged = ref.read(stagedMediaProvider(widget.chatId).notifier);
     final picked = ref.read(stagedMediaProvider(widget.chatId));
@@ -1080,6 +1183,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       caption: caption,
       replyTo: replyTo?.id,
       mentions: mentionsIn(caption, _people),
+      at: at,
       onStart: () {
         if (mounted) setState(() => _preparing++);
       },
@@ -1205,21 +1309,32 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           onPressed: _send,
         )
       else if (_empty && canRecord && ref.watch(stagedMediaProvider(widget.chatId)).isEmpty)
-        IconButton.filled(
+        _scheduleGestures(IconButton.filled(
           tooltip: 'Record voice message',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
           icon: const Icon(Icons.mic_rounded),
           onPressed: _startRecording,
-        )
+        ))
       else
-        IconButton.filled(
-          tooltip: 'Send',
+        _scheduleGestures(IconButton.filled(
+          tooltip: _scheduleAt == null ? 'Send' : 'Schedule',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
-          icon: const Icon(Icons.arrow_upward_rounded),
+          icon: Icon(_scheduleAt == null ? Icons.arrow_upward_rounded : Icons.schedule_send_rounded),
           onPressed: _send,
-        ),
+        )),
     ]);
   }
+
+  /// Send (or the mic) with "Schedule message" on a long-press or right-click. The button's own
+  /// tooltip then shows on hover only: on touch its long-press would win over this one.
+  Widget _scheduleGestures(Widget button) => GestureDetector(
+        onLongPress: () => unawaited(_scheduleMenu(null)),
+        onSecondaryTapUp: (d) => unawaited(_scheduleMenu(d.globalPosition)),
+        child: TooltipTheme(
+          data: TooltipTheme.of(context).copyWith(triggerMode: TooltipTriggerMode.manual),
+          child: button,
+        ),
+      );
 
   /// Ids on screen when the conversation opened: those don't animate in, later ones do.
   Set<String>? _initialIds;
@@ -1712,6 +1827,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ),
               ),
             if (_preparing > 0) const LinearProgressIndicator(key: Key('preparing-photo')),
+            ScheduledBar(chatId: chatId, mentionsOf: (text) => mentionsIn(text, _people)),
             Material(
               color: theme.colorScheme.surface,
               shape: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
@@ -1745,6 +1861,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
                       child: ComposerPreview(preview: _preview!, onRemove: _removePreview),
+                    ),
+                  if (_scheduleAt case final at? when _editing == null)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
+                      child: _ComposeBanner(
+                        key: const Key('schedule-banner'),
+                        icon: Icons.schedule_send_outlined,
+                        title: 'Scheduling for ${whenLabel(at, h24: MediaQuery.alwaysUse24HourFormatOf(context))}',
+                        snippet: _recording.active ? 'This voice message waits until then.' : 'What you send next waits until then.',
+                        cancelTooltip: 'Cancel scheduling',
+                        onCancel: () => setState(() => _scheduleAt = null),
+                      ),
                     ),
                   if ((_replyTo != null || _editing != null) && !_recording.active)
                     Padding(
@@ -1821,6 +1949,7 @@ class _PasteMediaAction extends ContextAction<PasteTextIntent> {
 
 class _ComposeBanner extends StatelessWidget {
   const _ComposeBanner({
+    super.key,
     required this.icon,
     required this.title,
     required this.snippet,

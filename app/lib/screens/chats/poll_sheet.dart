@@ -8,8 +8,9 @@ import '../../chat/providers.dart';
 import '../../theme/tokens.dart';
 
 /// Shows the new-poll sheet for [chatId] and sends the poll made there, replying to [replyTo] if
-/// set. Returns the poll's id, or null when the sheet was closed without sending.
-Future<String?> showNewPollSheet(BuildContext context, String chatId, {String? replyTo}) async {
+/// set. Returns the poll's id, or null when the sheet was closed without sending. [at]: the poll is
+/// scheduled for then instead.
+Future<String?> showNewPollSheet(BuildContext context, String chatId, {String? replyTo, DateTime? at}) async {
   final poll = await showModalBottomSheet<PollBody>(
     context: context,
     isScrollControlled: true,
@@ -17,7 +18,7 @@ Future<String?> showNewPollSheet(BuildContext context, String chatId, {String? r
   );
   if (poll == null || !context.mounted) return null;
   final sync = ProviderScope.containerOf(context, listen: false).read(chatSyncProvider);
-  return sync?.sendPoll(chatId, poll);
+  return sync?.sendPoll(chatId, poll, at: at);
 }
 
 /// The sheet's body: question, 2–[maxPollOptions] options and the multiple-answer switch. Pops with

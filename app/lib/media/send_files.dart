@@ -22,8 +22,9 @@ class FileSendReport {
 }
 
 /// Sends each of [files] to [chatId] in order; [replyTo] goes with the first one sent. Sizes are
-/// checked before anything is read into memory.
-Future<FileSendReport> sendFiles(MediaService media, String chatId, List<OutgoingFile> files, {String? replyTo}) async {
+/// checked before anything is read into memory. [at]: scheduled for then instead.
+Future<FileSendReport> sendFiles(MediaService media, String chatId, List<OutgoingFile> files,
+    {String? replyTo, DateTime? at}) async {
   final report = FileSendReport();
   for (final f in files) {
     final name = cleanFileName(f.name);
@@ -34,7 +35,7 @@ Future<FileSendReport> sendFiles(MediaService media, String chatId, List<Outgoin
       final size = await f.length();
       if (size != null && size > maxFileBytes) throw FileTooLargeException(size);
       final bytes = size == null ? await _readUpToLimit(f) : await f.read();
-      await media.sendFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: report.sent == 0 ? replyTo : null);
+      await media.sendFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: report.sent == 0 ? replyTo : null, at: at);
       report.sent++;
     } on FileTooLargeException {
       report.tooLarge.add(name);

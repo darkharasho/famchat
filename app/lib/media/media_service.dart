@@ -153,6 +153,12 @@ class MediaService {
     final cutoff = _now().subtract(orphanGrace).millisecondsSinceEpoch;
     for (final id in await db.uploadMessageIds()) {
       final row = await sync.db.messageById(id);
+      // A scheduled message's blobs are needed until it's on the server.
+      final scheduled = row == null ? await sync.db.scheduledById(id) : null;
+      if (scheduled != null) {
+        if (scheduled.onServer) await db.deleteUploadsFor(id);
+        continue;
+      }
       if (row?.state == 'sent' || (row == null && (await db.uploadsFor(id)).every((u) => u.createdAt < cutoff))) {
         await db.deleteUploadsFor(id);
       }
@@ -178,8 +184,10 @@ class MediaService {
   /// until both blobs are uploaded. Throws [UnsupportedImageException] for an image that won't decode.
   ///
   /// [caption], [replyTo] and [mentions] go inside the encrypted message (see `Captioned`).
+  /// [at]: scheduled for then instead (`ChatSync.scheduleMessage`); the blobs upload now.
   Future<String> sendPhoto(String chatId, Uint8List original,
-      {String? caption, String? replyTo, List<String> mentions = const [], String? album}) async {
+      {String? caption, String? replyTo, List<String> mentions = const [], String? album, DateTime? at}) async {
+    _checkAt(at);
     final p = await processor.process(original);
     final key = newMediaKey();
     final messageId = newUlid();
@@ -187,7 +195,7 @@ class MediaService {
         chatId: chatId, messageId: messageId, kind: 'thumb', purpose: MediaPurpose.thumb, key: key, plaintext: p.thumb, position: 0);
     final full = await stage(
         chatId: chatId, messageId: messageId, kind: 'photo', purpose: MediaPurpose.file, key: key, plaintext: p.full, position: 1);
-    return sync.enqueueMessage(
+    return _queue(
       chatId,
       PhotoBody(
         mediaKey: full.id,
@@ -203,15 +211,27 @@ class MediaService {
         mentions: mentions.take(maxMentions).toList(),
         album: album,
       ),
-      id: messageId,
+      messageId,
+      at,
     );
+  }
+
+  /// Queues [body] as message [id] in the outbox, or schedules it for [at].
+  Future<String> _queue(String chatId, Plaintext body, String id, DateTime? at, {bool forwarded = false}) => at == null
+      ? sync.enqueueMessage(chatId, body, id: id, forwarded: forwarded)
+      : sync.scheduleMessage(chatId, body, at, id: id);
+
+  /// A time to schedule for must be one the server takes (checked before anything is staged).
+  void _checkAt(DateTime? at) {
+    if (at != null && !sync.canScheduleAt(at)) throw ArgumentError.value(at, 'at', 'not between a minute and 366 days ahead');
   }
 
   /// Encrypts and queues a processed video (its file, and its poster frame when there is one);
   /// returns the message id. Throws [VideoTooLargeException] past [maxVideoBytes] and
   /// [ArgumentError] for an empty file or a length outside (0, [VideoBody.maxDurationMs]].
   Future<String> sendVideo(String chatId, ProcessedVideo v,
-      {String? caption, String? replyTo, List<String> mentions = const [], String? album}) async {
+      {String? caption, String? replyTo, List<String> mentions = const [], String? album, DateTime? at}) async {
+    _checkAt(at);
     if (v.bytes.length > maxVideoBytes) throw VideoTooLargeException(v.bytes.length);
     if (v.bytes.isEmpty || v.width < 1 || v.height < 1) throw ArgumentError.value(v.bytes.length, 'bytes', 'empty video');
     final ms = v.duration.inMilliseconds;
@@ -225,7 +245,8 @@ class MediaService {
         caption: caption,
         replyTo: replyTo,
         mentions: mentions,
-        album: album);
+        album: album,
+        at: at);
   }
 
   Future<String> _stageVideo(
@@ -240,6 +261,7 @@ class MediaService {
     String? replyTo,
     List<String> mentions = const [],
     String? album,
+    DateTime? at,
   }) async {
     final key = newMediaKey();
     final messageId = newUlid();
@@ -249,7 +271,7 @@ class MediaService {
             chatId: chatId, messageId: messageId, kind: 'thumb', purpose: MediaPurpose.thumb, key: key, plaintext: thumb, position: 0);
     final f = await stage(
         chatId: chatId, messageId: messageId, kind: 'video', purpose: MediaPurpose.file, key: key, plaintext: file, position: 1);
-    return sync.enqueueMessage(
+    return _queue(
       chatId,
       VideoBody(
         mediaKey: f.id,
@@ -266,7 +288,8 @@ class MediaService {
         mentions: mentions.take(maxMentions).toList(),
         album: album,
       ),
-      id: messageId,
+      messageId,
+      at,
       forwarded: forwarded,
     );
   }
@@ -280,11 +303,13 @@ class MediaService {
     FetchedPreview fetched, {
     String? replyTo,
     List<String> mentions = const [],
+    DateTime? at,
   }) async {
+    _checkAt(at);
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
     final messageId = newUlid();
-    return sync.enqueueMessage(
+    return _queue(
       chatId,
       TextBody(
         t,
@@ -292,7 +317,8 @@ class MediaService {
         mentions: mentions.take(maxMentions).toList(),
         preview: await _linkPreview(chatId, messageId, fetched),
       ),
-      id: messageId,
+      messageId,
+      at,
     );
   }
 
@@ -359,7 +385,8 @@ class MediaService {
 
   /// Encrypts and queues a recorded voice clip (one `voice` blob); returns the message id. Throws
   /// [ArgumentError] for an empty clip, a length outside (0, [maxVoiceDuration]], or too many bytes.
-  Future<String> sendVoice(String chatId, RecordedVoice v) async {
+  Future<String> sendVoice(String chatId, RecordedVoice v, {DateTime? at}) async {
+    _checkAt(at);
     if (v.bytes.isEmpty) throw ArgumentError.value(v.bytes.length, 'bytes', 'empty recording');
     if (v.duration <= Duration.zero || v.duration > maxVoiceDuration) {
       throw ArgumentError.value(v.duration, 'duration', 'voice messages are at most ${maxVoiceDuration.inMinutes} minutes');
@@ -368,7 +395,7 @@ class MediaService {
     final messageId = newUlid();
     final clip = await stage(
         chatId: chatId, messageId: messageId, kind: 'voice', purpose: MediaPurpose.file, key: key, plaintext: v.bytes, position: 0);
-    return sync.enqueueMessage(
+    return _queue(
       chatId,
       VoiceBody(
         mediaKey: clip.id,
@@ -378,7 +405,8 @@ class MediaService {
         waveform: v.waveform.take(VoiceBody.maxWaveform).toList(),
         bytes: v.bytes.length,
       ),
-      id: messageId,
+      messageId,
+      at,
     );
   }
 
@@ -387,19 +415,20 @@ class MediaService {
   /// [FileTooLargeException] past [maxFileBytes] (before anything is staged) and [ArgumentError]
   /// for an empty file.
   Future<String> sendFile(String chatId,
-      {required String name, required Uint8List bytes, String? mime, String? replyTo}) async {
+      {required String name, required Uint8List bytes, String? mime, String? replyTo, DateTime? at}) async {
+    _checkAt(at);
     if (bytes.length > maxFileBytes) throw FileTooLargeException(bytes.length);
     if (bytes.isEmpty) throw ArgumentError.value(bytes.length, 'bytes', 'empty file');
-    return _stageFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: replyTo);
+    return _stageFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: replyTo, at: at);
   }
 
   Future<String> _stageFile(String chatId,
-      {required String name, required Uint8List bytes, String? mime, String? replyTo, bool forwarded = false}) async {
+      {required String name, required Uint8List bytes, String? mime, String? replyTo, bool forwarded = false, DateTime? at}) async {
     final key = newMediaKey();
     final messageId = newUlid();
     final f = await stage(
         chatId: chatId, messageId: messageId, kind: 'file', purpose: MediaPurpose.file, key: key, plaintext: bytes, position: 0);
-    return sync.enqueueMessage(
+    return _queue(
       chatId,
       FileBody(
         mediaKey: f.id,
@@ -410,7 +439,8 @@ class MediaService {
         mime: FileBody.mimeOrDefault(mime),
         replyTo: replyTo,
       ),
-      id: messageId,
+      messageId,
+      at,
       forwarded: forwarded,
     );
   }
@@ -533,7 +563,7 @@ class MediaService {
     final rows = await db.uploadsFor(row.id);
     if (rows.isEmpty) {
       if (!ChatSync.mediaKinds.contains(row.kind)) return true;
-      await sync.db.setMessageState(row.id, 'failed');
+      await sync.failUnsendable(row.id);
       return false;
     }
     if (rows.every((r) => r.done)) return true;
@@ -574,7 +604,7 @@ class MediaService {
         // Too large, not a member any more, key conflict: retrying won't help until the user asks.
         _failures.remove(messageId);
         _setProgress(messageId, null);
-        await sync.db.setMessageState(messageId, 'failed');
+        await sync.failUnsendable(messageId);
       } else {
         _retryLater(messageId);
       }

@@ -76,6 +76,32 @@ class _Device {
   bool revoked = false;
 }
 
+/// A scheduled message (server/src/hub.ts `putScheduled`).
+class _Scheduled {
+  _Scheduled(this.id, this.chatId, this.userId, this.createdAt);
+  final String id, chatId, userId;
+  final int createdAt;
+  late String senderDeviceId;
+  late Map<String, Object?> envelope;
+  late int deliverAt, updatedAt;
+  String state = 'pending';
+  bool silent = false;
+  List<String> mentions = const [];
+
+  ScheduledDto dto() => ScheduledDto(
+        id: id,
+        chatId: chatId,
+        senderDeviceId: senderDeviceId,
+        envelope: envelope,
+        deliverAt: deliverAt,
+        state: state,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        silent: silent,
+        mentions: mentions,
+      );
+}
+
 class _Member {
   _Member(this.joinedSeq, this.joinedAt);
   final int joinedSeq, joinedAt;
@@ -379,6 +405,66 @@ class FakeChatBackend {
     return m;
   }
 
+  // --- scheduled messages (server/src/hub.ts, docs/protocol.md "Scheduled messages") ---
+
+  /// Scheduled messages by id.
+  final scheduled = <String, _Scheduled>{};
+
+  /// Delivered scheduled ids → their sender: a `send` of one from any of their devices acks again.
+  final _deliveredScheduled = <String, String>{};
+
+  /// The server's clock for the scheduling window (the message clock [now] runs from 2023).
+  int Function() wallClock = () => DateTime.now().millisecondsSinceEpoch;
+
+  ScheduledDto? scheduledDto(String id) => scheduled[id]?.dto();
+
+  /// The hub's alarm reaching [id]'s time: delivered like a send (an `ack` to every socket of the
+  /// sender, `msg` to every member socket), or, when the chat's epoch moved on, `needs_resend`.
+  void runScheduled(String id) {
+    final s = scheduled[id]!;
+    final c = _chats[s.chatId]!;
+    if (s.envelope['epoch'] != c.currentEpoch) {
+      s
+        ..state = 'needs_resend'
+        ..updatedAt = now();
+      _toUser(s.userId, {'type': 'needs_resend', 'chatId': s.chatId, 'id': id});
+      _toUser(s.userId, {'type': 'scheduled'});
+      return;
+    }
+    _deliverScheduled(s);
+  }
+
+  MessageDto _deliverScheduled(_Scheduled s) {
+    scheduled.remove(s.id);
+    _deliveredScheduled[s.id] = s.userId;
+    final c = _chats[s.chatId]!;
+    final msg = MessageDto(
+      chatId: s.chatId,
+      seq: ++c.lastSeq,
+      id: s.id,
+      senderUserId: s.userId,
+      senderDeviceId: s.senderDeviceId,
+      envelope: s.envelope,
+      createdAt: now(),
+      disappearSecs: c.disappearSecs,
+    );
+    c.messages.add(msg);
+    c.lastMessageAt = msg.createdAt;
+    if (s.mentions.isNotEmpty) sentMentions[s.id] = s.mentions;
+    _toUser(s.userId, {'type': 'ack', 'id': s.id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': ?msg.disappearSecs});
+    for (final u in c.members.keys) {
+      _toUser(u, {'type': 'msg', 'message': _msgJson(msg)});
+    }
+    _toUser(s.userId, {'type': 'scheduled'});
+    return msg;
+  }
+
+  /// Moves [chatId] to a new epoch (someone left, a device was revoked) without the rest of it.
+  void rotateEpoch(String chatId) {
+    _chats[chatId]!.currentEpoch++;
+    _notify(_chats[chatId]!.members.keys, {'type': 'chat', 'chatId': chatId});
+  }
+
   // --- media (server/src/routes/media.ts) ---
 
   final _media = <String, _Blob>{};
@@ -454,7 +540,7 @@ class FakeChatBackend {
           'invalid_request' => 400,
           'forbidden' => 403,
           'not_found' => 404,
-          'wraps_mismatch' || 'epoch_exists' || 'stale_epoch' => 409,
+          'wraps_mismatch' || 'epoch_exists' || 'stale_epoch' || 'conflict' => 409,
           _ => 500,
         },
         code,
@@ -539,12 +625,18 @@ class FakeChatBackend {
         final env = m['envelope'] as Map<String, Object?>;
         final prior = _chats.values.expand((c) => c.messages).where((x) => x.id == id).firstOrNull;
         if (prior != null) {
-          if (prior.chatId == chatId && prior.senderDeviceId == h.deviceId) {
+          // A delivered scheduled message acks again for any device of its sender.
+          if (prior.chatId == chatId && (prior.senderDeviceId == h.deviceId || _deliveredScheduled[id] == h.userId)) {
             h._deliver({'type': 'ack', 'id': id, 'seq': prior.seq, 'createdAt': prior.createdAt});
           } else {
             h._deliver({'type': 'error', 'id': id, 'error': 'conflict'});
           }
           return;
+        }
+        // My scheduled message's id: deliver it now with this envelope. Someone else's: conflict.
+        final sch = scheduled[id];
+        if (sch != null && (sch.userId != h.userId || sch.chatId != chatId)) {
+          return h._deliver({'type': 'error', 'id': id, 'error': 'conflict'});
         }
         final c = _chats[chatId];
         if (c == null || !c.members.containsKey(h.userId)) {
@@ -555,6 +647,11 @@ class FakeChatBackend {
         }
         if (env['epoch'] != c.currentEpoch || !c.epochs.contains(c.currentEpoch)) {
           return h._deliver({'type': 'error', 'id': id, 'error': 'stale_epoch'});
+        }
+        if (sch != null) {
+          scheduled.remove(id);
+          _deliveredScheduled[id] = h.userId;
+          _toUser(h.userId, {'type': 'scheduled'});
         }
         final msg = MessageDto(
           chatId: chatId,
@@ -835,6 +932,72 @@ class FakeChatApi implements ChatApi {
         }
         b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
         return c.dto(userId);
+      });
+
+  @override
+  Future<ScheduledDto> putScheduled(
+    String id, {
+    required String chatId,
+    required Map<String, Object?> envelope,
+    required int deliverAt,
+    bool silent = false,
+    List<String> mentions = const [],
+  }) =>
+      _run('PUT /me/scheduled/$id', () {
+        final c = b._memberChat(chatId, userId);
+        final ahead = deliverAt - b.wallClock();
+        if (ahead < 60000 || ahead > 366 * 86400000) b._err('invalid_request');
+        if (envelope['epoch'] != c.currentEpoch) b._err('stale_epoch');
+        final prior = b.scheduled[id];
+        if ((prior != null && (prior.userId != userId || prior.chatId != chatId)) ||
+            b._chats.values.expand((x) => x.messages).any((m) => m.id == id)) {
+          b._err('conflict');
+        }
+        final t = b.now();
+        final s = (prior ?? _Scheduled(id, chatId, userId, t))
+          ..senderDeviceId = deviceId
+          ..envelope = envelope
+          ..deliverAt = deliverAt
+          ..silent = silent
+          ..mentions = List.of(mentions)
+          ..state = 'pending'
+          ..updatedAt = t;
+        b.scheduled[id] = s;
+        b._notify([userId], {'type': 'scheduled'});
+        return s.dto();
+      });
+
+  @override
+  Future<List<ScheduledDto>> scheduled() => _run('GET /me/scheduled', () {
+        final mine = [
+          for (final s in b.scheduled.values)
+            if (s.userId == userId && (b._chats[s.chatId]?.members.containsKey(userId) ?? false)) s,
+        ]..sort((x, y) => x.deliverAt != y.deliverAt ? x.deliverAt.compareTo(y.deliverAt) : x.id.compareTo(y.id));
+        return [for (final s in mine) s.dto()];
+      });
+
+  _Scheduled _mine(String id) {
+    final s = b.scheduled[id];
+    if (s == null || s.userId != userId) b._err('not_found');
+    return s;
+  }
+
+  @override
+  Future<void> deleteScheduled(String id) => _run('DELETE /me/scheduled/$id', () {
+        _mine(id);
+        b.scheduled.remove(id);
+        b._notify([userId], {'type': 'scheduled'});
+      });
+
+  @override
+  Future<void> sendScheduled(String id) => _run('POST /me/scheduled/$id/send', () {
+        final s = _mine(id);
+        if (s.envelope['epoch'] != b._chats[s.chatId]!.currentEpoch) {
+          s.state = 'needs_resend';
+          b._notify([userId], {'type': 'scheduled'});
+          b._err('stale_epoch');
+        }
+        b._deliverScheduled(s);
       });
 
   @override

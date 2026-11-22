@@ -138,6 +138,10 @@ final starsProvider =
 final starredMessagesProvider = StreamProvider.family<List<MessageRow>, String?>(
     (ref, chatId) => ref.watch(chatDbProvider).watchStarredMessages(chatId: chatId));
 
+/// My scheduled messages in a chat, soonest first (docs/protocol.md "Scheduled messages").
+final scheduledProvider =
+    StreamProvider.family<List<ScheduledRow>, String>((ref, chatId) => ref.watch(chatDbProvider).watchScheduled(chatId));
+
 final messagesProvider =
     StreamProvider.family<List<MessageRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMessages(id));
 
