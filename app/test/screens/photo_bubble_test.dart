@@ -90,6 +90,9 @@ void main() {
       await tester.tap(find.text('Photos and videos'));
       await settle(tester);
     }
+    expect(find.byKey(const Key('photo-thumb')), findsNothing, reason: 'waiting in the tray');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
     expect(find.byKey(const Key('photo-thumb')), findsOneWidget);
     expect(find.byKey(const Key('upload-progress')), findsOneWidget);
     expect(find.byKey(const Key('pending-icon')), findsOneWidget);

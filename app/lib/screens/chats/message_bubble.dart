@@ -176,7 +176,11 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   /// The text Copy copies, or null.
-  String? get _copyText => !widget.deleted && widget.message.kind == 'text' ? _text : null;
+  String? get _copyText => widget.deleted
+      ? null
+      : widget.message.kind == 'text'
+          ? _text
+          : widget.shownText;
 
   bool get _hasActions =>
       _reactable ||
@@ -420,15 +424,37 @@ class _MessageBubbleState extends State<MessageBubble> {
       ]),
     );
 
+    // A photo or video's caption, under it in the same bubble.
+    final caption = photo != null || video != null ? widget.shownText : null;
+    final captionStyle = theme.textTheme.bodyLarge?.copyWith(color: fg);
+    // As wide as the media, so it wraps under it, read from the left.
+    final mediaWidth = photo != null
+        ? thumbSize(photo.width, photo.height).width
+        : video != null
+            ? thumbSize(video.width, video.height).width
+            : 0.0;
+    Widget? captionLine() => caption == null
+        ? null
+        : SizedBox(
+            key: Key('caption-${m.id}'),
+            width: mediaWidth,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+              child: LinkText(caption, style: captionStyle, linkColor: fg, mentions: widget.mentionNames, markdown: true),
+            ),
+          );
+
     Widget content;
     if (photo != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
+        ?captionLine(),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (video != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         VideoThumb(body: video, messageId: m.id, onOpen: () => showVideoViewer(context, video, m.id)),
+        ?captionLine(),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (gif != null) {

@@ -34,6 +34,8 @@ import '../../media/clipboard_media.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/send_media.dart';
+import '../../chat/plaintext.dart' show maxTextLength;
+import '../../media/staged_media.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
@@ -50,6 +52,7 @@ import 'link_preview_card.dart';
 import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
+import 'staged_tray.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
 
@@ -236,7 +239,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     unawaited(_loadReadPosition());
     _webPaste = listenForPastedFiles(() => mounted && _focus.hasFocus, (files) async {
       final sorted = await pickedFromFiles(files);
-      await _confirmPaste(sorted.media);
+      _stage(sorted.media);
     });
   }
 
@@ -589,50 +592,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       otherwise?.call();
       return;
     }
-    await _confirmPaste(media);
-  }
-
-  /// Asks before sending pasted [media] (a stray paste shouldn't reach the family), showing the
-  /// first photo.
-  Future<void> _confirmPaste(List<PickedMedia> media) async {
-    if (media.isEmpty || !mounted) return;
-    final photo = media.whereType<PickedPhoto>().firstOrNull;
-    final videos = media.whereType<PickedVideo>().length;
-    final title = media.length == 1
-        ? (videos == 1 ? 'Send this video?' : 'Send this photo?')
-        : videos == 0
-            ? 'Send ${media.length} photos?'
-            : videos == media.length
-                ? 'Send ${media.length} videos?'
-                : 'Send ${media.length} photos and videos?';
-    final send = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('paste-confirm'),
-        title: Text(title),
-        content: photo == null
-            ? null
-            : ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 360, maxHeight: 360),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(Radii.md),
-                  child: Image.memory(
-                    photo.bytes,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Icon(Icons.image_outlined, size: 64),
-                  ),
-                ),
-              ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(autofocus: true, onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
-        ],
-      ),
-    );
-    if (send == true && mounted) {
-      await sendPicked(media);
-      _focus.requestFocus();
-    }
+    _stage(media);
   }
 
   /// Phones and tablets, where taps elsewhere should put the keyboard away.
@@ -722,8 +682,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   Future<void> _send() async {
     final sync = ref.read(chatSyncProvider);
     final text = replaceTrailingEmoticon(_text.text);
-    if (sync == null || text.trim().isEmpty) return;
     final editing = _editing, replyTo = _replyTo;
+    if (editing == null && ref.read(stagedMediaProvider(widget.chatId)).isNotEmpty) {
+      if (text.trim().runes.length > maxTextLength) {
+        _snack('That message is too long.');
+        return;
+      }
+      await _sendStaged(text, replyTo);
+      if (!_pickerOpen && mounted) _focus.requestFocus();
+      return;
+    }
+    if (sync == null || text.trim().isEmpty) return;
     if (editing != null && _changes.isDeleted(editing.id)) {
       _cancelCompose();
       _snack('That message was deleted.');
@@ -904,7 +873,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         if (sorted.skipped > 0 || details.files.length > sorted.media.length + sorted.skipped) {
           _snack('Only photos and videos can be sent here.');
         }
-        await sendPicked(sorted.media);
+        _stage(sorted.media);
       },
       child: Stack(children: [
         child,
@@ -995,18 +964,36 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _snack("Couldn't open the picker.");
       return;
     }
-    await sendPicked(picked);
+    _stage(picked);
   }
 
-  /// Sends each photo and video as its own message, saying which couldn't be sent.
-  Future<void> sendPicked(List<PickedMedia> picked) async {
+  /// Puts photos and videos in the tray above the composer, to go with the next Send.
+  void _stage(List<PickedMedia> items) {
+    if (items.isEmpty || !mounted) return;
+    final left = ref.read(stagedMediaProvider(widget.chatId).notifier).add(items);
+    if (left > 0) _snack('You can send up to $maxStagedMedia photos and videos at once.');
+    if (!_touch) _focus.requestFocus();
+  }
+
+  /// Sends the staged photos and videos, each its own message, with [caption] (and the reply and
+  /// its @mentions) on the last; says which couldn't be sent.
+  Future<void> _sendStaged(String caption, MessageRow? replyTo) async {
     final media = ref.read(mediaServiceProvider);
+    final staged = ref.read(stagedMediaProvider(widget.chatId).notifier);
+    final picked = ref.read(stagedMediaProvider(widget.chatId));
     if (media == null || picked.isEmpty) return;
+    staged.clear();
+    _text.clear();
+    setState(() => _replyTo = null);
+    _saveDraftNow();
     final report = await sendMedia(
       media,
       ref.read(videoProcessorProvider),
       widget.chatId,
       picked,
+      caption: caption,
+      replyTo: replyTo?.id,
+      mentions: mentionsIn(caption, _people),
       onStart: () {
         if (mounted) setState(() => _preparing++);
       },
@@ -1085,7 +1072,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               allowedMimeTypes: const ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic'],
               onContentInserted: (content) {
                 if (content.data case final bytes? when bytes.isNotEmpty) {
-                  unawaited(_confirmPaste([PickedPhoto(bytes)]));
+                  _stage([PickedPhoto(bytes)]);
                 }
               },
             ),
@@ -1131,7 +1118,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           icon: const Icon(Icons.check_rounded),
           onPressed: _send,
         )
-      else if (_empty && canRecord)
+      else if (_empty && canRecord && ref.watch(stagedMediaProvider(widget.chatId)).isEmpty)
         IconButton.filled(
           tooltip: 'Record voice message',
           style: IconButton.styleFrom(fixedSize: const Size.square(48)),
@@ -1301,7 +1288,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
                 onForward: forwardableKinds.contains(m.kind) && m.body != null && !changes.isDeleted(m.id) ? () => _forward(m) : null,
                 forwarded: isForwarded(m),
-                onEdit: m.senderUserId == me && m.kind == 'text' && !changes.isDeleted(m.id) ? () => _startEdit(m) : null,
+                onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
                 onReadBy: group && m.senderUserId == me && m.seq != null && others.isNotEmpty
                     ? () => _showReaders(m, members, users, me)
@@ -1513,6 +1500,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         ),
                       )
                     : Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (ref.watch(stagedMediaProvider(chatId)) case final staged
+                      when staged.isNotEmpty && _editing == null && !_recording.active)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(side, Space.xs, side, 0),
+                      child: Builder(
+                        builder: (context) => StagedTray(
+                          items: staged,
+                          onRemove: ref.read(stagedMediaProvider(chatId).notifier).removeAt,
+                          onAdd: () => _attach(context),
+                        ),
+                      ),
+                    ),
                   if (_preview != null && _editing == null && !_recording.active)
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
