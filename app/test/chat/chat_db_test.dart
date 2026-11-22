@@ -55,6 +55,17 @@ void main() {
     expect(old.members.map((m) => m.userId), containsAll(['me', 'bob']));
   });
 
+  test("votes and poll ends aren't unread and aren't the chat's last message", () async {
+    await db.upsertChat(chat('p', createdAt: 1, lastMessageAt: 5));
+    await db.insertMessageIfAbsent(msg('m1', 'p', 1, kind: 'poll', body: '{"kind":"poll","question":"Q","options":["a","b"],"multi":false}'));
+    await db.insertMessageIfAbsent(msg('m2', 'p', 2, kind: 'vote', body: '{"kind":"vote","target":"m1","choices":[0]}'));
+    await db.insertMessageIfAbsent(msg('m3', 'p', 3, kind: 'poll_end', body: '{"kind":"poll_end","target":"m1"}'));
+    await db.setMyLastRead('p', 1);
+    final item = (await db.watchChatList('me').first).single;
+    expect(item.unread, 0);
+    expect(item.last?.id, 'm1');
+  });
+
   test('unread starts at the join point for new members', () async {
     await db.upsertChat(ChatDto(
       id: 'g',

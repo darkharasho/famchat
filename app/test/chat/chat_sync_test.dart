@@ -462,6 +462,27 @@ void main() {
     expect(backend.silentIds, hasLength(1));
   });
 
+  test('a poll notifies; votes and the end are sent silent and point at the poll', () async {
+    final alice = await start(await backend.addUser('Alice'));
+    final bob = await start(await backend.addUser('Bob'));
+    final chatId = await alice.sync.openDirect(bob.d.userId);
+    final pollId = await alice.sync.sendPoll(chatId, const PollBody('Lunch?', ['Pizza', 'Tacos']));
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    expect((await bob.d.db.messageById(pollId))!.kind, 'poll');
+    final vote = await bob.sync.vote(chatId, pollId, [1]);
+    final end = await alice.sync.endPoll(chatId, pollId);
+    await until(() async => (await alice.rows(chatId)).length == 3 && (await bob.rows(chatId)).length == 3);
+    expect(backend.silentIds, {vote, end});
+    for (final (id, kind) in [(vote, 'vote'), (end, 'poll_end')]) {
+      for (final n in [alice, bob]) {
+        final r = (await n.d.db.messageById(id))!;
+        expect(r.kind, kind);
+        expect(r.targetId, pollId);
+      }
+    }
+    expect(() => alice.sync.sendPoll(chatId, const PollBody('Q', ['a', 'a'])), throwsArgumentError);
+  });
+
   test("muting is per user and reaches the user's other devices", () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

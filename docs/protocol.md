@@ -240,6 +240,35 @@ Move fields of `play`:
 A direct chat runs at most one long game (Landlord) and one quick game (all the others) at once: a `game` message is
 inert if an unfinished, non-inert game of the same kind was running when it landed.
 
+### Polls
+Any chat (direct or group) can hold polls. A poll is a normal message; votes and the end are changes
+pointing at it:
+
+```
+{"kind":"poll", "question":"...", "options":["...","..."], "multi":false, "replyTo"?:"<id>"}
+{"kind":"vote", "target":"<pollMessageId>", "choices":[0,2]}     this sender's whole choice set; [] takes the vote back
+{"kind":"poll_end", "target":"<pollMessageId>"}                  ends the poll; counts only from the poll's sender
+```
+
+The poll's id is the `poll` message's id; option ids are indexes into `options`. `multi` (false when missing) lets
+voters pick more than one. A poll is invalid unless the question is 1–300 characters after trimming and there are
+2–10 options of 1–100 characters each after trimming, no two the same ignoring case (senders drop blank options
+first). A `vote` without a non-empty `target` and a list of at most 10 integers (any integral number, as in games),
+or a `poll_end` without a non-empty `target`, is invalid.
+
+Every device folds a chat's rows in timeline order (by `seq`, its own pending rows last) and skips failed rows and
+events whose target isn't a poll, so everyone sees the same totals:
+
+- A vote replaces its sender's earlier choices. Indexes out of range and repeats are dropped; on a single-choice
+  poll only the first remaining choice counts. A vote left with no choices removes the voter.
+- The first `poll_end` from the poll's sender ends it: later votes and ends don't count. Ends from anyone else
+  change nothing. Ending can't be undone.
+- Once ended, the winners are the options with the most votes (all of them on a tie), if that count is above 0.
+
+Votes and ends are sent `silent` like edits: they don't notify, aren't unread, don't move the chat's
+`lastMessageAt`, and the timeline doesn't show them. Polls can't be forwarded or edited. Votes on a deleted poll
+don't matter.
+
 ### Link previews
 A text may carry a card for its first link, made by the sender:
 `{"kind":"text", "text":"look https://…", "preview": {"url", "title", "description"?, "siteName"?,

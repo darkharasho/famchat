@@ -5,8 +5,8 @@ import 'dart:convert';
 import 'db/chat_db.dart';
 import 'plaintext.dart';
 
-/// Kinds that change another message instead of showing as one.
-const changeKinds = {'reaction', 'edit', 'delete', 'pin'};
+/// Kinds that change another message instead of showing as one (poll votes and ends included).
+const changeKinds = {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end'};
 
 /// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
 /// and count as activity and unread, unlike changes).
