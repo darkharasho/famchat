@@ -1,6 +1,8 @@
-// Sending picked, shared or dropped photos and videos: each its own message.
+// Sending picked, shared or dropped photos and videos: each its own message, the text typed with them
+// as the last one's caption.
 import 'package:cross_file/cross_file.dart';
 
+import '../chat/plaintext.dart' show validMessageText;
 import 'media_service.dart';
 import 'photo.dart';
 import 'photo_picker.dart';
@@ -9,6 +11,9 @@ import 'video.dart';
 /// What couldn't be sent, by reason.
 class SendReport {
   int badImages = 0, badVideos = 0, bigVideos = 0;
+
+  /// The item meant to carry the caption couldn't be sent, so the caption went as a text.
+  bool captionSentAsText = false;
 
   /// What to tell the person, or null when everything went.
   String? get problem {
@@ -29,24 +34,39 @@ class SendReport {
 }
 
 /// Sends each of [items] to [chatId] in order; [onStart]/[onEnd] bracket each one (progress UI).
+///
+/// [caption] (when not blank), [replyTo] and [mentions] go with the last item. When that one can't
+/// be sent they go as a text instead, so what was typed is never lost.
 Future<SendReport> sendMedia(
   MediaService media,
   VideoProcessor videos,
   String chatId,
   List<PickedMedia> items, {
+  String? caption,
+  String? replyTo,
+  List<String> mentions = const [],
   void Function()? onStart,
   void Function()? onEnd,
 }) async {
   final report = SendReport();
-  for (final item in items) {
+  final text = caption == null ? null : validMessageText(caption);
+  for (final (i, item) in items.indexed) {
+    final last = i == items.length - 1;
+    final withCaption = last && text != null;
+    // A reply with nothing typed still belongs on the last item.
+    final reply = last ? replyTo : null;
+    final mentioned = withCaption ? mentions : const <String>[];
     onStart?.call();
+    var sent = false;
     try {
       switch (item) {
         case PickedPhoto(:final bytes):
-          await media.sendPhoto(chatId, bytes);
+          await media.sendPhoto(chatId, bytes, caption: withCaption ? text : null, replyTo: reply, mentions: mentioned);
         case PickedVideo(:final file):
-          await media.sendVideo(chatId, await videos.process(file));
+          await media.sendVideo(chatId, await videos.process(file),
+              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned);
       }
+      sent = true;
     } on VideoTooLargeException {
       report.bigVideos++;
     } on UnsupportedVideoException {
@@ -57,6 +77,10 @@ Future<SendReport> sendMedia(
       item is PickedVideo ? report.badVideos++ : report.badImages++;
     } finally {
       onEnd?.call();
+    }
+    if (withCaption && !sent) {
+      await media.sync.sendText(chatId, text, replyTo: replyTo, mentions: mentions);
+      report.captionSentAsText = true;
     }
   }
   return report;
