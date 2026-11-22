@@ -131,10 +131,10 @@ class TranscriptModel extends Notifier<ModelState> {
     final run = ++_run;
     final files = ref.read(modelFilesProvider);
     final total = files.fold<int>(0, (s, f) => s + f.size);
+    _set(run, ModelDownloading(0, total));
     final dir = await _dir;
     await dir.create(recursive: true);
     var received = 0;
-    _set(run, ModelDownloading(0, total));
     try {
       for (final f in files) {
         final dest = File(p.join(dir.path, f.name));
