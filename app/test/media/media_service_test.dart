@@ -303,6 +303,31 @@ void main() {
       expect(await carol.media.load(v.ref), clip.bytes);
     });
 
+    test("forwarding a voice clip copies its sender's transcript, as the forwarder's", () async {
+      final (alice, bob, carol, ab, ac) = await trio();
+      final clip = RecordedVoice(bytes: photoBytes(800, 3), duration: const Duration(seconds: 4), waveform: [1, 2, 3]);
+      final id = await bob.media.sendVoice(ab, clip);
+      await bob.sync.sendTranscript(ab, id, 'pick up milk');
+      await until(() async => (await alice.rows(ab)).any((r) => r.kind == 'transcript'), reason: 'alice gets the transcript');
+      final fwd = await forward(alice, ab, id, ac);
+      String? carolSees(List<MessageRow> rows) {
+        final m = rows.where((r) => r.id == fwd).firstOrNull;
+        return m == null ? null : messageChanges(rows).transcriptOf(m);
+      }
+
+      await until(() async => carolSees(await carol.rows(ac)) != null, reason: 'carol gets the clip and its transcript');
+      expect(carolSees(await carol.rows(ac)), 'pick up milk');
+    });
+
+    test('forwarding a clip without a transcript sends none', () async {
+      final (alice, bob, _, ab, ac) = await trio();
+      final clip = RecordedVoice(bytes: photoBytes(800, 3), duration: const Duration(seconds: 4), waveform: [1, 2, 3]);
+      final id = await bob.media.sendVoice(ab, clip);
+      await until(() async => (await alice.voices(ab)).isNotEmpty, reason: 'alice gets it');
+      await forward(alice, ab, id, ac);
+      expect((await alice.rows(ac)).where((r) => r.kind == 'transcript'), isEmpty);
+    });
+
     test('a video forwards with its poster frame', () async {
       final (alice, bob, carol, ab, ac) = await trio();
       final v = ProcessedVideo(bytes: photoBytes(900, 2), thumb: photoBytes(30, 4), width: 640, height: 360, duration: const Duration(seconds: 3));

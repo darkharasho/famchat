@@ -867,6 +867,23 @@ class ChatSync {
     return _enqueueMessage(chatId, EditBody(messageId, t), targetId: messageId);
   }
 
+  /// Sends this user's transcript of their voice message [messageId] (docs/protocol.md
+  /// "Transcripts"): trimmed and cut to [maxTranscriptLength]. Returns its id, or null when the text
+  /// is empty or the clip is gone, deleted, someone else's, or not a voice message. Runs in the sync
+  /// queue, like deletes, so the check and the enqueue see the same message.
+  Future<String?> sendTranscript(String chatId, String messageId, String text, {String? lang}) async {
+    final t = clipTranscript(text);
+    if (t.isEmpty) return null;
+    String? sent;
+    await _enqueue(() async {
+      final m = await db.messageById(messageId);
+      if (m == null || m.chatId != chatId || m.senderUserId != me.userId || m.kind != 'voice') return;
+      if (messageChanges([m, ...await db.changesTo(chatId, messageId)]).isDeleted(messageId)) return;
+      sent = await _enqueueMessage(chatId, TranscriptBody(messageId, t, lang: lang), targetId: messageId);
+    });
+    return sent;
+  }
+
   /// Whether [attachPreview] would attach a preview of [url] to [messageId] now.
   Future<bool> canAttachPreview(String chatId, String messageId, String url) async {
     final own = await _ownText(chatId, messageId);
@@ -1833,4 +1850,16 @@ class ReminderAfterExpiry implements Exception {
 
   @override
   String toString() => 'ReminderAfterExpiry($expiresAt)';
+}
+
+/// [text] trimmed and cut to [maxTranscriptLength], without leaving half an emoji (a lone high
+/// surrogate) at the cut.
+String clipTranscript(String text) {
+  var t = text.trim();
+  if (t.length > maxTranscriptLength) {
+    t = t.substring(0, maxTranscriptLength);
+    if (t.codeUnitAt(t.length - 1) & 0xFC00 == 0xD800) t = t.substring(0, t.length - 1);
+    t = t.trimRight();
+  }
+  return t;
 }

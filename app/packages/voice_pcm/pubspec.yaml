@@ -1,0 +1,25 @@
+name: voice_pcm
+description: Decodes FamChat voice clips (.m4a) to mono float PCM on iOS, macOS and Android.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: dev.famchat.voice_pcm
+        pluginClass: VoicePcmPlugin
+      ios:
+        pluginClass: VoicePcmPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: VoicePcmPlugin
+        sharedDarwinSource: true

@@ -151,6 +151,13 @@ and search it. A version that doesn't know the kind stores it as `unknown` and s
 Senders don't transcribe scheduled clips, or clips over 3 minutes on their own; forwarding a clip sends
 a copy of its transcript for the new message.
 
+The apps (not the web) transcribe with Whisper base through sherpa-onnx, once the person turns on
+"Transcribe my voice messages". The model (about 160 MB) is downloaded from Hugging Face at a pinned
+commit, with each file's SHA-256 checked; that download is the only new network traffic, and it says
+nothing about any message. Anyone can tap Transcribe on a clip without a transcript. On the sender's own
+clip the result is sent as above. On anyone else's it stays on that device, in a local table, labelled
+"Transcribed on this device", and goes with the message. A transcript from the sender wins over it.
+
 Pins are messages too, but anyone in the chat can pin any message (docs: "Pins"):
 
 ```

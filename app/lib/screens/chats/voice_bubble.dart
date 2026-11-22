@@ -21,7 +21,15 @@ String formatClock(Duration d) {
 const _waveWidth = 168.0, _waveHeight = 32.0;
 
 class VoiceBubble extends ConsumerWidget {
-  const VoiceBubble({super.key, required this.body, required this.messageId, this.mine = false, this.transcript});
+  const VoiceBubble({
+    super.key,
+    required this.body,
+    required this.messageId,
+    this.mine = false,
+    this.transcript,
+    this.localTranscript = false,
+    this.transcribing = false,
+  });
 
   final VoiceBody body;
   final String messageId;
@@ -31,6 +39,12 @@ class VoiceBubble extends ConsumerWidget {
 
   /// The words of the clip, shown under it (the sender's, or one made on this device).
   final String? transcript;
+
+  /// [transcript] was made on this device (Transcribe), not sent by the clip's sender.
+  final bool localTranscript;
+
+  /// A transcript is being made on this device now.
+  final bool transcribing;
 
   Duration get _length => Duration(milliseconds: body.durationMs);
 
@@ -128,12 +142,21 @@ class VoiceBubble extends ConsumerWidget {
 
   Widget _withTranscript(Widget player, Color ink) {
     final words = transcript;
-    if (words == null) return player;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      player,
-      const SizedBox(height: 6),
-      SizedBox(width: _playerWidth, child: _Transcript(words, color: ink)),
-    ]);
+    if (words == null && !transcribing) return player;
+    return Builder(builder: (context) {
+      final small = Theme.of(context).textTheme.labelSmall?.copyWith(color: ink.withValues(alpha: 0.7));
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        player,
+        const SizedBox(height: 6),
+        if (words != null) SizedBox(width: _playerWidth, child: _Transcript(words, color: ink)),
+        if (words != null && localTranscript)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('Transcribed on this device', key: const Key('voice-transcript-local'), style: small),
+          ),
+        if (words == null && transcribing) Text('Transcribing…', key: const Key('voice-transcribing'), style: small),
+      ]);
+    });
   }
 }
 

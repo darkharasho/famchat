@@ -16,6 +16,8 @@ import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/files.dart' show fileOf;
 import '../../chat/forward.dart';
+import '../../transcripts/model_download_dialog.dart';
+import '../../transcripts/transcripts_service.dart';
 import '../../chat/mentions.dart';
 import '../../chat/wire.dart' show FetchedPreview;
 import '../../widgets/link_text.dart' show splitLinks;
@@ -94,6 +96,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Where a recording goes, fixed when it starts: the clip still sends if the user leaves the chat
   /// while the recorder is finishing (when `ref` can no longer be used).
   MediaService? _voiceTarget;
+  TranscriptsService? _transcriptsTarget;
   bool _empty = true;
   RecordingStatus _recStatus = RecordingStatus.idle;
 
@@ -722,6 +725,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (_emojiPopover.isShowing) _emojiPopover.hide();
     unawaited(ref.read(voicePlaybackProvider.notifier).stop());
     _voiceTarget = ref.read(mediaServiceProvider);
+    _transcriptsTarget = ref.read(transcriptsServiceProvider);
     await _recording.start();
     switch (_recording.status) {
       case RecordingStatus.denied:
@@ -744,6 +748,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _sendVoice(RecordedVoice clip) async {
     final media = _voiceTarget;
+    final transcripts = _transcriptsTarget;
     if (media == null) {
       _snack("Couldn't send that voice message.");
       return;
@@ -760,7 +765,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         _scheduledSnack(at);
         return;
       }
-      await media.sendVoice(widget.chatId, clip);
+      final id = await media.sendVoice(widget.chatId, clip);
+      // The transcript follows the clip; it never holds it up.
+      unawaited(transcripts?.afterVoiceSent(widget.chatId, id, clip, scheduled: false));
     } on ArgumentError {
       _snack("That voice message can't be sent.");
     } catch (_) {
@@ -1251,6 +1258,22 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (report.problem case final p?) _snack(p);
   }
 
+  /// Transcribe in the menu: on this device, after offering the model download if it's missing.
+  Future<void> _transcribe(MessageRow m) async {
+    final service = ref.read(transcriptsServiceProvider);
+    if (service == null || !await ensureTranscriptModel(context, ref) || !mounted) return;
+    switch (await service.transcribeMessage(m)) {
+      case TranscribeOutcome.done:
+        break;
+      case TranscribeOutcome.noSpeech:
+        _snack('No speech found in that voice message.');
+      case TranscribeOutcome.gone:
+        _snack('That voice message is no longer available.');
+      case TranscribeOutcome.failed:
+        _snack("Couldn't transcribe that voice message.");
+    }
+  }
+
   void _snack(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
@@ -1477,6 +1500,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final pinnedIds = changes.pinned.toSet();
     final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
     final reminders = ref.watch(remindersProvider(chatId)).value ?? const <String, int>{};
+    final localTranscripts = kIsWeb ? const <String, String>{} : ref.watch(localTranscriptsProvider(chatId)).value ?? const <String, String>{};
+    final transcribingIds = kIsWeb ? const <String>{} : ref.watch(transcribingProvider).value ?? const <String>{};
+    final canTranscribe = !kIsWeb && ref.watch(transcriptsServiceProvider) != null;
     final polls = ref.watch(pollsProvider(chatId));
     Widget? pollIn(MessageRow m) {
       final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
@@ -1570,7 +1596,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   if (group && mentionsOf(m).isNotEmpty) everyoneName,
                 ],
                 linkPreview: changes.previewOf(m),
-                transcript: changes.transcriptOf(m),
+                // The sender's transcript wins over one made here.
+                transcript: changes.transcriptOf(m) ?? (changes.isDeleted(m.id) ? null : localTranscripts[m.id]),
+                localTranscript: changes.transcriptOf(m) == null && localTranscripts.containsKey(m.id),
+                transcribing: transcribingIds.contains(m.id),
+                onTranscribe: canTranscribe &&
+                        m.kind == 'voice' &&
+                        !changes.isDeleted(m.id) &&
+                        changes.transcriptOf(m) == null &&
+                        !localTranscripts.containsKey(m.id) &&
+                        !transcribingIds.contains(m.id)
+                    ? () => unawaited(_transcribe(m))
+                    : null,
                 custom: pollIn(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,

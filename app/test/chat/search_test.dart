@@ -136,6 +136,15 @@ void main() {
       expect(await searchMessages(db, 'milk'), isEmpty);
     });
 
+    test('finds a local transcript; the shared one wins', () async {
+      await put([clip('v1', 1), clip('v2', 2), change('t2', 'A', 3, 'transcript', 'v2', newText: 'from bob: bread')]);
+      await db.putLocalTranscript('A', 'v1', 'local milk');
+      await db.putLocalTranscript('A', 'v2', 'local bread');
+      final hits = await searchMessages(db, 'milk');
+      expect(hits.map((h) => h.text), ['🎤 local milk']);
+      expect((await searchMessages(db, 'bread')).map((h) => h.text), ['🎤 from bob: bread']);
+    });
+
     test('only the latest transcript matches', () async {
       await put([
         clip('v1', 1),

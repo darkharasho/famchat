@@ -176,6 +176,20 @@ class LocalStars extends Table {
   Set<Column> get primaryKey => {messageId};
 }
 
+/// Transcripts this device made of other people's voice messages (Transcribe in the message menu).
+/// They never leave this device; a transcript the clip's sender sends wins over one here. They go
+/// with their message.
+@DataClassName('LocalTranscriptRow')
+class LocalTranscripts extends Table {
+  TextColumn get messageId => text()();
+  TextColumn get chatId => text()();
+  TextColumn get body => text()();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {messageId};
+}
+
 /// My reminders (docs/protocol.md "Reminders"), mirrored from `GET /me/reminders`. Kept here so a
 /// reminder whose time came while every device of mine was off still shows at the next open (the
 /// server forgets it once it fires).
@@ -377,13 +391,14 @@ int compareChatListItems(ChatListItem a, ChatListItem b) {
   LocalStars,
   LocalScheduled,
   LocalReminders,
+  LocalTranscripts,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -444,6 +459,7 @@ class ChatDb extends _$ChatDb {
             await m.createTable(localScheduled);
             await m.createTable(localReminders);
           }
+          if (from < 14) await m.createTable(localTranscripts);
         },
       );
 
@@ -609,6 +625,7 @@ class ChatDb extends _$ChatDb {
         await (delete(localMessages)..where((m) => m.chatId.equals(id))).go();
         await (delete(localScheduled)..where((m) => m.chatId.equals(id))).go();
         await (delete(localReminders)..where((m) => m.chatId.equals(id))).go();
+        await (delete(localTranscripts)..where((m) => m.chatId.equals(id))).go();
         await (delete(localMembers)..where((m) => m.chatId.equals(id))).go();
         await (delete(localKeys)..where((m) => m.chatId.equals(id))).go();
         await (delete(localChats)..where((m) => m.id.equals(id))).go();
@@ -676,6 +693,7 @@ class ChatDb extends _$ChatDb {
           if (rows.isNotEmpty) await (delete(localMessages)..where((m) => m.id.isIn([for (final r in rows) r.id]))).go();
           await (delete(localStars)..where((s) => s.messageId.isIn(chunk))).go();
           await (delete(localReminders)..where((r) => r.messageId.isIn(chunk))).go();
+          await (delete(localTranscripts)..where((t) => t.messageId.isIn(chunk))).go();
           out.addAll(rows);
         }
         return out;
@@ -701,7 +719,44 @@ class ChatDb extends _$ChatDb {
         return true;
       });
 
-  Future<void> deleteMessages(List<String> ids) => (delete(localMessages)..where((m) => m.id.isIn(ids))).go();
+  Future<void> deleteMessages(List<String> ids) => transaction(() async {
+        await (delete(localMessages)..where((m) => m.id.isIn(ids))).go();
+        await (delete(localTranscripts)..where((t) => t.messageId.isIn(ids))).go();
+      });
+
+  // --- transcripts made on this device ---
+
+  /// Keeps [text] as voice message [messageId]'s transcript on this device, if the message is still
+  /// here: not purged, expired or deleted by its sender. The check and the write are one
+  /// transaction, so a purge can't slip between them and leave the text behind. Returns whether it
+  /// was kept.
+  Future<bool> putLocalTranscript(String chatId, String messageId, String text) => transaction(() async {
+        final m = await messageById(messageId);
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (m == null || m.chatId != chatId || m.kind != 'voice') return false;
+        if (m.expiresAt != null && m.expiresAt! <= now) return false;
+        final deleted = await (select(localMessages)
+              ..where((r) =>
+                  r.targetId.equals(messageId) &
+                  r.kind.equals('delete') &
+                  r.senderUserId.equals(m.senderUserId) &
+                  r.state.equals('failed').not())
+              ..limit(1))
+            .getSingleOrNull();
+        if (deleted != null) return false;
+        await into(localTranscripts).insertOnConflictUpdate(
+            LocalTranscriptRow(messageId: messageId, chatId: chatId, body: text, createdAt: now));
+        return true;
+      });
+
+  /// [chatId]'s local transcripts, by message id.
+  Stream<Map<String, String>> watchLocalTranscripts(String chatId) =>
+      (select(localTranscripts)..where((t) => t.chatId.equals(chatId)))
+          .watch()
+          .map((rows) => {for (final r in rows) r.messageId: r.body});
+
+  Future<String?> localTranscriptOf(String messageId) async =>
+      (await (select(localTranscripts)..where((t) => t.messageId.equals(messageId))).getSingleOrNull())?.body;
 
   Future<MessageRow?> messageById(String id) =>
       (select(localMessages)..where((m) => m.id.equals(id))).getSingleOrNull();
@@ -813,6 +868,7 @@ class ChatDb extends _$ChatDb {
       "OR (m.kind = 'voice' AND EXISTS (SELECT 1 FROM local_messages t "
       "WHERE t.kind = 'transcript' AND t.target_id = m.id AND t.sender_user_id = m.sender_user_id "
       "AND json_extract(t.body, '\$.text') LIKE ? ESCAPE '\\')) "
+      "OR (m.kind = 'voice' AND EXISTS (SELECT 1 FROM local_transcripts l WHERE l.message_id = m.id AND l.body LIKE ? ESCAPE '\\')) "
       "OR EXISTS (SELECT 1 FROM local_messages e "
       "WHERE e.kind = 'edit' AND e.target_id = m.id AND e.sender_user_id = m.sender_user_id "
       "AND json_extract(e.body, '\$.text') LIKE ? ESCAPE '\\')) "
@@ -825,9 +881,10 @@ class ChatDb extends _$ChatDb {
         Variable.withString(pattern),
         Variable.withString(pattern),
         Variable.withString(pattern),
+        Variable.withString(pattern),
         Variable.withInt(limit),
       ],
-      readsFrom: {localMessages},
+      readsFrom: {localMessages, localTranscripts},
     ).get();
     return [for (final r in rows) localMessages.map(r.data)];
   }
