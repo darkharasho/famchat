@@ -134,6 +134,14 @@ sealed class Plaintext {
         final target = j['target'];
         if (target is! String || target.isEmpty) throw const FormatException('bad poll_end');
         return PollEndBody(target);
+      case 'transcript':
+        final target = j['target'], text = j['text'], lang = j['lang'];
+        if (target is! String || target.isEmpty) throw const FormatException('bad transcript target');
+        if (text is! String || text.isEmpty || text.length > maxTranscriptLength) {
+          throw const FormatException('bad transcript');
+        }
+        // A language tag that doesn't check out is dropped; the text still counts.
+        return TranscriptBody(target, text, lang: lang is String && lang.isNotEmpty && lang.length <= 16 ? lang : null);
       default:
         return UnknownBody(kind, j);
     }
@@ -824,6 +832,21 @@ class PollEndBody extends Plaintext {
   String get kind => 'poll_end';
   @override
   Map<String, Object?> toJson() => {'kind': kind, 'target': target};
+}
+
+/// The longest transcript text.
+const maxTranscriptLength = 20000;
+
+/// The sender's transcript of their own voice message [target], made on their device; the latest
+/// one wins (docs/protocol.md "Transcripts"). [lang] is the detected language, if known.
+class TranscriptBody extends Plaintext {
+  const TranscriptBody(this.target, this.text, {this.lang});
+  final String target, text;
+  final String? lang;
+  @override
+  String get kind => 'transcript';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'text': text, 'lang': ?lang};
 }
 
 /// A kind this version doesn't know (a newer version's).
