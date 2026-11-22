@@ -126,6 +126,18 @@ class HttpChatApi implements ChatApi {
       (await _call('PATCH', '/chats/${_seg(chatId)}', {'disappearSecs': secs}))!['chat'] as Map<String, Object?>);
 
   @override
+  Future<void> setReminder(String chatId, String messageId, int at) =>
+      _call('PUT', '/chats/${_seg(chatId)}/messages/${_seg(messageId)}/reminder', {'at': at});
+
+  @override
+  Future<void> clearReminder(String chatId, String messageId) =>
+      _call('DELETE', '/chats/${_seg(chatId)}/messages/${_seg(messageId)}/reminder');
+
+  @override
+  Future<List<ReminderDto>> reminders() async =>
+      [for (final r in _items(await _get('/me/reminders'), 'reminders')) ReminderDto.fromJson(r)];
+
+  @override
   Future<ScheduledDto> putScheduled(
     String id, {
     required String chatId,

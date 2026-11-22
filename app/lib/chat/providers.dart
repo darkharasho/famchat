@@ -142,6 +142,10 @@ final starredMessagesProvider = StreamProvider.family<List<MessageRow>, String?>
 final scheduledProvider =
     StreamProvider.family<List<ScheduledRow>, String>((ref, chatId) => ref.watch(chatDbProvider).watchScheduled(chatId));
 
+/// My reminders in a chat: message id → when (Unix ms). Only I see them.
+final remindersProvider =
+    StreamProvider.family<Map<String, int>, String>((ref, chatId) => ref.watch(chatDbProvider).watchReminders(chatId));
+
 final messagesProvider =
     StreamProvider.family<List<MessageRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMessages(id));
 

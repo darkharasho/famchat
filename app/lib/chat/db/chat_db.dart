@@ -175,6 +175,21 @@ class LocalStars extends Table {
   Set<Column> get primaryKey => {messageId};
 }
 
+/// My reminders (docs/protocol.md "Reminders"), mirrored from `GET /me/reminders`. Kept here so a
+/// reminder whose time came while every device of mine was off still shows at the next open (the
+/// server forgets it once it fires).
+@DataClassName('ReminderRow')
+class LocalReminders extends Table {
+  TextColumn get messageId => text()();
+  TextColumn get chatId => text()();
+
+  /// When it comes (Unix ms).
+  IntColumn get at => integer()();
+
+  @override
+  Set<Column> get primaryKey => {messageId};
+}
+
 @DataClassName('UserRow')
 class LocalUsers extends Table {
   TextColumn get id => text()();
@@ -360,6 +375,7 @@ int compareChatListItems(ChatListItem a, ChatListItem b) {
   LocalRevokedProofs,
   LocalStars,
   LocalScheduled,
+  LocalReminders,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
@@ -422,9 +438,10 @@ class ChatDb extends _$ChatDb {
             await m.createIndex(localMessagesExpiresAt);
           }
           if (from < 13) {
-            // Scheduled messages come with the next sync.
+            // Scheduled messages and reminders come with the next sync.
             await m.addColumn(localMessages, localMessages.scheduledFor);
             await m.createTable(localScheduled);
+            await m.createTable(localReminders);
           }
         },
       );
@@ -575,6 +592,7 @@ class ChatDb extends _$ChatDb {
   Future<void> deleteChat(String id) => transaction(() async {
         await (delete(localMessages)..where((m) => m.chatId.equals(id))).go();
         await (delete(localScheduled)..where((m) => m.chatId.equals(id))).go();
+        await (delete(localReminders)..where((m) => m.chatId.equals(id))).go();
         await (delete(localMembers)..where((m) => m.chatId.equals(id))).go();
         await (delete(localKeys)..where((m) => m.chatId.equals(id))).go();
         await (delete(localChats)..where((m) => m.id.equals(id))).go();
@@ -638,6 +656,7 @@ class ChatDb extends _$ChatDb {
           final rows = await (select(localMessages)..where((m) => m.id.isIn(chunk) | m.targetId.isIn(chunk))).get();
           if (rows.isNotEmpty) await (delete(localMessages)..where((m) => m.id.isIn([for (final r in rows) r.id]))).go();
           await (delete(localStars)..where((s) => s.messageId.isIn(chunk))).go();
+          await (delete(localReminders)..where((r) => r.messageId.isIn(chunk))).go();
           out.addAll(rows);
         }
         return out;
@@ -869,6 +888,23 @@ class ChatDb extends _$ChatDb {
   /// Marks my message [id] as a scheduled one that went out late (see [LocalMessages.scheduledFor]).
   Future<void> setScheduledFor(String id, int at) =>
       (update(localMessages)..where((m) => m.id.equals(id))).write(LocalMessagesCompanion(scheduledFor: Value(at)));
+
+  // --- reminders ---
+
+  /// My reminders in [chatId]: message id → when (Unix ms).
+  Stream<Map<String, int>> watchReminders(String chatId) =>
+      (select(localReminders)..where((r) => r.chatId.equals(chatId))).watch().map((rs) => {for (final r in rs) r.messageId: r.at});
+
+  Future<List<ReminderRow>> allReminders() => select(localReminders).get();
+
+  Future<ReminderRow?> reminderOf(String messageId) =>
+      (select(localReminders)..where((r) => r.messageId.equals(messageId))).getSingleOrNull();
+
+  Future<void> putReminder(String chatId, String messageId, int at) =>
+      into(localReminders).insertOnConflictUpdate(ReminderRow(messageId: messageId, chatId: chatId, at: at));
+
+  Future<void> deleteReminder(String messageId) =>
+      (delete(localReminders)..where((r) => r.messageId.equals(messageId))).go();
 
   // --- keys ---
 

@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../chat/background_send.dart';
+import '../chat/chat_sync.dart' show FiredReminder;
 import '../chat/providers.dart';
 import '../router.dart';
 import '../session/session_controller.dart';
@@ -66,6 +67,33 @@ final pushControllerProvider = Provider<PushController?>((ref) {
   return c;
 });
 
+/// Shows my reminders as they come (see [ReminderNotifier]).
+final reminderNotifierProvider = Provider<ReminderNotifier?>((ref) {
+  final sync = ref.watch(chatSyncProvider);
+  final me = ref.watch(myUserIdProvider);
+  if (sync == null || me == null) return null;
+  final router = ref.read(routerProvider);
+  final r = ReminderNotifier(
+    db: ref.watch(chatDbProvider),
+    myUserId: me,
+    notifier: ref.watch(localNotifierProvider),
+    showInApp: (title, body, route) => showPushSnackBar(
+      ref.read(rootMessengerKeyProvider).currentState,
+      PushMessage(title: title, body: body),
+      route,
+      router.go,
+    ),
+    previewsOn: () async => previewsSupported() && await readPreviewsOn(),
+    pushedHere: () => ref.read(pushControllerProvider)?.registered ?? false,
+  );
+  void show(FiredReminder f) => unawaited(r.show(f));
+  sync.onReminder = show;
+  ref.onDispose(() {
+    if (sync.onReminder == show) sync.onReminder = null;
+  });
+  return r;
+});
+
 void showPushSnackBar(ScaffoldMessengerState? messenger, PushMessage m, String? route, void Function(String) go) {
   if (messenger == null) return;
   final text = [m.title, m.body].whereType<String>().where((s) => s.isNotEmpty).join(': ');
@@ -121,6 +149,7 @@ final socketLifecycleProvider = Provider<void>((ref) {
 final notificationsProvider = Provider<void>((ref) {
   ref.watch(pushControllerProvider);
   ref.watch(messageNotifierProvider);
+  ref.watch(reminderNotifierProvider);
   ref.watch(socketLifecycleProvider);
   ref.watch(previewKeyringSyncProvider);
 });

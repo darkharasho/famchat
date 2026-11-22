@@ -13,6 +13,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../chat/db/chat_db.dart';
 import 'app_badge.dart';
 import 'chat_route.dart';
+import 'notifications.dart' show reminderNotificationId;
 import 'preview.dart';
 import 'preview_setting.dart';
 import 'push_messaging.dart';
@@ -78,13 +79,14 @@ Future<FlutterLocalNotificationsPlugin> _androidNotifications({void Function(Str
 /// How a push notification for [chatId] shows on Android: one per chat (tag), and expandable to
 /// the whole [body], which a single line would cut off. [badge]: the unread total, which launchers
 /// that count notifications show as the icon number.
-AndroidNotificationDetails previewNotificationDetails(String chatId, String body, {int? badge}) => AndroidNotificationDetails(
+/// [tag]: replaces the chat's (a reminder's is `reminder-<messageId>`, as the server's push).
+AndroidNotificationDetails previewNotificationDetails(String chatId, String body, {int? badge, String? tag}) => AndroidNotificationDetails(
       _channel.id,
       _channel.name,
       channelDescription: _channel.description,
       importance: Importance.high,
       priority: Priority.high,
-      tag: chatId,
+      tag: tag ?? chatId,
       styleInformation: BigTextStyleInformation(body),
       // flutter_local_notifications 23 has no publicVersion; the lock screen's own "contents
       // hidden" redaction stands in for a generic public version.
@@ -110,6 +112,9 @@ Future<void> handleBackgroundPush(
   final badge = m.badge;
   if (badge != null) await setBadge(badge);
   final chatId = m.chatId;
+  // A reminder shown by a push is done: it isn't shown again as missed at the next open.
+  final reminderOf = m.isReminder ? m.messageId : null;
+  if (reminderOf != null && !m.isPreview) await _dropReminder(reminderOf);
   if (!m.isPreview || chatId == null) return;
   try {
     final options = firebaseOptions();
@@ -130,15 +135,33 @@ Future<void> handleBackgroundPush(
       await db?.close();
     } catch (_) {}
     await plugin.show(
-      id: chatId.hashCode & 0x7fffffff,
+      id: reminderOf == null ? chatId.hashCode & 0x7fffffff : reminderNotificationId(reminderOf),
       title: text.title,
       body: text.body,
-      payload: chatRoute(chatId),
-      notificationDetails: NotificationDetails(android: previewNotificationDetails(chatId, text.body, badge: badge)),
+      payload: m.route,
+      notificationDetails: NotificationDetails(
+        android: previewNotificationDetails(chatId, text.body,
+            badge: badge, tag: reminderOf == null ? null : 'reminder-$reminderOf'),
+      ),
     );
+    if (reminderOf != null) await _dropReminder(reminderOf);
   } catch (e) {
     // Nothing more to do. Only the error's type: its message could hold message text.
     debugPrint('background push: notification failed: ${e.runtimeType}');
+  }
+}
+
+/// Forgets my reminder on [messageId] in the chat database (this isolate's own connection).
+Future<void> _dropReminder(String messageId) async {
+  try {
+    final db = openChatDb();
+    try {
+      await db.deleteReminder(messageId);
+    } finally {
+      await db.close();
+    }
+  } catch (e) {
+    debugPrint('background push: reminder not cleared: ${e.runtimeType}');
   }
 }
 

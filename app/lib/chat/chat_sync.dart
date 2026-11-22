@@ -34,6 +34,17 @@ class CaughtUp {
   final List<MessageRow> messages;
 }
 
+/// A reminder of mine that came: now (the server's `reminder` frame) or while every device of mine
+/// was off ([missed]: found at the next open).
+class FiredReminder {
+  const FiredReminder({required this.chatId, required this.messageId, required this.at, this.missed = false});
+  final String chatId, messageId;
+
+  /// The time it was set for (Unix ms).
+  final int at;
+  final bool missed;
+}
+
 class ChatSync {
   ChatSync({
     required this.db,
@@ -243,6 +254,11 @@ class ChatSync {
       await syncGone();
     } catch (_) {
       // Tombstones wait for the next sync; the device's own timers still run meanwhile.
+    }
+    try {
+      await refreshReminders();
+    } catch (_) {
+      // Reminders wait for the next sync or `reminders` event.
     }
     await keys.fetch();
     for (final c in chats) {
@@ -527,6 +543,15 @@ class ChatSync {
         await refreshStars();
       case 'scheduled':
         await refreshScheduled();
+      case 'reminders':
+        await refreshReminders();
+      case 'reminder':
+        // One of my reminders came: it's no longer set (the server deleted it), and it's shown.
+        final chatId = e['chatId'], messageId = e['messageId'], at = e['at'];
+        if (chatId is String && messageId is String && at is int) {
+          await _onReminderLane(() => db.deleteReminder(messageId));
+          _fire(FiredReminder(chatId: chatId, messageId: messageId, at: at));
+        }
       case 'needs_resend':
         // My scheduled message's key changed before it went out: re-encrypt it and send it now.
         if (e['id'] case final String id) await _onSchedLane(() => _needsResend(id));
@@ -1393,6 +1418,81 @@ class ChatSync {
     final out = jsonEncode(j);
     Plaintext.decode(utf8.encode(out)); // still a valid message
     return out;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Reminders (docs/protocol.md "Reminders")
+
+  /// Sets, clears and refreshes run one at a time, so a refresh can't undo a change made after it
+  /// started.
+  Future<void> _reminderLane = Future.value();
+  Future<void> _onReminderLane(Future<void> Function() work) {
+    final next = _reminderLane.then((_) => work());
+    _reminderLane = next.catchError((_) {});
+    return next;
+  }
+
+  /// Sets (or moves) my reminder on [messageId] to [at]: on the server, then here. Throws
+  /// [ArgumentError] when [at] isn't [scheduleMin] to [scheduleMax] ahead, and the API's errors
+  /// (offline, or the message is gone).
+  Future<void> setReminder(String chatId, String messageId, DateTime at) {
+    if (!canScheduleAt(at)) throw ArgumentError.value(at, 'at', 'not between a minute and 366 days ahead');
+    return _onReminderLane(() async {
+      await api.setReminder(chatId, messageId, at.millisecondsSinceEpoch);
+      await db.putReminder(chatId, messageId, at.millisecondsSinceEpoch);
+    });
+  }
+
+  /// Clears my reminder on [messageId], on the server and here.
+  Future<void> clearReminder(String chatId, String messageId) => _onReminderLane(() async {
+        await api.clearReminder(chatId, messageId);
+        await db.deleteReminder(messageId);
+      });
+
+  /// Takes the server's list of my reminders. One kept here that the server no longer lists came
+  /// while this device was away when its time has passed (shown now, as missed), else it was
+  /// cleared on another device.
+  Future<void> refreshReminders() => _onReminderLane(() async {
+        final list = await api.reminders();
+        final ids = {for (final r in list) r.messageId};
+        // A little slack: this device's clock may run a bit behind the server's.
+        final now = _now().millisecondsSinceEpoch + reminderClockSlack.inMilliseconds;
+        for (final r in await db.allReminders()) {
+          if (ids.contains(r.messageId)) continue;
+          await db.deleteReminder(r.messageId);
+          if (r.at <= now) _fire(FiredReminder(chatId: r.chatId, messageId: r.messageId, at: r.at, missed: true));
+        }
+        for (final r in list) {
+          await db.putReminder(r.chatId, r.messageId, r.at);
+        }
+      });
+
+  /// A reminder gone from the server's list this close to its time counts as having come (see
+  /// [refreshReminders]).
+  static const reminderClockSlack = Duration(minutes: 2);
+
+  /// Called with each reminder that comes (the notification layer shows it). Reminders that came
+  /// while it's unset are handed over once it's set.
+  void Function(FiredReminder r)? get onReminder => _onReminder;
+  set onReminder(void Function(FiredReminder r)? f) {
+    _onReminder = f;
+    if (f != null && _firedBacklog.isNotEmpty) {
+      final fired = [..._firedBacklog];
+      _firedBacklog.clear();
+      fired.forEach(f);
+    }
+  }
+
+  void Function(FiredReminder r)? _onReminder;
+  final _firedBacklog = <FiredReminder>[];
+
+  void _fire(FiredReminder r) {
+    final f = _onReminder;
+    if (f != null) {
+      f(r);
+    } else if (_firedBacklog.length < 100) {
+      _firedBacklog.add(r);
+    }
   }
 
   // ---------------------------------------------------------------------------------------------

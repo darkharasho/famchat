@@ -6143,6 +6143,267 @@ class LocalScheduledCompanion extends UpdateCompanion<ScheduledRow> {
   }
 }
 
+class $LocalRemindersTable extends LocalReminders
+    with TableInfo<$LocalRemindersTable, ReminderRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalRemindersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
+  @override
+  late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
+    'chat_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<int> at = GeneratedColumn<int>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [messageId, chatId, at];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_reminders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReminderRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('chat_id')) {
+      context.handle(
+        _chatIdMeta,
+        chatId.isAcceptableOrUnknown(data['chat_id']!, _chatIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chatIdMeta);
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {messageId};
+  @override
+  ReminderRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReminderRow(
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      chatId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chat_id'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalRemindersTable createAlias(String alias) {
+    return $LocalRemindersTable(attachedDatabase, alias);
+  }
+}
+
+class ReminderRow extends DataClass implements Insertable<ReminderRow> {
+  final String messageId;
+  final String chatId;
+
+  /// When it comes (Unix ms).
+  final int at;
+  const ReminderRow({
+    required this.messageId,
+    required this.chatId,
+    required this.at,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['message_id'] = Variable<String>(messageId);
+    map['chat_id'] = Variable<String>(chatId);
+    map['at'] = Variable<int>(at);
+    return map;
+  }
+
+  LocalRemindersCompanion toCompanion(bool nullToAbsent) {
+    return LocalRemindersCompanion(
+      messageId: Value(messageId),
+      chatId: Value(chatId),
+      at: Value(at),
+    );
+  }
+
+  factory ReminderRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReminderRow(
+      messageId: serializer.fromJson<String>(json['messageId']),
+      chatId: serializer.fromJson<String>(json['chatId']),
+      at: serializer.fromJson<int>(json['at']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'messageId': serializer.toJson<String>(messageId),
+      'chatId': serializer.toJson<String>(chatId),
+      'at': serializer.toJson<int>(at),
+    };
+  }
+
+  ReminderRow copyWith({String? messageId, String? chatId, int? at}) =>
+      ReminderRow(
+        messageId: messageId ?? this.messageId,
+        chatId: chatId ?? this.chatId,
+        at: at ?? this.at,
+      );
+  ReminderRow copyWithCompanion(LocalRemindersCompanion data) {
+    return ReminderRow(
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      chatId: data.chatId.present ? data.chatId.value : this.chatId,
+      at: data.at.present ? data.at.value : this.at,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReminderRow(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('at: $at')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(messageId, chatId, at);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReminderRow &&
+          other.messageId == this.messageId &&
+          other.chatId == this.chatId &&
+          other.at == this.at);
+}
+
+class LocalRemindersCompanion extends UpdateCompanion<ReminderRow> {
+  final Value<String> messageId;
+  final Value<String> chatId;
+  final Value<int> at;
+  final Value<int> rowid;
+  const LocalRemindersCompanion({
+    this.messageId = const Value.absent(),
+    this.chatId = const Value.absent(),
+    this.at = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalRemindersCompanion.insert({
+    required String messageId,
+    required String chatId,
+    required int at,
+    this.rowid = const Value.absent(),
+  }) : messageId = Value(messageId),
+       chatId = Value(chatId),
+       at = Value(at);
+  static Insertable<ReminderRow> custom({
+    Expression<String>? messageId,
+    Expression<String>? chatId,
+    Expression<int>? at,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (messageId != null) 'message_id': messageId,
+      if (chatId != null) 'chat_id': chatId,
+      if (at != null) 'at': at,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalRemindersCompanion copyWith({
+    Value<String>? messageId,
+    Value<String>? chatId,
+    Value<int>? at,
+    Value<int>? rowid,
+  }) {
+    return LocalRemindersCompanion(
+      messageId: messageId ?? this.messageId,
+      chatId: chatId ?? this.chatId,
+      at: at ?? this.at,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (chatId.present) {
+      map['chat_id'] = Variable<String>(chatId.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<int>(at.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalRemindersCompanion(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('at: $at, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -6365,6 +6626,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
       $LocalRevokedProofsTable(this);
   late final $LocalStarsTable localStars = $LocalStarsTable(this);
   late final $LocalScheduledTable localScheduled = $LocalScheduledTable(this);
+  late final $LocalRemindersTable localReminders = $LocalRemindersTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -6391,6 +6653,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localRevokedProofs,
     localStars,
     localScheduled,
+    localReminders,
     meta,
     localMessagesChatSeq,
     localMessagesExpiresAt,
@@ -9515,6 +9778,177 @@ typedef $$LocalScheduledTableProcessedTableManager =
       ScheduledRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalRemindersTableCreateCompanionBuilder =
+    LocalRemindersCompanion Function({
+      required String messageId,
+      required String chatId,
+      required int at,
+      Value<int> rowid,
+    });
+typedef $$LocalRemindersTableUpdateCompanionBuilder =
+    LocalRemindersCompanion Function({
+      Value<String> messageId,
+      Value<String> chatId,
+      Value<int> at,
+      Value<int> rowid,
+    });
+
+class $$LocalRemindersTableFilterComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalRemindersTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalRemindersTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalRemindersTable> {
+  $$LocalRemindersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get chatId =>
+      $composableBuilder(column: $table.chatId, builder: (column) => column);
+
+  GeneratedColumn<int> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+}
+
+class $$LocalRemindersTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalRemindersTable,
+          ReminderRow,
+          $$LocalRemindersTableFilterComposer,
+          $$LocalRemindersTableOrderingComposer,
+          $$LocalRemindersTableAnnotationComposer,
+          $$LocalRemindersTableCreateCompanionBuilder,
+          $$LocalRemindersTableUpdateCompanionBuilder,
+          (
+            ReminderRow,
+            BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>,
+          ),
+          ReminderRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalRemindersTableTableManager(_$ChatDb db, $LocalRemindersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalRemindersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalRemindersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalRemindersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> messageId = const Value.absent(),
+                Value<String> chatId = const Value.absent(),
+                Value<int> at = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRemindersCompanion(
+                messageId: messageId,
+                chatId: chatId,
+                at: at,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String messageId,
+                required String chatId,
+                required int at,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalRemindersCompanion.insert(
+                messageId: messageId,
+                chatId: chatId,
+                at: at,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalRemindersTable, ReminderRow>(table),
+                  BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalRemindersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalRemindersTable,
+      ReminderRow,
+      $$LocalRemindersTableFilterComposer,
+      $$LocalRemindersTableOrderingComposer,
+      $$LocalRemindersTableAnnotationComposer,
+      $$LocalRemindersTableCreateCompanionBuilder,
+      $$LocalRemindersTableUpdateCompanionBuilder,
+      (
+        ReminderRow,
+        BaseReferences<_$ChatDb, $LocalRemindersTable, ReminderRow>,
+      ),
+      ReminderRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -9670,5 +10104,7 @@ class $ChatDbManager {
       $$LocalStarsTableTableManager(_db, _db.localStars);
   $$LocalScheduledTableTableManager get localScheduled =>
       $$LocalScheduledTableTableManager(_db, _db.localScheduled);
+  $$LocalRemindersTableTableManager get localReminders =>
+      $$LocalRemindersTableTableManager(_db, _db.localReminders);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }

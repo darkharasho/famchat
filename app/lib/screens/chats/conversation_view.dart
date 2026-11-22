@@ -940,6 +940,60 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  /// "Remind me" on [m] (a time, then set), or with a reminder already at [current]: change or
+  /// clear it.
+  Future<void> _remind(MessageRow m, int? current) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final h24 = MediaQuery.alwaysUse24HourFormatOf(context);
+    if (current != null) {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Reminder'),
+              subtitle: Text(whenLabel(DateTime.fromMillisecondsSinceEpoch(current), h24: h24)),
+            ),
+            ListTile(
+              key: const Key('reminder-change'),
+              leading: const Icon(Icons.schedule_rounded),
+              title: const Text('Change time'),
+              onTap: () => Navigator.pop(context, 'change'),
+            ),
+            ListTile(
+              key: const Key('reminder-clear'),
+              leading: const Icon(Icons.notifications_off_outlined),
+              title: const Text('Clear reminder'),
+              onTap: () => Navigator.pop(context, 'clear'),
+            ),
+          ]),
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == 'clear') {
+        try {
+          await sync.clearReminder(widget.chatId, m.id);
+          _snack('Reminder cleared');
+        } catch (_) {
+          _snack("Couldn't clear the reminder. Check your connection.");
+        }
+        return;
+      }
+    }
+    final at = await pickTime(context, title: current == null ? 'Remind me' : 'Change reminder');
+    if (at == null || !mounted) return;
+    try {
+      await sync.setReminder(widget.chatId, m.id, at);
+      _snack('Reminder set for ${whenLabel(at, h24: h24)}');
+    } on ArgumentError {
+      _snack('That time is too close now. Pick another.');
+    } catch (_) {
+      _snack("Couldn't set the reminder. Check your connection.");
+    }
+  }
+
   /// Album items other than the last have no bubble of their own: jumps go to their album's.
   Map<String, String> _albumOwner = const {};
 
@@ -1419,6 +1473,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final pinNotes = {for (final r in changes.pinEvents) r.id: r};
     final pinnedIds = changes.pinned.toSet();
     final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
+    final reminders = ref.watch(remindersProvider(chatId)).value ?? const <String, int>{};
     final polls = ref.watch(pollsProvider(chatId));
     Widget? pollIn(MessageRow m) {
       final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
@@ -1541,6 +1596,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         }
                       },
                 starred: starred.contains(m.id),
+                reminderAt: reminders[m.id],
+                onRemind: m.seq == null || changes.isDeleted(m.id) ? null : () => unawaited(_remind(m, reminders[m.id])),
                 onStar: m.seq == null || changes.isDeleted(m.id)
                     ? null
                     : () => sync?.star(chatId, m.id, starred: !starred.contains(m.id)),

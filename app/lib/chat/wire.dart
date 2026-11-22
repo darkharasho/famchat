@@ -397,7 +397,28 @@ class ScheduledDto {
       );
 }
 
+/// One of my reminders (docs/protocol.md "Reminders").
+class ReminderDto {
+  const ReminderDto({required this.chatId, required this.messageId, required this.at});
+  final String chatId, messageId;
+
+  /// When it comes (Unix ms).
+  final int at;
+
+  factory ReminderDto.fromJson(Map<String, Object?> j) =>
+      ReminderDto(chatId: _f(j, 'chatId'), messageId: _f(j, 'messageId'), at: _f(j, 'at'));
+}
+
 abstract interface class ChatApi {
+  /// Sets (or moves) my reminder on [messageId] to [at] (Unix ms, 1 minute to 366 days ahead).
+  Future<void> setReminder(String chatId, String messageId, int at);
+
+  /// Clears my reminder on [messageId] (fine when there is none).
+  Future<void> clearReminder(String chatId, String messageId);
+
+  /// My reminders, soonest first.
+  Future<List<ReminderDto>> reminders();
+
   /// Schedules message [id] (or replaces my scheduled message [id]) to go out at [deliverAt] (Unix
   /// ms, 1 minute to 366 days ahead), encrypted under the chat's current epoch.
   Future<ScheduledDto> putScheduled(

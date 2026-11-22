@@ -465,6 +465,24 @@ class FakeChatBackend {
     _notify(_chats[chatId]!.members.keys, {'type': 'chat', 'chatId': chatId});
   }
 
+  // --- reminders (server/src/routes/chats.ts, hub.ts) ---
+
+  /// Reminders by user, then message id.
+  final reminders = <String, Map<String, ReminderDto>>{};
+
+  /// Reminder pushes sent, as (device id, message id): to the owner's devices without an open socket.
+  final reminderPushes = <(String, String)>[];
+
+  /// The hub's alarm reaching [userId]'s reminder on [messageId]: a `reminder` frame to every socket
+  /// of theirs, a push to their devices without one, and the row is gone.
+  void fireReminder(String userId, String messageId) {
+    final r = reminders[userId]!.remove(messageId)!;
+    _toUser(userId, {'type': 'reminder', 'chatId': r.chatId, 'messageId': messageId, 'at': r.at});
+    for (final d in _devices.values) {
+      if (d.userId == userId && !d.revoked && !(_hubs[d.id]?.connected ?? false)) reminderPushes.add((d.id, messageId));
+    }
+  }
+
   // --- media (server/src/routes/media.ts) ---
 
   final _media = <String, _Blob>{};
@@ -932,6 +950,33 @@ class FakeChatApi implements ChatApi {
         }
         b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
         return c.dto(userId);
+      });
+
+  @override
+  Future<void> setReminder(String chatId, String messageId, int at) =>
+      _run('PUT /chats/$chatId/messages/$messageId/reminder', () {
+        final c = b._memberChat(chatId, userId);
+        final ahead = at - b.wallClock();
+        if (ahead < 60000 || ahead > 366 * 86400000) b._err('invalid_request');
+        if (!c.messages.any((m) => m.id == messageId)) b._err('not_found');
+        (b.reminders[userId] ??= {})[messageId] = ReminderDto(chatId: chatId, messageId: messageId, at: at);
+        b._notify([userId], {'type': 'reminders'});
+      });
+
+  @override
+  Future<void> clearReminder(String chatId, String messageId) =>
+      _run('DELETE /chats/$chatId/messages/$messageId/reminder', () {
+        b._memberChat(chatId, userId);
+        if (b.reminders[userId]?.remove(messageId) != null) b._notify([userId], {'type': 'reminders'});
+      });
+
+  @override
+  Future<List<ReminderDto>> reminders() => _run('GET /me/reminders', () {
+        final mine = [
+          for (final r in (b.reminders[userId] ?? const <String, ReminderDto>{}).values)
+            if (b._chats[r.chatId]?.members.containsKey(userId) ?? false) r,
+        ]..sort((x, y) => x.at.compareTo(y.at));
+        return mine;
       });
 
   @override

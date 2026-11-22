@@ -6,7 +6,7 @@ import 'dart:async';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
-import '../chat/chat_sync.dart' show CaughtUp;
+import '../chat/chat_sync.dart' show CaughtUp, FiredReminder;
 import '../chat/db/chat_db.dart';
 import '../chat/message_changes.dart' show mentionsOf;
 import 'chat_route.dart';
@@ -64,6 +64,9 @@ class PushController {
 
   /// Whether the server has this device's current token (the last registration went through).
   bool _registered = false;
+
+  /// This device gets pushes now (its token is registered).
+  bool get registered => _registered;
 
   Future<void> start() async {
     _subs.add(messaging.onMessageOpenedApp.listen(_open));
@@ -131,7 +134,7 @@ class PushController {
   }
 
   void _open(PushMessage m) {
-    final route = chatRoute(m.chatId);
+    final route = m.route;
     if (route != null) openRoute(route);
   }
 
@@ -146,8 +149,9 @@ class PushController {
     }
     if (_stopped) return;
     final chatId = shown.chatId;
-    if (chatId != null && isChatVisible(chatId)) return;
-    showInApp(shown, chatRoute(chatId));
+    // A reminder shows even over its chat: it's about one message, maybe far up.
+    if (chatId != null && !shown.isReminder && isChatVisible(chatId)) return;
+    showInApp(shown, shown.route);
   }
 
   Future<void> stop() async {
@@ -156,6 +160,82 @@ class PushController {
       await s.cancel();
     }
     _subs.clear();
+  }
+}
+
+/// The notification id of [messageId]'s reminder (apart from its chat's message notifications).
+int reminderNotificationId(String messageId) => 'reminder-$messageId'.hashCode & 0x7fffffff;
+
+/// A reminder's notification body: with previews on, the message as notifications show it
+/// ("Name: text" in groups); otherwise who and where, as the server's push says (docs/protocol.md
+/// "Push", reminders). Never throws.
+Future<String> reminderBody(
+  ChatDb db,
+  String chatId,
+  String messageId, {
+  required String myUserId,
+  required Future<bool> Function() previewsOn,
+}) async {
+  try {
+    final row = await db.messageById(messageId);
+    final chat = await db.chatById(chatId);
+    if (row != null) {
+      try {
+        if (await previewsOn()) {
+          final text = await rowPreviewText(db, row);
+          if (text != null) return await previewBody(db: db, chatId: chatId, senderUserId: row.senderUserId, preview: text);
+        }
+      } catch (_) {
+        // The generic text, then.
+      }
+    }
+    final group = chat?.kind == 'group';
+    final title = chat?.title == null || chat!.title!.isEmpty ? 'Group' : chat.title!;
+    if (row != null && row.senderUserId == myUserId) return group ? '$title: your message' : 'Your message';
+    final sender = row == null ? 'Someone' : (await db.userById(row.senderUserId))?.name ?? 'Someone';
+    return group ? '$title: message from $sender' : 'Message from $sender';
+  } catch (_) {
+    return 'A message you asked to be reminded of';
+  }
+}
+
+/// My reminders as they come ([ChatSync.onReminder]): a notification on desktop apps and the web
+/// (the local notifier), the in-app note on phones, whose socket is open only while FamChat is in
+/// front (in the background the server pushes them instead). Tapping opens the chat at the message.
+class ReminderNotifier {
+  ReminderNotifier({
+    required this.db,
+    required this.myUserId,
+    required this.notifier,
+    required this.showInApp,
+    required this.previewsOn,
+    this.pushedHere = _never,
+  });
+
+  static bool _never() => false;
+
+  final ChatDb db;
+  final String myUserId;
+
+  /// This device gets pushes: a reminder that came while it was away was pushed to it then, so it
+  /// isn't shown again as missed.
+
+  /// Null on phones.
+  final LocalNotifier? notifier;
+
+  /// Shows it inside the app; [route] is where "Open" goes.
+  final void Function(String title, String body, String route) showInApp;
+  final Future<bool> Function() previewsOn;
+  final bool Function() pushedHere;
+
+  Future<void> show(FiredReminder r) async {
+    final route = messageRoute(r.chatId, r.messageId);
+    if (route == null || (r.missed && pushedHere())) return;
+    final body = await reminderBody(db, r.chatId, r.messageId, myUserId: myUserId, previewsOn: previewsOn);
+    final n = notifier;
+    // The web shows nothing until the person allowed notifications: then the in-app note too.
+    if (n == null || n.needsPermission) showInApp('Reminder', body, route);
+    if (n != null) await n.show(id: reminderNotificationId(r.messageId), title: 'Reminder', body: body, route: route);
   }
 }
 

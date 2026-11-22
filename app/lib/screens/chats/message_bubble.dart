@@ -59,7 +59,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, pin, star, forward, save, copy, readBy, edit, delete }
+enum MessageAction { reply, pin, star, remind, forward, save, copy, readBy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -112,6 +112,8 @@ class MessageBubble extends StatefulWidget {
     this.pinned = false,
     this.onStar,
     this.starred = false,
+    this.onRemind,
+    this.reminderAt,
     this.album,
     this.onOpenAlbumItem,
     this.custom,
@@ -136,6 +138,13 @@ class MessageBubble extends StatefulWidget {
   /// Stars it for me (or unstars it, when [starred]); a ★ shows by the time while starred.
   final VoidCallback? onStar;
   final bool starred;
+
+  /// "Remind me" (or, with [reminderAt], change or clear it); a bell shows by the time while one is
+  /// set, and tapping it does the same. Reminders are mine alone.
+  final VoidCallback? onRemind;
+
+  /// When my reminder on it comes (Unix ms), or null.
+  final int? reminderAt;
 
   /// My sent messages in groups: who has read it.
   final VoidCallback? onReadBy;
@@ -249,6 +258,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (widget.onReply != null) MessageAction.reply,
         if (widget.onPin != null) MessageAction.pin,
         if (widget.onStar != null) MessageAction.star,
+        if (widget.onRemind != null) MessageAction.remind,
         if (widget.onForward != null) MessageAction.forward,
         if (widget.onSave != null) MessageAction.save,
         if (_copyText != null) MessageAction.copy,
@@ -263,6 +273,9 @@ class _MessageBubbleState extends State<MessageBubble> {
             ? (Icons.push_pin_rounded, 'Unpin')
             : (Icons.push_pin_outlined, 'Pin for everyone'),
         MessageAction.star => widget.starred ? (Icons.star_rounded, 'Unstar') : (Icons.star_outline_rounded, 'Star'),
+        MessageAction.remind => widget.reminderAt != null
+            ? (Icons.notifications_active_outlined, 'Change reminder')
+            : (Icons.notification_add_outlined, 'Remind me'),
         MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.save => (Icons.download_rounded, hoverReactions ? 'Save as…' : 'Save'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
@@ -317,6 +330,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onPin?.call();
       case MessageAction.star:
         widget.onStar?.call();
+      case MessageAction.remind:
+        widget.onRemind?.call();
       case MessageAction.forward:
         widget.onForward?.call();
       case MessageAction.save:
@@ -433,7 +448,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     // My sent messages each carry their ticks (with the time), as Telegram does; others' runs show
     // the time once, under the last bubble.
     final showTime = widget.lastInGroup || widget.starred || pending || m.state == 'failed' || widget.receipt != null ||
-        m.scheduledFor != null;
+        m.scheduledFor != null || widget.reminderAt != null;
 
     // "edited" stays in the bubble; the time goes under it (below).
     final showEdited = widget.edited && !widget.deleted;
@@ -448,6 +463,20 @@ class _MessageBubbleState extends State<MessageBubble> {
       child: Row(key: Key('time-${m.id}'), mainAxisSize: MainAxisSize.min, children: [
         if (widget.starred && !widget.deleted) ...[
           Icon(Icons.star_rounded, key: Key('star-${m.id}'), size: 13, color: const Color(0xFFE0A100), semanticLabel: 'Starred'),
+          const SizedBox(width: 3),
+        ],
+        if (widget.reminderAt != null && !widget.deleted) ...[
+          GestureDetector(
+            onTap: widget.onRemind,
+            behavior: HitTestBehavior.opaque,
+            child: Icon(
+              Icons.notifications_active_outlined,
+              key: Key('bell-${m.id}'),
+              size: 13,
+              color: dim,
+              semanticLabel: 'Reminder set',
+            ),
+          ),
           const SizedBox(width: 3),
         ],
         Text(
