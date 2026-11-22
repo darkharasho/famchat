@@ -101,6 +101,21 @@ class LocalKeys extends Table {
   Set<Column> get primaryKey => {chatId, epoch};
 }
 
+/// This user's starred messages (docs/protocol.md "Starred messages"), mirrored from the server.
+/// [pending]: changed here and not yet confirmed by the server; [starred] false is an unstar waiting
+/// to go (the row goes once it does).
+@DataClassName('StarRow')
+class LocalStars extends Table {
+  TextColumn get messageId => text()();
+  TextColumn get chatId => text()();
+  IntColumn get starredAt => integer()();
+  BoolColumn get starred => boolean().withDefault(const Constant(true))();
+  BoolColumn get pending => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {messageId};
+}
+
 @DataClassName('UserRow')
 class LocalUsers extends Table {
   TextColumn get id => text()();
@@ -284,13 +299,14 @@ int compareChatListItems(ChatListItem a, ChatListItem b) {
   LocalFamilies,
   LocalFamilyAdmins,
   LocalRevokedProofs,
+  LocalStars,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -333,8 +349,42 @@ class ChatDb extends _$ChatDb {
             await m.addColumn(localChats, localChats.avatarKey);
             await m.addColumn(localUsers, localUsers.lastSeenAt);
           }
+          // Filled in by the next sync.
+          if (from < 11) await m.createTable(localStars);
         },
       );
+
+  // ---------------------------------------------------------------------------------------------
+  // Stars
+
+  /// Starred message ids (in [chatId], or all), newest star first. Unstars waiting to go are left out.
+  Stream<List<StarRow>> watchStars({String? chatId}) => (select(localStars)
+        ..where((s) => s.starred.equals(true) & (chatId == null ? const Constant(true) : s.chatId.equals(chatId)))
+        ..orderBy([(s) => OrderingTerm.desc(s.starredAt), (s) => OrderingTerm.desc(s.messageId)]))
+      .watch();
+
+  /// Stars or unstars here first; [pending] until the server has it.
+  Future<void> setStar(String chatId, String messageId, {required bool starred, required int at, bool pending = true}) =>
+      into(localStars).insertOnConflictUpdate(
+          StarRow(messageId: messageId, chatId: chatId, starredAt: at, starred: starred, pending: pending));
+
+  Future<List<StarRow>> pendingStars() => (select(localStars)..where((s) => s.pending.equals(true))).get();
+
+  Future<StarRow?> starOf(String messageId) =>
+      (select(localStars)..where((s) => s.messageId.equals(messageId))).getSingleOrNull();
+
+  Future<void> dropStar(String messageId) => (delete(localStars)..where((s) => s.messageId.equals(messageId))).go();
+
+  /// The server's list replaces what's here, except changes still waiting to go.
+  Future<void> replaceStars(List<({String chatId, String messageId, int starredAt})> stars) => transaction(() async {
+        await (delete(localStars)..where((s) => s.pending.equals(false))).go();
+        for (final st in stars) {
+          await into(localStars).insert(
+            StarRow(messageId: st.messageId, chatId: st.chatId, starredAt: st.starredAt, starred: true, pending: false),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
 
   /// Set once a device before schema 8 had pinned the family's admins (the upgrade to per-family
   /// pins reads it).

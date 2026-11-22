@@ -119,6 +119,10 @@ final chatListProvider = StreamProvider<List<ChatListItem>>((ref) {
 
 final chatProvider = StreamProvider.family<ChatRow?, String>((ref, id) => ref.watch(chatDbProvider).watchChat(id));
 
+/// My starred messages in a chat (or every chat, for null), newest star first.
+final starsProvider =
+    StreamProvider.family<List<StarRow>, String?>((ref, chatId) => ref.watch(chatDbProvider).watchStars(chatId: chatId));
+
 final messagesProvider =
     StreamProvider.family<List<MessageRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMessages(id));
 

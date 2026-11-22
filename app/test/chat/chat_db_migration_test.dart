@@ -35,6 +35,7 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 1');
     }));
     addTearDown(db.close);
@@ -68,6 +69,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 2');
     }));
     addTearDown(db.close);
@@ -99,6 +101,7 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 3');
     }));
     addTearDown(db.close);
@@ -129,6 +132,7 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 4');
     }));
     addTearDown(db.close);
@@ -157,6 +161,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 5');
     }));
     addTearDown(db.close);
@@ -184,6 +189,7 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 6');
     }));
     addTearDown(db.close);
@@ -260,6 +266,7 @@ void main() {
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 8');
     }));
     addTearDown(db.close);
@@ -303,6 +310,7 @@ void main() {
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute('DROP TABLE local_stars')
         ..execute('PRAGMA user_version = 9');
     }));
     addTearDown(db.close);
@@ -318,6 +326,28 @@ void main() {
     expect((await db.chatById('C'))!.pinnedAt, 5);
     expect((await db.chatById('C'))!.markedUnread, isTrue);
     expect((await db.userById('A'))!.lastSeenAt, 7);
+  });
+
+  test('schema 10 to 11: a table for starred messages; rows kept', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('DROP TABLE local_stars')
+        ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
+            "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute('PRAGMA user_version = 10');
+    }));
+    addTearDown(db.close);
+    expect((await db.chatById('C'))!.title, 'Us');
+    expect(await db.watchStars().first, isEmpty);
+    await db.setStar('C', 'M', starred: true, at: 3);
+    expect((await db.watchStars(chatId: 'C').first).single.messageId, 'M');
   });
 
   test('family pins: replaced as a whole, families absent from the map are dropped', () async {

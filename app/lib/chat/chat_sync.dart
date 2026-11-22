@@ -224,6 +224,7 @@ class ChatSync {
       final local = (await db.chatById(c.id))!.myLastReadSeq;
       if (local > server) hub.send({'type': 'read', 'chatId': c.id, 'seq': local});
     }
+    await refreshStars();
     await keys.fetch();
     for (final c in chats) {
       try {
@@ -466,6 +467,8 @@ class ChatSync {
         await _catchUp(chatId);
         await _retryUndecryptable();
         await _flushOutbox();
+      case 'stars':
+        await refreshStars();
       case 'removed':
         await db.deleteChat(e['chatId'] as String);
       case 'device':
@@ -796,6 +799,42 @@ class ChatSync {
   Future<void> mute(String chatId, int? until) async {
     await api.muteChat(chatId, until);
     await db.setMutedUntil(chatId, until);
+  }
+
+  /// Stars or unstars [messageId] for this user: here at once, then on the server (on the next sync
+  /// if offline). A refusal (the message or chat is gone) undoes it here.
+  Future<void> star(String chatId, String messageId, {required bool starred}) async {
+    await db.setStar(chatId, messageId, starred: starred, at: _now().millisecondsSinceEpoch);
+    await _pushStar(chatId, messageId, starred);
+  }
+
+  Future<void> _pushStar(String chatId, String messageId, bool starred) async {
+    try {
+      await api.setStar(chatId, messageId, starred);
+    } on ApiException catch (e) {
+      if (e.status < 400 || e.status >= 500) return; // retried on the next sync
+      await db.dropStar(messageId);
+      return;
+    } catch (_) {
+      return; // offline: retried on the next sync
+    }
+    // Confirmed, unless it changed again meanwhile.
+    final now = await db.starOf(messageId);
+    if (now == null || now.starred != starred) return;
+    if (starred) {
+      await db.setStar(chatId, messageId, starred: true, at: now.starredAt, pending: false);
+    } else {
+      await db.dropStar(messageId);
+    }
+  }
+
+  /// Sends stars made offline, then takes the server's list.
+  Future<void> refreshStars() async {
+    for (final p in await db.pendingStars()) {
+      await _pushStar(p.chatId, p.messageId, p.starred);
+    }
+    final stars = await api.stars();
+    await db.replaceStars([for (final s in stars) (chatId: s.chatId, messageId: s.messageId, starredAt: s.starredAt)]);
   }
 
   /// Pins [chatId] to the top of this user's chat list, or unpins it.

@@ -156,6 +156,9 @@ class FakeChatBackend {
   int _ids = 0;
   int _clock = 1700000000000;
   final _users = <String, _User>{};
+
+  /// Starred messages by user, then message id.
+  final stars = <String, Map<String, StarDto>>{};
   final _devices = <String, _Device>{};
   final _chats = <String, _Chat>{};
 
@@ -571,6 +574,9 @@ class FakeChatApi implements ChatApi {
   /// When set, the next call throws this instead of running.
   Object? failNext;
 
+  /// Calls (by name) that fail as if offline until removed.
+  final offlineCalls = <String>{};
+
   /// Calls (by name, e.g. `GET /chats/<id>/messages`) that wait for their completer: a slow network.
   final holds = <String, Completer<void>>{};
 
@@ -579,6 +585,7 @@ class FakeChatApi implements ChatApi {
     final h = holds[call];
     if (h != null) await h.future;
     b.calls.add(call);
+    if (offlineCalls.contains(call)) throw Exception('offline: $call');
     final fail = failNext;
     if (fail != null) {
       failNext = null;
@@ -730,6 +737,31 @@ class FakeChatApi implements ChatApi {
   Future<void> muteChat(String chatId, int? until) => _run('PUT /chats/$chatId/mute', () {
         b._memberChat(chatId, userId).members[userId]!.mutedUntil = until;
         b._notify([userId], {'type': 'chat', 'chatId': chatId});
+      });
+
+  @override
+  Future<void> setStar(String chatId, String messageId, bool starred) =>
+      _run('${starred ? 'PUT' : 'DELETE'} /chats/$chatId/messages/$messageId/star', () {
+        final c = b._memberChat(chatId, userId);
+        if (!c.messages.any((m) => m.id == messageId)) throw ApiException(404, 'not_found');
+        final mine = b.stars.putIfAbsent(userId, () => {});
+        final bool changed;
+        if (starred) {
+          changed = !mine.containsKey(messageId);
+          if (changed) mine[messageId] = StarDto(chatId: chatId, messageId: messageId, starredAt: b.now());
+        } else {
+          changed = mine.remove(messageId) != null;
+        }
+        if (changed) b._notify([userId], {'type': 'stars'});
+      });
+
+  @override
+  Future<List<StarDto>> stars() => _run('GET /me/stars', () {
+        final list = [
+          for (final s in (b.stars[userId] ?? const <String, StarDto>{}).values)
+            if (b._chats[s.chatId]?.members.containsKey(userId) ?? false) s,
+        ]..sort((x, y) => y.starredAt.compareTo(x.starredAt));
+        return list;
       });
 
   @override

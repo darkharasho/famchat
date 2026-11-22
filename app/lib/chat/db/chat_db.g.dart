@@ -4701,6 +4701,374 @@ class LocalRevokedProofsCompanion extends UpdateCompanion<RevokedProofRow> {
   }
 }
 
+class $LocalStarsTable extends LocalStars
+    with TableInfo<$LocalStarsTable, StarRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalStarsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
+  @override
+  late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
+    'chat_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _starredAtMeta = const VerificationMeta(
+    'starredAt',
+  );
+  @override
+  late final GeneratedColumn<int> starredAt = GeneratedColumn<int>(
+    'starred_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _starredMeta = const VerificationMeta(
+    'starred',
+  );
+  @override
+  late final GeneratedColumn<bool> starred = GeneratedColumn<bool>(
+    'starred',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("starred" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _pendingMeta = const VerificationMeta(
+    'pending',
+  );
+  @override
+  late final GeneratedColumn<bool> pending = GeneratedColumn<bool>(
+    'pending',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("pending" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    messageId,
+    chatId,
+    starredAt,
+    starred,
+    pending,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_stars';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<StarRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('chat_id')) {
+      context.handle(
+        _chatIdMeta,
+        chatId.isAcceptableOrUnknown(data['chat_id']!, _chatIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chatIdMeta);
+    }
+    if (data.containsKey('starred_at')) {
+      context.handle(
+        _starredAtMeta,
+        starredAt.isAcceptableOrUnknown(data['starred_at']!, _starredAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_starredAtMeta);
+    }
+    if (data.containsKey('starred')) {
+      context.handle(
+        _starredMeta,
+        starred.isAcceptableOrUnknown(data['starred']!, _starredMeta),
+      );
+    }
+    if (data.containsKey('pending')) {
+      context.handle(
+        _pendingMeta,
+        pending.isAcceptableOrUnknown(data['pending']!, _pendingMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {messageId};
+  @override
+  StarRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return StarRow(
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      chatId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chat_id'],
+      )!,
+      starredAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}starred_at'],
+      )!,
+      starred: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}starred'],
+      )!,
+      pending: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}pending'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalStarsTable createAlias(String alias) {
+    return $LocalStarsTable(attachedDatabase, alias);
+  }
+}
+
+class StarRow extends DataClass implements Insertable<StarRow> {
+  final String messageId;
+  final String chatId;
+  final int starredAt;
+  final bool starred;
+  final bool pending;
+  const StarRow({
+    required this.messageId,
+    required this.chatId,
+    required this.starredAt,
+    required this.starred,
+    required this.pending,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['message_id'] = Variable<String>(messageId);
+    map['chat_id'] = Variable<String>(chatId);
+    map['starred_at'] = Variable<int>(starredAt);
+    map['starred'] = Variable<bool>(starred);
+    map['pending'] = Variable<bool>(pending);
+    return map;
+  }
+
+  LocalStarsCompanion toCompanion(bool nullToAbsent) {
+    return LocalStarsCompanion(
+      messageId: Value(messageId),
+      chatId: Value(chatId),
+      starredAt: Value(starredAt),
+      starred: Value(starred),
+      pending: Value(pending),
+    );
+  }
+
+  factory StarRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return StarRow(
+      messageId: serializer.fromJson<String>(json['messageId']),
+      chatId: serializer.fromJson<String>(json['chatId']),
+      starredAt: serializer.fromJson<int>(json['starredAt']),
+      starred: serializer.fromJson<bool>(json['starred']),
+      pending: serializer.fromJson<bool>(json['pending']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'messageId': serializer.toJson<String>(messageId),
+      'chatId': serializer.toJson<String>(chatId),
+      'starredAt': serializer.toJson<int>(starredAt),
+      'starred': serializer.toJson<bool>(starred),
+      'pending': serializer.toJson<bool>(pending),
+    };
+  }
+
+  StarRow copyWith({
+    String? messageId,
+    String? chatId,
+    int? starredAt,
+    bool? starred,
+    bool? pending,
+  }) => StarRow(
+    messageId: messageId ?? this.messageId,
+    chatId: chatId ?? this.chatId,
+    starredAt: starredAt ?? this.starredAt,
+    starred: starred ?? this.starred,
+    pending: pending ?? this.pending,
+  );
+  StarRow copyWithCompanion(LocalStarsCompanion data) {
+    return StarRow(
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      chatId: data.chatId.present ? data.chatId.value : this.chatId,
+      starredAt: data.starredAt.present ? data.starredAt.value : this.starredAt,
+      starred: data.starred.present ? data.starred.value : this.starred,
+      pending: data.pending.present ? data.pending.value : this.pending,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('StarRow(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('starredAt: $starredAt, ')
+          ..write('starred: $starred, ')
+          ..write('pending: $pending')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(messageId, chatId, starredAt, starred, pending);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is StarRow &&
+          other.messageId == this.messageId &&
+          other.chatId == this.chatId &&
+          other.starredAt == this.starredAt &&
+          other.starred == this.starred &&
+          other.pending == this.pending);
+}
+
+class LocalStarsCompanion extends UpdateCompanion<StarRow> {
+  final Value<String> messageId;
+  final Value<String> chatId;
+  final Value<int> starredAt;
+  final Value<bool> starred;
+  final Value<bool> pending;
+  final Value<int> rowid;
+  const LocalStarsCompanion({
+    this.messageId = const Value.absent(),
+    this.chatId = const Value.absent(),
+    this.starredAt = const Value.absent(),
+    this.starred = const Value.absent(),
+    this.pending = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalStarsCompanion.insert({
+    required String messageId,
+    required String chatId,
+    required int starredAt,
+    this.starred = const Value.absent(),
+    this.pending = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : messageId = Value(messageId),
+       chatId = Value(chatId),
+       starredAt = Value(starredAt);
+  static Insertable<StarRow> custom({
+    Expression<String>? messageId,
+    Expression<String>? chatId,
+    Expression<int>? starredAt,
+    Expression<bool>? starred,
+    Expression<bool>? pending,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (messageId != null) 'message_id': messageId,
+      if (chatId != null) 'chat_id': chatId,
+      if (starredAt != null) 'starred_at': starredAt,
+      if (starred != null) 'starred': starred,
+      if (pending != null) 'pending': pending,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalStarsCompanion copyWith({
+    Value<String>? messageId,
+    Value<String>? chatId,
+    Value<int>? starredAt,
+    Value<bool>? starred,
+    Value<bool>? pending,
+    Value<int>? rowid,
+  }) {
+    return LocalStarsCompanion(
+      messageId: messageId ?? this.messageId,
+      chatId: chatId ?? this.chatId,
+      starredAt: starredAt ?? this.starredAt,
+      starred: starred ?? this.starred,
+      pending: pending ?? this.pending,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (chatId.present) {
+      map['chat_id'] = Variable<String>(chatId.value);
+    }
+    if (starredAt.present) {
+      map['starred_at'] = Variable<int>(starredAt.value);
+    }
+    if (starred.present) {
+      map['starred'] = Variable<bool>(starred.value);
+    }
+    if (pending.present) {
+      map['pending'] = Variable<bool>(pending.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalStarsCompanion(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('starredAt: $starredAt, ')
+          ..write('starred: $starred, ')
+          ..write('pending: $pending, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -4921,6 +5289,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
       $LocalFamilyAdminsTable(this);
   late final $LocalRevokedProofsTable localRevokedProofs =
       $LocalRevokedProofsTable(this);
+  late final $LocalStarsTable localStars = $LocalStarsTable(this);
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -4941,6 +5310,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localFamilies,
     localFamilyAdmins,
     localRevokedProofs,
+    localStars,
     meta,
     localMessagesChatSeq,
   ];
@@ -7393,6 +7763,207 @@ typedef $$LocalRevokedProofsTableProcessedTableManager =
       RevokedProofRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalStarsTableCreateCompanionBuilder = LocalStarsCompanion Function({
+  required String messageId,
+  required String chatId,
+  required int starredAt,
+  Value<bool> starred,
+  Value<bool> pending,
+  Value<int> rowid,
+});
+typedef $$LocalStarsTableUpdateCompanionBuilder = LocalStarsCompanion Function({
+  Value<String> messageId,
+  Value<String> chatId,
+  Value<int> starredAt,
+  Value<bool> starred,
+  Value<bool> pending,
+  Value<int> rowid,
+});
+
+class $$LocalStarsTableFilterComposer
+    extends Composer<_$ChatDb, $LocalStarsTable> {
+  $$LocalStarsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get starredAt => $composableBuilder(
+    column: $table.starredAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get starred => $composableBuilder(
+    column: $table.starred,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get pending => $composableBuilder(
+    column: $table.pending,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalStarsTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalStarsTable> {
+  $$LocalStarsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get starredAt => $composableBuilder(
+    column: $table.starredAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get starred => $composableBuilder(
+    column: $table.starred,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get pending => $composableBuilder(
+    column: $table.pending,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalStarsTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalStarsTable> {
+  $$LocalStarsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get chatId =>
+      $composableBuilder(column: $table.chatId, builder: (column) => column);
+
+  GeneratedColumn<int> get starredAt =>
+      $composableBuilder(column: $table.starredAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get starred =>
+      $composableBuilder(column: $table.starred, builder: (column) => column);
+
+  GeneratedColumn<bool> get pending =>
+      $composableBuilder(column: $table.pending, builder: (column) => column);
+}
+
+class $$LocalStarsTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalStarsTable,
+          StarRow,
+          $$LocalStarsTableFilterComposer,
+          $$LocalStarsTableOrderingComposer,
+          $$LocalStarsTableAnnotationComposer,
+          $$LocalStarsTableCreateCompanionBuilder,
+          $$LocalStarsTableUpdateCompanionBuilder,
+          (StarRow, BaseReferences<_$ChatDb, $LocalStarsTable, StarRow>),
+          StarRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalStarsTableTableManager(_$ChatDb db, $LocalStarsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalStarsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalStarsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalStarsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> messageId = const Value.absent(),
+                Value<String> chatId = const Value.absent(),
+                Value<int> starredAt = const Value.absent(),
+                Value<bool> starred = const Value.absent(),
+                Value<bool> pending = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalStarsCompanion(
+                messageId: messageId,
+                chatId: chatId,
+                starredAt: starredAt,
+                starred: starred,
+                pending: pending,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String messageId,
+                required String chatId,
+                required int starredAt,
+                Value<bool> starred = const Value.absent(),
+                Value<bool> pending = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalStarsCompanion.insert(
+                messageId: messageId,
+                chatId: chatId,
+                starredAt: starredAt,
+                starred: starred,
+                pending: pending,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalStarsTable, StarRow>(table),
+                  BaseReferences<_$ChatDb, $LocalStarsTable, StarRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalStarsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalStarsTable,
+      StarRow,
+      $$LocalStarsTableFilterComposer,
+      $$LocalStarsTableOrderingComposer,
+      $$LocalStarsTableAnnotationComposer,
+      $$LocalStarsTableCreateCompanionBuilder,
+      $$LocalStarsTableUpdateCompanionBuilder,
+      (StarRow, BaseReferences<_$ChatDb, $LocalStarsTable, StarRow>),
+      StarRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -7544,5 +8115,7 @@ class $ChatDbManager {
       $$LocalFamilyAdminsTableTableManager(_db, _db.localFamilyAdmins);
   $$LocalRevokedProofsTableTableManager get localRevokedProofs =>
       $$LocalRevokedProofsTableTableManager(_db, _db.localRevokedProofs);
+  $$LocalStarsTableTableManager get localStars =>
+      $$LocalStarsTableTableManager(_db, _db.localStars);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }
