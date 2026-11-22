@@ -108,6 +108,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               const ProfilePhotoTile(),
               row(Icons.devices_rounded, 'Devices', 'Your signed-in phones and computers', '/settings/devices',
                   key: const Key('settings-devices')),
+              row(Icons.star_outline_rounded, 'Starred messages', 'Messages you starred, in every chat', '/settings/starred',
+                  key: const Key('settings-starred')),
             ]),
             const NotificationSettingsGroup(),
             const DisplaySettingsGroup(),

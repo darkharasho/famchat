@@ -363,6 +363,14 @@ class ChatDb extends _$ChatDb {
         ..orderBy([(s) => OrderingTerm.desc(s.starredAt), (s) => OrderingTerm.desc(s.messageId)]))
       .watch();
 
+  /// My starred messages that are here (in [chatId], or all), newest star first.
+  Stream<List<MessageRow>> watchStarredMessages({String? chatId}) {
+    final q = select(localMessages).join([innerJoin(localStars, localStars.messageId.equalsExp(localMessages.id))])
+      ..where(localStars.starred.equals(true) & (chatId == null ? const Constant(true) : localMessages.chatId.equals(chatId)))
+      ..orderBy([OrderingTerm.desc(localStars.starredAt), OrderingTerm.desc(localStars.messageId)]);
+    return q.watch().map((rows) => [for (final r in rows) r.readTable(localMessages)]);
+  }
+
   /// Stars or unstars here first; [pending] until the server has it.
   Future<void> setStar(String chatId, String messageId, {required bool starred, required int at, bool pending = true}) =>
       into(localStars).insertOnConflictUpdate(

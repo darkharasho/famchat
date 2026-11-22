@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart' show MaterialPage, MediaQuery;
 
+import 'screens/chats/chat_media_screen.dart';
 import 'screens/add_device_screen.dart';
 import 'screens/devices_screen.dart';
 import 'screens/families_screen.dart';
@@ -22,6 +23,7 @@ import 'screens/settings_screen.dart';
 import 'settings/appearance_screen.dart';
 import 'screens/share_screen.dart';
 import 'screens/spikes_screen.dart';
+import 'screens/starred_screen.dart';
 import 'screens/storage_screen.dart';
 import 'session/session_controller.dart';
 
@@ -100,6 +102,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                   GoRoute(path: 'add', builder: (context, state) => NewChatScreen(addTo: state.pathParameters['id'])),
                 ],
               ),
+              GoRoute(path: 'media', builder: (context, state) => ChatMediaScreen(chatId: state.pathParameters['id']!)),
             ],
           ),
           GoRoute(
@@ -120,6 +123,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [GoRoute(path: 'add', builder: (context, state) => const AddDeviceScreen())],
               ),
               GoRoute(path: 'storage', builder: (context, state) => const StorageScreen()),
+              GoRoute(path: 'starred', builder: (context, state) => const StarredScreen()),
               GoRoute(path: 'appearance', builder: (context, state) => const AppearanceScreen()),
               GoRoute(
                 path: 'families',

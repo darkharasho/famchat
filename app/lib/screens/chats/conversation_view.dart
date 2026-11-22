@@ -54,9 +54,8 @@ import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
 import 'album_grid.dart';
-import 'photo_view.dart';
+import 'media_pager.dart';
 import 'pin_bar.dart';
-import 'video_view.dart';
 import 'staged_tray.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -841,26 +840,6 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
-  /// Opens a photo or video full screen.
-  void _openMedia(MessageRow m) {
-    final body = m.body == null ? null : _decodeBody(m.body!);
-    switch (body) {
-      case PhotoBody():
-        unawaited(showPhotoViewer(context, body));
-      case VideoBody():
-        unawaited(showVideoViewer(context, body, m.id));
-      default:
-    }
-  }
-
-  static Plaintext? _decodeBody(String body) {
-    try {
-      return Plaintext.decode(utf8.encode(body));
-    } on FormatException {
-      return null;
-    }
-  }
-
   /// Album items other than the last have no bubble of their own: jumps go to their album's.
   Map<String, String> _albumOwner = const {};
 
@@ -1307,7 +1286,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 key: _keyFor(m.id),
                 message: m,
                 album: album,
-                onOpenAlbumItem: album == null ? null : (i) => _openMedia(album[i]),
+                onOpenAlbumItem: album == null ? null : (i) => showMediaPager(context, album, i),
                 shownText: changes.textOf(m),
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),

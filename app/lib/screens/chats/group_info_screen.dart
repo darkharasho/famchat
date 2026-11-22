@@ -293,6 +293,15 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
             ]),
             SettingsGroup(children: [
               ListTile(
+                key: const Key('chat-media'),
+                leading: const TileIcon(Icons.photo_library_outlined),
+                title: const Text('Media, links and starred'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => context.go('/chats/$chatId/media'),
+              ),
+            ]),
+            SettingsGroup(children: [
+              ListTile(
                 key: const Key('mute-chat'),
                 leading: TileIcon(
                   (chat.mutedUntil ?? 0) > DateTime.now().millisecondsSinceEpoch

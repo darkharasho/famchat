@@ -24,7 +24,7 @@ class AlbumGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const half = (albumWidth - _gap) / 2;
-    Widget tile(int i, Size size) => _AlbumTile(row: items[i], size: size, onOpen: () => onOpen(i));
+    Widget tile(int i, Size size) => AlbumTile(row: items[i], size: size, onOpen: () => onOpen(i));
     final n = items.length;
     final Widget grid;
     if (n == 2) {
@@ -72,8 +72,9 @@ class AlbumGrid extends StatelessWidget {
   }
 }
 
-class _AlbumTile extends StatelessWidget {
-  const _AlbumTile({required this.row, required this.size, required this.onOpen});
+/// One photo or video, cropped to [size] (an album tile, or a gallery square).
+class AlbumTile extends StatelessWidget {
+  const AlbumTile({super.key, required this.row, required this.size, required this.onOpen});
 
   final MessageRow row;
   final Size size;
