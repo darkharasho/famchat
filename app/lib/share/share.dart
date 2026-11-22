@@ -61,6 +61,8 @@ final pendingShareProvider = NotifierProvider<PendingShare, IncomingShare?>(Pend
 bool sharedPathAllowed(String path, {required List<String> privateDirs, required List<String> cacheDirs}) {
   String dir(String d) => d.endsWith('/') ? d : '$d/';
   if (path.split('/').any((part) => part == '..' || part == '.')) return false;
+  // The process's own state (/proc/self/environ, …) and devices aren't the user's files.
+  if (const ['/proc/', '/sys/', '/dev/'].any(path.startsWith)) return false;
   if (!privateDirs.any((d) => path.startsWith(dir(d)) || path == d)) return true;
   final parent = path.substring(0, path.lastIndexOf('/') + 1);
   return cacheDirs.any((c) => parent == dir(c));

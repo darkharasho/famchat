@@ -144,6 +144,10 @@ void main() {
       expect(ok('/data/user/0/dev.famchat.app/cache/video/play.mp4'), isFalse);
       expect(ok('/data/user/0/dev.famchat.app/cache/../files/key'), isFalse);
       expect(ok('/data/user/0/dev.famchat.app'), isFalse);
+      expect(ok('/proc/self/environ'), isFalse, reason: "the process's own state");
+      expect(ok('/proc/self/maps'), isFalse);
+      expect(ok('/dev/zero'), isFalse);
+      expect(ok('/sys/kernel/notes'), isFalse);
     });
 
     test('long names are cut in the middle, keeping the extension', () {
