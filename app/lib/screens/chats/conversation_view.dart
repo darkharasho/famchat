@@ -1512,7 +1512,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         ),
                       ),
                     ),
-                  if (_preview != null && _editing == null && !_recording.active)
+                  // A link card can't go with photos, so none while they wait.
+                  if (_preview != null && _editing == null && !_recording.active && ref.watch(stagedMediaProvider(chatId)).isEmpty)
                     Padding(
                       padding: EdgeInsets.fromLTRB(side, Space.sm, side, 0),
                       child: ComposerPreview(preview: _preview!, onRemove: _removePreview),

@@ -889,8 +889,11 @@ void main() {
     await d.db.insertMessageIfAbsent(unknown('M1', voice));
     await d.db.insertMessageIfAbsent(unknown('M2', {'kind': 'sticker', 'id': 7}));
     await d.db.insertMessageIfAbsent(unknown('M3', {...voice, 'durationMs': -1}));
+    await d.db.insertMessageIfAbsent(unknown('M4', {...voice, 'later': 'kept', 'forwarded': true}));
     await start(d);
     expect((await d.db.messageById('M1'))!.kind, 'voice');
+    // Fields this version doesn't know are kept for a later one (as a caption was for older apps).
+    expect(jsonDecode((await d.db.messageById('M4'))!.body!), allOf(containsPair('later', 'kept'), containsPair('forwarded', true)));
     expect((await d.db.messageById('M2'))!.kind, 'unknown');
     expect((await d.db.messageById('M3'))!.kind, 'invalid');
   });

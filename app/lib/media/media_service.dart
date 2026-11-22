@@ -176,7 +176,7 @@ class MediaService {
         bytes: p.full.length,
         caption: caption,
         replyTo: replyTo,
-        mentions: mentions,
+        mentions: mentions.take(maxMentions).toList(),
       ),
       id: messageId,
     );
@@ -236,7 +236,7 @@ class MediaService {
         bytes: file.length,
         caption: caption,
         replyTo: replyTo,
-        mentions: mentions,
+        mentions: mentions.take(maxMentions).toList(),
       ),
       id: messageId,
       forwarded: forwarded,

@@ -368,22 +368,24 @@ class ChatSync {
     } on FormatException {
       return base;
     }
-    return _classify(base, p, forwarded: _forwardedFlag(raw));
+    return _classify(base, p, raw: _fields(raw));
   }
 
-  /// Whether a decoded plaintext says `"forwarded": true` (kept beside any kind).
-  static bool _forwardedFlag(List<int> raw) {
+  /// A decoded plaintext's JSON object (empty if it isn't one).
+  static Map<String, Object?> _fields(List<int> raw) {
     try {
       final j = jsonDecode(utf8.decode(raw));
-      return j is Map && j['forwarded'] == true;
+      return j is Map<String, Object?> ? j : const {};
     } on FormatException {
-      return false;
+      return const {};
     }
   }
 
-  /// [base] stored as plaintext [p]'s kind.
-  static MessageRow _classify(MessageRow base, Plaintext p, {bool forwarded = false}) {
-    final body = jsonEncode({...p.toJson(), if (forwarded && p is! UnknownBody) 'forwarded': true});
+  /// [base] stored as plaintext [p]'s kind. Fields of [raw] this version doesn't know (like
+  /// `"forwarded"`, or ones a newer version added, such as a photo's caption before captions) are
+  /// kept, so they show once the app updates.
+  static MessageRow _classify(MessageRow base, Plaintext p, {Map<String, Object?> raw = const {}}) {
+    final body = jsonEncode({...raw, ...p.toJson()});
     return switch (p) {
       TextBody() => base.copyWith(kind: 'text', body: Value(body)),
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
@@ -412,7 +414,7 @@ class ChatSync {
         await db.replaceMessage(r.copyWith(kind: 'invalid', body: const Value(null), targetId: const Value(null)));
         continue;
       }
-      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p, forwarded: _forwardedFlag(utf8.encode(body))));
+      if (p is! UnknownBody) await db.replaceMessage(_classify(r, p, raw: _fields(utf8.encode(body))));
     }
   }
 
