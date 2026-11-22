@@ -3,6 +3,7 @@
 // the fragment, so it never reaches the server; only the token is sent.
 // A reviewer link (docs/protocol.md "Reviewer accounts") is marked: /join#review.<token>. The
 // joiner then picks their own display name; the marker isn't sent either.
+import 'dart:async';
 import 'dart:typed_data';
 
 import '../crypto/encoding.dart';
@@ -25,6 +26,27 @@ String? parseInviteToken(String input) {
 String? inviteTokenFromUri(Uri uri) {
   if (!uri.path.endsWith('/join') || uri.fragment.isEmpty) return null;
   return parseInviteToken(uri.fragment);
+}
+
+/// The invite in [uri] when it's a famchat.dev invite link, else null.
+String? inviteFromLink(Uri uri) {
+  if (uri.scheme != 'https' || uri.host != 'famchat.dev') return null;
+  return inviteTokenFromUri(uri);
+}
+
+final _tapped = StreamController<Uri>.broadcast();
+
+/// Invite links tapped inside the app (in a message or its link preview), which
+/// InviteLinkListener (session/app_links.dart) handles like ones the system brings.
+Stream<Uri> get tappedInviteLinks => _tapped.stream;
+
+/// Handles [uri] in the app when it's an invite link, and says whether it did. Opening one
+/// through the system doesn't work on iOS: it never sends an app its own universal links, so
+/// the link would open in Safari.
+bool openInviteInApp(Uri uri) {
+  if (inviteFromLink(uri) == null) return false;
+  _tapped.add(uri);
+  return true;
 }
 
 /// A parsed invite is a reviewer link: the joiner names themselves.

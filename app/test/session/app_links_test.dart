@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:famchat/chat/providers.dart';
 import 'package:famchat/session/app_links.dart';
+import 'package:famchat/session/invite_link.dart' show openInviteInApp;
 import 'package:famchat/session/secure_kv.dart';
 import 'package:famchat/session/session_controller.dart';
+import 'package:famchat/widgets/link_text.dart' show openLink;
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/app_harness.dart';
@@ -177,5 +179,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("You're already signed in."), findsOneWidget);
     expect(find.text('Join Smiths?'), findsNothing);
+  });
+
+  // iOS never sends an app its own universal links: opened through the system, an invite link
+  // tapped in a FamChat message would land in Safari. So the app handles it itself.
+  testWidgets('signed in: an invite link tapped in a message offers to join, in the app', (tester) async {
+    server.extraFamilies.add({...approvedFamily(), 'role': 'admin'});
+    final invite = server.addInvite(name: 'Mom', familyId: 10);
+    await start(tester);
+    await signInDirectly(tester, server);
+    server.users.values.single.familyRoles.remove(10);
+    await openLink(Uri.parse('https://famchat.dev/join#$invite'));
+    await tester.pumpAndSettle();
+    expect(find.text('Join Smiths?'), findsOneWidget);
+  });
+
+  testWidgets('signed out: an invite link tapped in the app opens Join with it', (tester) async {
+    await start(tester);
+    await openLink(Uri.parse('https://famchat.dev/join#$token'));
+    await tester.pumpAndSettle();
+    expect(find.text('Joining with the invite link you opened.'), findsOneWidget);
+  });
+
+  test('only invite links are handled in the app; others go to the browser', () {
+    expect(openInviteInApp(Uri.parse('https://famchat.dev/join#$token')), isTrue);
+    for (final u in ['https://famchat.dev/download.html', 'https://example.com/join#$token', 'https://famchat.dev/join']) {
+      expect(openInviteInApp(Uri.parse(u)), isFalse, reason: u);
+    }
   });
 }
