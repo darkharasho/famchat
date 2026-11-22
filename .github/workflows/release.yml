@@ -378,10 +378,12 @@ jobs:
             fi
           done
 
-  # Tag releases go straight to App Store review once TestFlight has processed the build, pulling an
-  # older version that's waiting for review or in review: the newest build is the one worth
-  # reviewing, and patches (patch.yml patches the App Store's live version too) carry Dart changes
-  # meanwhile. If submitting fails, that's a warning; submit.yml can submit the build later.
+  # Tag releases go to App Store review once TestFlight has processed the build (asc-submit.py
+  # reconcile): an older version waiting for review or in review is pulled, unless it has to be
+  # reviewed (scripts/review-required.sh: native changes no patch can bring to the App Store's live
+  # version). Then this build waits in TestFlight and submit.yml's hourly reconcile submits it once
+  # that one is live. Releases never wait on review: patches carry Dart changes to every installed
+  # version meanwhile. If submitting fails, that's a warning; the hourly reconcile tries again.
   app-store-review:
     needs: ios
     if: startsWith(github.ref, 'refs/tags/v') && needs.ios.outputs.shipped != ''
@@ -399,11 +401,9 @@ jobs:
         run: |
           export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           (umask 077; printf '%s' "$ASC_KEY" > "$ASC_KEY_PATH")
-          if python3 scripts/asc-submit.py submit "$BUNDLE_ID" "$RELEASE" --wait 90 --replace-waiting \
-              --whats-new "Bug fixes and improvements." | tee -a "$GITHUB_STEP_SUMMARY"; [ "${PIPESTATUS[0]}" = 0 ]; then
-            echo "Submitted $RELEASE for App Store review" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::$RELEASE wasn't submitted for App Store review (see the log). Submit it later with submit.yml."
+          python3 scripts/asc-submit.py reconcile "$BUNDLE_ID" "$RELEASE" --wait 90 | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${PIPESTATUS[0]}" != 0 ]; then
+            echo "::warning::$RELEASE wasn't submitted for App Store review (see the log); submit.yml's hourly reconcile tries again."
           fi
           rm -f "$ASC_KEY_PATH"
 
