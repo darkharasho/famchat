@@ -27,6 +27,7 @@ import shared_preferences_foundation
 import url_launcher_macos
 import video_compress
 import video_player_avfoundation
+import voice_pcm
 import wakelock_plus
 import media_kit_video
 
@@ -53,6 +54,7 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   UrlLauncherPlugin.register(with: registry.registrar(forPlugin: "UrlLauncherPlugin"))
   VideoCompressPlugin.register(with: registry.registrar(forPlugin: "VideoCompressPlugin"))
   VideoPlayerPlugin.register(with: registry.registrar(forPlugin: "VideoPlayerPlugin"))
+  VoicePcmPlugin.register(with: registry.registrar(forPlugin: "VoicePcmPlugin"))
   WakelockPlusMacosPlugin.register(with: registry.registrar(forPlugin: "WakelockPlusMacosPlugin"))
   MediaKitVideoPlugin.register(with: registry.registrar(forPlugin: "MediaKitVideoPlugin"))
 }
