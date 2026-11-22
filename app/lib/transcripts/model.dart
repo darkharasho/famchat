@@ -100,7 +100,12 @@ class TranscriptModel extends Notifier<ModelState> {
   /// checked when downloading, not on every start).
   Future<void> refresh() async {
     if (!ref.mounted || state is ModelDownloading) return;
-    final paths = await _readyPaths();
+    ModelPaths? paths;
+    try {
+      paths = await _readyPaths();
+    } catch (_) {
+      paths = null; // no app storage (tests), or unreadable: treat as not downloaded
+    }
     if (!ref.mounted || state is ModelDownloading) return;
     state = paths == null ? const ModelAbsent() : ModelReady(paths);
   }
