@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show DatabaseConnection, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/hub_link.dart';
@@ -54,7 +54,8 @@ List<Override> quietChatOverrides() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   return [
     chatDbProvider.overrideWith((ref) {
-      final db = ChatDb(NativeDatabase.memory());
+      // Streams close at once, so no drift timer outlives the widget tree.
+      final db = ChatDb(DatabaseConnection(NativeDatabase.memory(), closeStreamsSynchronously: true));
       ref.onDispose(db.close);
       return db;
     }),
