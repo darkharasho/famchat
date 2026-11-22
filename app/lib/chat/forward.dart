@@ -8,7 +8,7 @@ import 'message_changes.dart';
 import 'plaintext.dart';
 
 /// Kinds that can be forwarded.
-const forwardableKinds = {'text', 'photo', 'voice', 'gif', 'video'};
+const forwardableKinds = {'text', 'photo', 'voice', 'gif', 'video', 'file'};
 
 /// The message can't be forwarded: deleted, its media expired, or a kind that can't be.
 class ForwardException implements Exception {
@@ -44,7 +44,7 @@ Future<String> forwardMessage({
       return sync.enqueueMessage(toChatId, TextBody(text), forwarded: true);
     case GifBody():
       return sync.enqueueMessage(toChatId, body, forwarded: true);
-    case PhotoBody() || VoiceBody() || VideoBody():
+    case PhotoBody() || VoiceBody() || VideoBody() || FileBody():
       if (media == null) throw const ForwardException('media unavailable');
       final id = await media.forwardMedia(toChatId, body, caption: changes.textOf(message));
       if (id == null) throw const ForwardException('media expired');

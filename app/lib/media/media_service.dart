@@ -63,6 +63,22 @@ extension VoiceRef on VoiceBody {
   MediaRef get ref => MediaRef(id: mediaKey, key: key, sha256: sha256, purpose: MediaPurpose.file);
 }
 
+extension FileRef on FileBody {
+  MediaRef get ref => MediaRef(id: mediaKey, key: key, sha256: sha256, purpose: MediaPurpose.file);
+}
+
+/// Largest file that can be sent (its ciphertext fits the server's `file` limit).
+final int maxFileBytes = mediaKindLimits['file']! - mediaOverhead;
+
+/// The file is over [maxFileBytes].
+class FileTooLargeException implements Exception {
+  const FileTooLargeException(this.bytes);
+  final int bytes;
+
+  @override
+  String toString() => 'FileTooLargeException: $bytes bytes';
+}
+
 /// A staged blob: its media key and the SHA-256 of its ciphertext.
 typedef StagedBlob = ({String id, Uint8List sha256});
 
@@ -358,7 +374,40 @@ class MediaService {
     );
   }
 
-  /// Copies a photo, voice or video message into [chatId] (forwarding): its blobs are loaded, then encrypted
+  /// Encrypts and queues a file (one `file` blob); returns the message id. [name] is cleaned with
+  /// [cleanFileName] and [mime] falls back to [FileBody.defaultMime]. Throws
+  /// [FileTooLargeException] past [maxFileBytes] (before anything is staged) and [ArgumentError]
+  /// for an empty file.
+  Future<String> sendFile(String chatId,
+      {required String name, required Uint8List bytes, String? mime, String? replyTo}) async {
+    if (bytes.length > maxFileBytes) throw FileTooLargeException(bytes.length);
+    if (bytes.isEmpty) throw ArgumentError.value(bytes.length, 'bytes', 'empty file');
+    return _stageFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: replyTo);
+  }
+
+  Future<String> _stageFile(String chatId,
+      {required String name, required Uint8List bytes, String? mime, String? replyTo, bool forwarded = false}) async {
+    final key = newMediaKey();
+    final messageId = newUlid();
+    final f = await stage(
+        chatId: chatId, messageId: messageId, kind: 'file', purpose: MediaPurpose.file, key: key, plaintext: bytes, position: 0);
+    return sync.enqueueMessage(
+      chatId,
+      FileBody(
+        mediaKey: f.id,
+        key: key,
+        sha256: f.sha256,
+        name: cleanFileName(name),
+        bytes: bytes.length,
+        mime: FileBody.mimeOrDefault(mime),
+        replyTo: replyTo,
+      ),
+      id: messageId,
+      forwarded: forwarded,
+    );
+  }
+
+  /// Copies a photo, voice, video or file message into [chatId] (forwarding): its blobs are loaded, then encrypted
   /// under a new key and uploaded again, since media access follows the chat it was sent to. Returns
   /// the new message id, or null when the media expired. Throws [ArgumentError] for other kinds.
   /// [caption] is the caption it shows now (after edits); replies and mentions aren't copied.
@@ -422,6 +471,10 @@ class MediaService {
             durationMs: body.durationMs,
             forwarded: true,
             caption: caption);
+      case FileBody():
+        final file = await load(body.ref);
+        if (file == null) return null;
+        return _stageFile(chatId, name: body.name, bytes: file, mime: body.mime, forwarded: true);
       default:
         throw ArgumentError.value(body.kind, 'body', 'not a media message');
     }

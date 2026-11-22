@@ -84,13 +84,30 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
  "bytes", "mime":"video/mp4"}                 size of the file (phones compress to 720p first)
 ```
 
+A file (any type) is one blob, purpose `"file"`, like a voice clip:
+
+```
+{"kind":"file", "mediaKey",                   media key of the file
+ "key", "sha256",                             b64url 32-byte media key; SHA-256 of the encrypted blob
+ "name":"Flight confirmation.pdf",            display name and default save name, never a path
+ "bytes", "mime":"application/pdf",           size of the file (at most 64 MiB minus the 40-byte overhead)
+ "replyTo"?}                                  the message it replies to
+```
+
+Receivers clean `name`: path separators (`/`, `\`, `:`), control characters and bidi marks
+(U+200E/F, U+202A–U+202E, U+2066–U+2069, U+061C) and line separators are removed, it is trimmed and
+cut to 255 characters (keeping a short extension), and an empty or dots-only name becomes `file`. A
+name that needs cleaning is cleaned, never a reason to drop the message. A `mime` that isn't a plain
+`type/subtype` (at most 100 characters) shows as `application/octet-stream`; a bad `replyTo` is
+ignored. Apps never run a received file: ones that execute code are only saved, never opened.
+
 A photo or video may carry a caption: `"caption":"..."` (trimmed, 1–4000 characters, as a text), and
 with it `"replyTo"` and `"mentions"` as a text has them (below). A caption that doesn't check out is
 ignored and the media still shows; clients from before captions show the media without it. When several
 photos and videos are sent together, the caption rides on the last. A forwarded copy keeps the caption
 (as it shows now) but not the reply or mentions.
 
-A text, GIF, photo, voice or video message may say `"forwarded": true`: a copy of a message from another chat. Media blobs are
+A text, GIF, photo, voice, video or file message may say `"forwarded": true`: a copy of a message from another chat. Media blobs are
 uploaded again under a new media key (media access follows the chat), so the copy stands alone.
 
 A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"<messageId>"}`
@@ -309,7 +326,7 @@ Clients keep unknown kinds (whole body) and show them as unsupported.
 
 ### Media blobs
 Each blob is `nonce(24) ‖ ct ‖ mac(16)`, XChaCha20-Poly1305 under the message's media key with
-`aad = "famchat-media-v1" ‖ str(purpose)`, purpose `"file"` (full photo, voice clip) or `"thumb"`.
+`aad = "famchat-media-v1" ‖ str(purpose)`, purpose `"file"` (full photo, voice clip, video, file) or `"thumb"`.
 Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); thumbnails at most
 320 px. Before decrypting, check the blob's SHA-256 against the message.
 
@@ -796,8 +813,8 @@ ids they starred, never content.
 ### Media
 - `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
   (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
-  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb`, `voice` or `video`
-  with caps 15 MiB, 1 MiB, 8 MiB and 64 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
+  message that will reference it) are ULIDs made by the client; `kind` is `photo`, `thumb`, `voice`, `video` or `file`
+  with caps 15 MiB, 1 MiB, 8 MiB, 64 MiB and 64 MiB (`too_large`). You must be a member of `chatId` (`not_found`).
   Re-posting a key you already stored for the same chat and size returns `200` (safe retry); any
   other reuse is `conflict`. Upload the blobs first, then send the message that references them.
 - `GET /media/:key` → the blob (`application/octet-stream`) for members of its chat (`not_found`

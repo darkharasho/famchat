@@ -401,6 +401,7 @@ class ChatSync {
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
       VideoBody() => base.copyWith(kind: 'video', body: Value(body)),
+      FileBody() => base.copyWith(kind: 'file', body: Value(body)),
       GameBody() => base.copyWith(kind: 'game', body: Value(body)),
       MoveBody(:final target) => base.copyWith(kind: 'move', body: Value(body), targetId: Value(target)),
       PollBody() => base.copyWith(kind: 'poll', body: Value(body)),
@@ -694,7 +695,7 @@ class ChatSync {
   Future<bool> Function(MessageRow row)? beforeSend;
 
   /// Kinds that reference uploaded blobs: held in the outbox while no [beforeSend] gate is set.
-  static const mediaKinds = {'photo', 'voice', 'video'};
+  static const mediaKinds = {'photo', 'voice', 'video', 'file'};
 
   /// Whether this device has a message the server hasn't acknowledged yet (sending, or waiting
   /// for a connection or an upload).
