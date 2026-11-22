@@ -155,7 +155,7 @@ class MediaService {
   ///
   /// [caption], [replyTo] and [mentions] go inside the encrypted message (see `Captioned`).
   Future<String> sendPhoto(String chatId, Uint8List original,
-      {String? caption, String? replyTo, List<String> mentions = const []}) async {
+      {String? caption, String? replyTo, List<String> mentions = const [], String? album}) async {
     final p = await processor.process(original);
     final key = newMediaKey();
     final messageId = newUlid();
@@ -177,6 +177,7 @@ class MediaService {
         caption: caption,
         replyTo: replyTo,
         mentions: mentions.take(maxMentions).toList(),
+        album: album,
       ),
       id: messageId,
     );
@@ -186,7 +187,7 @@ class MediaService {
   /// returns the message id. Throws [VideoTooLargeException] past [maxVideoBytes] and
   /// [ArgumentError] for an empty file or a length outside (0, [VideoBody.maxDurationMs]].
   Future<String> sendVideo(String chatId, ProcessedVideo v,
-      {String? caption, String? replyTo, List<String> mentions = const []}) async {
+      {String? caption, String? replyTo, List<String> mentions = const [], String? album}) async {
     if (v.bytes.length > maxVideoBytes) throw VideoTooLargeException(v.bytes.length);
     if (v.bytes.isEmpty || v.width < 1 || v.height < 1) throw ArgumentError.value(v.bytes.length, 'bytes', 'empty video');
     final ms = v.duration.inMilliseconds;
@@ -199,7 +200,8 @@ class MediaService {
         durationMs: ms,
         caption: caption,
         replyTo: replyTo,
-        mentions: mentions);
+        mentions: mentions,
+        album: album);
   }
 
   Future<String> _stageVideo(
@@ -213,6 +215,7 @@ class MediaService {
     String? caption,
     String? replyTo,
     List<String> mentions = const [],
+    String? album,
   }) async {
     final key = newMediaKey();
     final messageId = newUlid();
@@ -237,6 +240,7 @@ class MediaService {
         caption: caption,
         replyTo: replyTo,
         mentions: mentions.take(maxMentions).toList(),
+        album: album,
       ),
       id: messageId,
       forwarded: forwarded,

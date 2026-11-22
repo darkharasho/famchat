@@ -3,6 +3,7 @@
 import 'package:cross_file/cross_file.dart';
 
 import '../chat/plaintext.dart' show validMessageText;
+import '../chat/ulid.dart';
 import 'media_service.dart';
 import 'photo.dart';
 import 'photo_picker.dart';
@@ -50,6 +51,8 @@ Future<SendReport> sendMedia(
 }) async {
   final report = SendReport();
   final text = caption == null ? null : validMessageText(caption);
+  // Sent together: one album.
+  final album = items.length > 1 ? newUlid() : null;
   for (final (i, item) in items.indexed) {
     final last = i == items.length - 1;
     final withCaption = last && text != null;
@@ -61,10 +64,11 @@ Future<SendReport> sendMedia(
     try {
       switch (item) {
         case PickedPhoto(:final bytes):
-          await media.sendPhoto(chatId, bytes, caption: withCaption ? text : null, replyTo: reply, mentions: mentioned);
+          await media.sendPhoto(chatId, bytes,
+              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album);
         case PickedVideo(:final file):
           await media.sendVideo(chatId, await videos.process(file),
-              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned);
+              caption: withCaption ? text : null, replyTo: reply, mentions: mentioned, album: album);
       }
       sent = true;
     } on VideoTooLargeException {

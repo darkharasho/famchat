@@ -14,6 +14,7 @@ import '../../theme/tokens.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/link_text.dart';
 import '../../settings/time_format.dart' show clockTime;
+import 'album_grid.dart';
 import 'photo_view.dart';
 import 'link_preview_card.dart';
 import 'video_view.dart';
@@ -108,7 +109,14 @@ class MessageBubble extends StatefulWidget {
     this.pinned = false,
     this.onStar,
     this.starred = false,
+    this.album,
+    this.onOpenAlbumItem,
   });
+
+  /// Photos and videos sent together, oldest first, shown as one grid; [message] is the last of
+  /// them (it carries the caption, and the bubble's actions apply to it).
+  final List<MessageRow>? album;
+  final void Function(int index)? onOpenAlbumItem;
 
   /// Pins it for everyone (or unpins it, when [pinned]).
   final VoidCallback? onPin;
@@ -394,7 +402,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     final video = _video;
     final special = widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null);
     // Edge-to-edge media: little padding around it.
-    final visual = photo != null || gif != null || video != null;
+    final album = widget.deleted ? null : widget.album;
+    final visual = photo != null || gif != null || video != null || album != null;
     final mine = widget.mine;
     final bg = mine ? t.mineBubble : t.theirsBubble;
     final fg = mine ? t.onMineBubble : t.onTheirsBubble;
@@ -451,10 +460,12 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
 
     // A photo or video's caption, under it in the same bubble.
-    final caption = photo != null || video != null ? widget.shownText : null;
+    final caption = photo != null || video != null || album != null ? widget.shownText : null;
     final captionStyle = theme.textTheme.bodyLarge?.copyWith(color: fg);
     // As wide as the media, so it wraps under it, read from the left.
-    final mediaWidth = photo != null
+    final mediaWidth = album != null
+        ? albumWidth
+        : photo != null
         ? thumbSize(photo.width, photo.height).width
         : video != null
             ? thumbSize(video.width, video.height).width
@@ -471,7 +482,13 @@ class _MessageBubbleState extends State<MessageBubble> {
           );
 
     Widget content;
-    if (photo != null) {
+    if (album != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        AlbumGrid(items: album, onOpen: (i) => widget.onOpenAlbumItem?.call(i)),
+        ?captionLine(),
+        if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
+      ]);
+    } else if (photo != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
         ?captionLine(),

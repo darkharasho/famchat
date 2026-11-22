@@ -28,7 +28,7 @@ Feature parity with mainstream chat apps, without weakening end-to-end encryptio
 ## Albums
 - Photos and videos sent together from the tray share an album id: an optional `"album":"<ULID>"` field in each photo/video body, set when 2 or more are sent.
 - Consecutive messages from the same sender with the same album id show as **one bubble**: a grid of up to 4 tiles (1 = full, 2 = side by side, 3 = one big and two small, 4+ = 2×2 with "+N" on the 4th), and the caption (from the last item) under it. Tapping a tile opens the viewer at that item.
-- Each item is still its own message underneath: long-press on a tile reacts/replies/forwards/stars/pins/deletes **that item**. Reactions show under the album, combined across its items.
+- Each item is still its own message underneath. (Builder's call, changed during the build:) long-press on the album acts on the album: reply, pin, star and reactions go on the captioned (last) item; forward and delete apply to every item. Per-tile actions would need the message menu reworked.
 - If items of an album end up apart (something arrived in between), each run shows as its own album. Older apps show separate photos.
 
 ## Approaches considered

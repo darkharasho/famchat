@@ -107,4 +107,15 @@ void main() {
     expect(report.badVideos, 1);
     expect((await rows()).map((r) => r.kind), ['text']);
   });
+
+  test('items sent together share an album id; one alone has none', () async {
+    await sendMedia(media, FakeVideoProcessor(), chatId,
+        [PickedPhoto(photoBytes(100)), PickedVideo(XFile.fromData(photoBytes(200), path: '/v/a.mp4'))]);
+    await sendMedia(media, FakeVideoProcessor(), chatId, [PickedPhoto(photoBytes(50))]);
+    final sent = await rows();
+    final album = json(sent[0])['album'];
+    expect(album, isA<String>());
+    expect(json(sent[1])['album'], album);
+    expect(json(sent[2]).keys, isNot(contains('album')));
+  });
 }

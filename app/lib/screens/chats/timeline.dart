@@ -29,6 +29,15 @@ final class MessageEntry extends TimelineEntry {
   final bool firstInGroup, lastInGroup;
 }
 
+/// Photos and videos sent together (one album id, one sender, nothing in between): one bubble.
+/// [items] oldest first; the last carries the caption.
+final class AlbumEntry extends TimelineEntry {
+  const AlbumEntry(this.items, {required this.firstInGroup, required this.lastInGroup});
+
+  final List<MessageRow> items;
+  final bool firstInGroup, lastInGroup;
+}
+
 DateTime _at(MessageRow m) => DateTime.fromMillisecondsSinceEpoch(m.createdAt);
 DateTime _dayOf(DateTime t) => DateTime(t.year, t.month, t.day);
 
@@ -43,21 +52,39 @@ bool _sameRun(MessageRow a, MessageRow b) {
 
 /// [visible] oldest first → the entries to draw, oldest first. [unreadFrom]: the id of the message
 /// to put the "New messages" line above (after its day's separator); a run never spans the line.
-List<TimelineEntry> buildTimeline(List<MessageRow> visible, {String? unreadFrom}) {
+/// [albumOf]: a message's album id (null for none, or for one that shouldn't group, e.g. deleted).
+List<TimelineEntry> buildTimeline(List<MessageRow> visible, {String? unreadFrom, String? Function(MessageRow)? albumOf}) {
+  // Units: single messages, or albums of 2+.
+  final units = <List<MessageRow>>[];
+  for (final m in visible) {
+    final album = albumOf?.call(m);
+    final last = units.isEmpty ? null : units.last;
+    if (album != null &&
+        last != null &&
+        m.id != unreadFrom &&
+        albumOf!(last.last) == album &&
+        last.last.senderUserId == m.senderUserId &&
+        _dayOf(_at(last.last)) == _dayOf(_at(m))) {
+      last.add(m);
+    } else {
+      units.add([m]);
+    }
+  }
   final out = <TimelineEntry>[];
-  for (var i = 0; i < visible.length; i++) {
-    final m = visible[i];
-    final prev = i > 0 ? visible[i - 1] : null;
-    final next = i + 1 < visible.length ? visible[i + 1] : null;
-    final day = _dayOf(_at(m));
+  for (var i = 0; i < units.length; i++) {
+    final u = units[i];
+    final first = u.first, lastRow = u.last;
+    final prev = i > 0 ? units[i - 1].last : null;
+    final next = i + 1 < units.length ? units[i + 1].first : null;
+    final day = _dayOf(_at(first));
     if (prev == null || _dayOf(_at(prev)) != day) out.add(DayEntry(day));
-    final unread = m.id == unreadFrom;
+    final unread = first.id == unreadFrom;
     if (unread) out.add(const UnreadEntry());
-    out.add(MessageEntry(
-      m,
-      firstInGroup: prev == null || unread || !_sameRun(prev, m),
-      lastInGroup: next == null || next.id == unreadFrom || !_sameRun(m, next),
-    ));
+    final firstInGroup = prev == null || unread || !_sameRun(prev, first);
+    final lastInGroup = next == null || next.id == unreadFrom || !_sameRun(lastRow, next);
+    out.add(u.length > 1
+        ? AlbumEntry(List.unmodifiable(u), firstInGroup: firstInGroup, lastInGroup: lastInGroup)
+        : MessageEntry(first, firstInGroup: firstInGroup, lastInGroup: lastInGroup));
   }
   return out;
 }
