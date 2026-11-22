@@ -159,4 +159,24 @@ void main() {
     await alice.sync.purge([id]);
     expect(await alice.reminders(chatId), isEmpty);
   });
+
+  test("a purge clears the server's reminder too, so it never comes for a message I no longer have", () async {
+    final (alice, _, chatId, id) = await chatWithMessage();
+    await alice.sync.setReminder(chatId, id, inHours(1));
+    expect(backend.reminders[alice.d.userId]?.keys, [id]);
+    await alice.sync.purge([id]);
+    await until(() async => backend.reminders[alice.d.userId]?.isEmpty ?? true, reason: 'cleared on the server');
+    await alice.sync.refreshReminders();
+    expect(await alice.reminders(chatId), isEmpty, reason: 'not brought back by the next refresh');
+  });
+
+  test('a reminder after the message disappears from this device is refused', () async {
+    final (alice, _, chatId, id) = await chatWithMessage();
+    final expires = inHours(3);
+    await alice.d.db.customStatement('UPDATE local_messages SET expires_at = ? WHERE id = ?', [expires.millisecondsSinceEpoch, id]);
+    await expectLater(alice.sync.setReminder(chatId, id, inHours(4)), throwsA(isA<ReminderAfterExpiry>()));
+    expect(backend.reminders[alice.d.userId] ?? const {}, isEmpty);
+    await alice.sync.setReminder(chatId, id, inHours(2));
+    expect(await alice.reminders(chatId), {id: inHours(2).millisecondsSinceEpoch});
+  });
 }

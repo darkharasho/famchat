@@ -19,6 +19,10 @@ ALTER TABLE messages ADD COLUMN delete_at INTEGER;
 -- 1 when the message was delivered from scheduled_messages: then any device of the sender may
 -- resend its id and get the original ack (a plain send is idempotent per device).
 ALTER TABLE messages ADD COLUMN scheduled INTEGER NOT NULL DEFAULT 0;
+-- When the member's read position last moved (NULL: not since this column came). Their copy of a
+-- disappearing message they had read by then expires no later than this + its timer, so a device
+-- that was away doesn't start the clock when it comes back.
+ALTER TABLE chat_members ADD COLUMN last_read_at INTEGER;
 CREATE INDEX messages_delete_at ON messages(delete_at) WHERE delete_at IS NOT NULL;
 
 -- Messages a user scheduled, held as ciphertext until deliver_at. id is the message id it will be

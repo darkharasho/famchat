@@ -110,7 +110,7 @@ describe("scheduled messages", () => {
 
     await setClock(t0 + 2 * MIN + 1000);
     await runAlarm();
-    expect(await sa.next("ack")).toEqual({ type: "ack", id, seq: 1, createdAt: t0 + 2 * MIN + 1000 });
+    expect(await sa.next("ack")).toEqual({ type: "ack", id, seq: 1, createdAt: t0 + 2 * MIN + 1000, disappearSecs: null });
     const msg = (await sb.next("msg")) as { message: Msg; mentions?: string[] };
     expect(msg.message).toMatchObject({ id, seq: 1, senderDeviceId: a.deviceId });
     expect(msg.mentions).toEqual([c.userId]);
@@ -547,7 +547,8 @@ describe("disappearing messages", () => {
     await setTimer(a, chat.id, null);
     const id3 = newId();
     sa.send({ type: "send", id: id3, chatId: chat.id, envelope: envelope() });
-    await sa.next("ack");
+    // With no timer the ack says so (null), so the sender never falls back to a stale chat timer.
+    expect(await sa.next("ack")).toEqual({ type: "ack", id: id3, seq: expect.any(Number), createdAt: expect.any(Number), disappearSecs: null });
     const msgs = await history(b, chat.id);
     expect(msgs.map((m) => [m.id, m.disappearSecs])).toEqual([[id, WEEK_S], [sid, 86_400], [id3, undefined]]);
     expect((await msgRow(id))!.disappear_secs).toBe(WEEK_S);
@@ -672,5 +673,107 @@ describe("disappearing messages", () => {
     sa.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
     const ack = await sa.next("ack");
     expect((await msgRow(id))!.delete_at).toBe((ack.createdAt as number) + 86_400_000);
+  });
+
+  it("a change carries its target's timer (none included); other values are refused", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createGroup(a, [b]);
+    await setTimer(a, chat.id, WEEK_S);
+    const sa = await socket(a);
+    // An edit of a message sent before the timer: it lives as long as its target.
+    const edit = newId();
+    sa.send({ type: "send", id: edit, chatId: chat.id, envelope: envelope(), silent: true, disappearSecs: null });
+    expect(await sa.next("ack")).toMatchObject({ id: edit, disappearSecs: null });
+    expect(await msgRow(edit)).toMatchObject({ disappear_secs: null, delete_at: null });
+    // A reaction to a 24-hour message after the timer went to 7 days.
+    const react = newId();
+    sa.send({ type: "send", id: react, chatId: chat.id, envelope: envelope(), silent: true, disappearSecs: 86_400 });
+    expect(await sa.next("ack")).toMatchObject({ id: react, disappearSecs: 86_400 });
+    // Only silent changes choose; a plain message takes the chat's.
+    const plain = newId();
+    sa.send({ type: "send", id: plain, chatId: chat.id, envelope: envelope(), disappearSecs: null });
+    expect(await sa.next("ack")).toMatchObject({ id: plain, disappearSecs: WEEK_S });
+    const bad = newId();
+    sa.send({ type: "send", id: bad, chatId: chat.id, envelope: envelope(), silent: true, disappearSecs: 5 });
+    expect(await sa.next("error")).toEqual({ type: "error", id: bad, error: "invalid_request" });
+  });
+
+  it("the caller's chat says when their read position last moved", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createGroup(a, [b]);
+    await insertMessage(chat.id, a);
+    const mine = async (u: TestUser) =>
+      (await (await api(u.accessToken, "GET", "/chats")).json<{ chats: (ChatOut & { lastReadAt: number | null })[] }>()).chats[0];
+    expect((await mine(b)).lastReadAt).toBeNull();
+    const sa = await socket(a);
+    const sb = await socket(b);
+    const t0 = Date.now() + 5 * MIN;
+    await setClock(t0);
+    sb.send({ type: "read", chatId: chat.id, seq: 1 });
+    await readBy(sa, b.userId);
+    await realClock();
+    expect((await mine(b)).lastReadAt).toBe(t0);
+    // Only the caller's own: no one else's read time.
+    expect((await mine(a)).lastReadAt).toBeNull();
+    const single = await (await api(b.accessToken, "GET", `/chats/${chat.id}`)).json<{ chat: { lastReadAt: number | null } }>();
+    expect(single.chat.lastReadAt).toBe(t0);
+  });
+
+  it("a reminder doesn't fire for a message its owner's devices already deleted", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const c = await insertUserWithDevice();
+    const chat = await createGroup(a, [b, c]);
+    await setTimer(a, chat.id, 86_400);
+    await env.DB.prepare("UPDATE devices SET push_token = 'tok' WHERE id = ?").bind(b.deviceId).run();
+    const { reminders } = await capturePushes();
+    const sa = await socket(a);
+    const id = newId();
+    sa.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    await sa.next("ack");
+    const t0 = Date.now();
+    // b reads it and sets a reminder for a week; c never reads it, so the server keeps it.
+    // On b's laptop; b's phone (the push token) has no socket.
+    const sb = await socket(await otherDevice(b));
+    sb.send({ type: "read", chatId: chat.id, seq: 1 });
+    await readBy(sa, b.userId);
+    expect((await api(b.accessToken, "PUT", `/chats/${chat.id}/messages/${id}/reminder`, { at: t0 + 7 * DAY })).status).toBe(204);
+    // a's own copy is gone a day after sending; a's reminder in two days doesn't fire either.
+    expect((await api(a.accessToken, "PUT", `/chats/${chat.id}/messages/${id}/reminder`, { at: t0 + 2 * DAY })).status).toBe(204);
+    await setClock(t0 + 2 * DAY);
+    await runAlarm();
+    await sa.none("reminder");
+    await setClock(t0 + 7 * DAY);
+    await runAlarm();
+    expect(reminders).toEqual([]);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM reminders").first("n")).toBe(0);
+    expect(await msgRow(id)).not.toBeNull();
+  });
+});
+
+describe("cancelling a scheduled message never handed over", () => {
+  it("drops the blobs uploaded for it, but never a delivered message's", async () => {
+    const a = await insertUserWithDevice();
+    const b = await insertUserWithDevice();
+    const chat = await createGroup(a, [b]);
+    const id = newId();
+    const key = newId();
+    expect((await upload(a, { chatId: chat.id, key, messageId: id }, new Uint8Array(100))).status).toBe(201);
+    expect((await api(b.accessToken, "DELETE", `/me/scheduled/${id}`)).status).toBe(404);
+    expect(await usage()).toBe(100); // not b's blob
+    expect((await api(a.accessToken, "DELETE", `/me/scheduled/${id}`)).status).toBe(404);
+    expect(await usage()).toBe(0);
+    expect(await env.MEDIA.get(key)).toBeNull();
+
+    const sent = newId();
+    const key2 = newId();
+    expect((await upload(a, { chatId: chat.id, key: key2, messageId: sent }, new Uint8Array(100))).status).toBe(201);
+    const sa = await socket(a);
+    sa.send({ type: "send", id: sent, chatId: chat.id, envelope: envelope() });
+    await sa.next("ack");
+    expect((await api(a.accessToken, "DELETE", `/me/scheduled/${sent}`)).status).toBe(404);
+    expect(await usage()).toBe(100);
   });
 });

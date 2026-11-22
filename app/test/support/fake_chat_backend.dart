@@ -106,6 +106,9 @@ class _Member {
   _Member(this.joinedSeq, this.joinedAt);
   final int joinedSeq, joinedAt;
   int lastReadSeq = 0;
+
+  /// When [lastReadSeq] last moved (the server's `last_read_at`).
+  int? lastReadAt;
   int? mutedUntil, pinnedAt, archivedAt;
   bool markedUnread = false;
 }
@@ -144,6 +147,7 @@ class _Chat {
         pinnedAt: members[viewer]?.pinnedAt,
         archivedAt: members[viewer]?.archivedAt,
         markedUnread: members[viewer]?.markedUnread ?? false,
+        lastReadAt: members[viewer]?.lastReadAt,
         avatarKey: avatarKey,
         familyId: familyId,
         disappearSecs: disappearSecs,
@@ -208,6 +212,9 @@ class FakeChatBackend {
   final calls = <String>[];
 
   int now() => _clock += 10;
+
+  /// The time a `read` is recorded at (`Chat.lastReadAt`); [now] unless a test sets its own clock.
+  int Function()? readClock;
 
   String _id(String p) => '01J$p${(_ids++).toString().padLeft(22, '0')}';
 
@@ -451,7 +458,7 @@ class FakeChatBackend {
     c.messages.add(msg);
     c.lastMessageAt = msg.createdAt;
     if (s.mentions.isNotEmpty) sentMentions[s.id] = s.mentions;
-    _toUser(s.userId, {'type': 'ack', 'id': s.id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': ?msg.disappearSecs});
+    _toUser(s.userId, {'type': 'ack', 'id': s.id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': msg.disappearSecs});
     for (final u in c.members.keys) {
       _toUser(u, {'type': 'msg', 'message': _msgJson(msg)});
     }
@@ -645,7 +652,7 @@ class FakeChatBackend {
         if (prior != null) {
           // A delivered scheduled message acks again for any device of its sender.
           if (prior.chatId == chatId && (prior.senderDeviceId == h.deviceId || _deliveredScheduled[id] == h.userId)) {
-            h._deliver({'type': 'ack', 'id': id, 'seq': prior.seq, 'createdAt': prior.createdAt});
+            h._deliver({'type': 'ack', 'id': id, 'seq': prior.seq, 'createdAt': prior.createdAt, 'disappearSecs': prior.disappearSecs});
           } else {
             h._deliver({'type': 'error', 'id': id, 'error': 'conflict'});
           }
@@ -679,7 +686,8 @@ class FakeChatBackend {
           senderDeviceId: h.deviceId,
           envelope: env,
           createdAt: now(),
-          disappearSecs: c.disappearSecs,
+          // A silent change may carry its target's timer (null for none) instead of the chat's.
+          disappearSecs: m['silent'] == true && m.containsKey('disappearSecs') ? m['disappearSecs'] as int? : c.disappearSecs,
         );
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
@@ -689,7 +697,7 @@ class FakeChatBackend {
           h.dropNextAck = false;
           h.drop();
         } else {
-          h._deliver({'type': 'ack', 'id': id, 'seq': msg.seq, 'createdAt': msg.createdAt});
+          h._deliver({'type': 'ack', 'id': id, 'seq': msg.seq, 'createdAt': msg.createdAt, 'disappearSecs': msg.disappearSecs});
         }
         if (h.holdFanOut) return;
         for (final u in c.members.keys) {
@@ -708,6 +716,7 @@ class FakeChatBackend {
         final seq = (m['seq'] as int) < c.lastSeq ? m['seq'] as int : c.lastSeq;
         if (seq <= mem.lastReadSeq) return;
         mem.lastReadSeq = seq;
+        mem.lastReadAt = (readClock ?? now)();
         _notify(c.members.keys, {'type': 'read', 'chatId': c.id, 'userId': h.userId, 'seq': seq});
     }
   }

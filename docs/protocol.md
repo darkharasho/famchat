@@ -46,6 +46,7 @@ Device    = {id, name, platform, encPub, signPub, certSig, revoked}
 Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
              lastSeq, lastMessageAt: number|null, createdAt, mutedUntil: number|null,
              pinnedAt: number|null, archivedAt: number|null, markedUnread: boolean, avatarKey: string|null,
+             lastReadAt: number|null,
              disappearSecs: number|null, disappearChangedBy: string|null, disappearChangedAt: number|null,
              disappearChangedSeq: number|null, members: Member[]}       ("Disappearing messages")
 Member    = {userId, joinedSeq, lastReadSeq}
@@ -851,7 +852,9 @@ delivered as (the envelope's signature binds it and `senderDeviceId`).
   are still in, envelopes included so each of their devices can show and edit them (decrypting with
   the chat key of `envelope.epoch`).
 - `DELETE /me/scheduled/:id` → 204 (cancel; 404 unless it's the caller's). Blobs the caller uploaded
-  under that message id are deleted (R2 objects and rows).
+  under that message id are deleted (R2 objects and rows), also on a 404 when no message with that id
+  was ever delivered: a cancel of one whose `PUT` never arrived (or whose answer was lost) still
+  frees what was uploaded for it. Clients retry a cancel made offline until it gets 204 or 404.
 - `POST /me/scheduled/:id/send` → `{id, seq, createdAt}`: deliver now with the stored envelope (404
   unless the caller's; 409 `stale_epoch` after a key change, which also makes it `needs_resend`).
 - Any change to the list (created, edited, cancelled, delivered, dropped, state changed) sends
@@ -859,7 +862,7 @@ delivered as (the envelope's signature binds it and `senderDeviceId`).
 
 **Delivery.** At `deliverAt` the hub delivers it through the same path as a `send` (checks, a new
 `seq`, `msg` fan-out, pushes, the chat's disappearing timer as it is then) and sends
-`{type:"ack", id, seq, createdAt, disappearSecs?}` to **every** socket of the sender; their sockets also get the
+`{type:"ack", id, seq, createdAt, disappearSecs}` to **every** socket of the sender; their sockets also get the
 `msg` (unlike a socket `send`, no socket is excluded). Then the row is gone. Otherwise:
 
 - **The epoch moved on** (`stale_epoch`: someone left, a device was revoked): it becomes
@@ -899,7 +902,11 @@ A reminder is private to its owner: the server stores only (user, chat, message 
   reminder they had cached whose time passed while every device was off when they next open, since
   the server no longer lists it. A reminder for a message that is gone (deleted account,
   disappeared) or in a chat the owner left is dropped without notice; leaving a group deletes the
-  leaver's reminders there. Failures are retried with backoff and dropped after 6 tries.
+  leaver's reminders there. So is one for a disappearing message the owner's own copy is already past
+  (their own: `createdAt` + timer; someone else's they had read: `lastReadAt` + timer), even while
+  other members keep the server's copy: it would show a message their devices deleted. Clients also
+  clear the server's reminder when they delete a message, and don't offer times past their copy's
+  expiry. Failures are retried with backoff and dropped after 6 tries.
 
 ### Disappearing messages
 
@@ -913,12 +920,18 @@ messages, so it isn't end-to-end encrypted (like the title).
   disappearing messages") right after message `disappearChangedSeq` in the timeline. Only the latest
   change is kept, so a device that missed several sees one line. Setting the value it already has
   changes nothing (no new line). All three are `null` until the first change.
-- **Stamping.** Every message stored while a timer is set (silent changes and scheduled messages
-  too, with the setting at delivery) carries it: `Message.disappearSecs` in `msg` frames and history.
-  Turning the timer off or changing it doesn't touch messages already sent.
+- **Stamping.** Every message stored while a timer is set (scheduled messages too, with the setting
+  at delivery) carries it: `Message.disappearSecs` in `msg` frames and history. Turning the timer off
+  or changing it doesn't touch messages already sent. A silent change (reaction, edit, delete, pin,
+  vote…) is sent with `disappearSecs` = its target's timer (`null` for none), so an edit made after
+  the timer changed lives exactly as long as the message it edits; without the field it takes the
+  chat's.
 - **Clients** delete their own copy `disappearSecs` after they read it (their read position passed
   it, on any of their devices), their own messages that long after `createdAt`, and any message at
-  the backstop below at the latest.
+  the backstop below at the latest. A device that was away learns the read time from
+  `Chat.lastReadAt` (the caller's own: when their read position last moved, set by `read`; `null`
+  before it first moves): messages up to `lastReadSeq` expire at `min(now, lastReadAt)` + timer, not
+  when the device comes back.
 - **Server deletion** happens at the earlier of: (a) the moment every **current** member other than
   the sender has `lastReadSeq ≥ seq`, plus the timer (the sender counts as having read their own
   message; in a chat with only the sender, that's at once); (b) the backstop `createdAt + timer + 30
@@ -985,7 +998,7 @@ Frames are JSON text. One socket per device carries every chat.
 ### Client → hub
 | frame | effect |
 |---|---|
-| `{type:"send", id, chatId, envelope, silent?, mentions?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute |
+| `{type:"send", id, chatId, envelope, silent?, mentions?, disappearSecs?}` | store and fan out a message (below); `silent: true` pushes no one and marks the `msg` frames; `mentions` (≤ 50 user ids) are pushed through a mute; `disappearSecs` (silent only: `null` or an allowed timer, else `invalid_request`) is the timer of the message the change targets, stamped instead of the chat's ("Disappearing messages") |
 | `{type:"typing", chatId}` | relayed to the sockets of the other members who share a family with you; send at most every 3 s while typing |
 | `{type:"read", chatId, seq}` | sets your `lastReadSeq` (never backwards, capped at `lastSeq`) |
 | `{type:"ping"}` | answered `{type:"pong"}` without waking the hub; send every ~25 s |
@@ -1000,7 +1013,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 |---|---|
 | `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
 | `{type:"presence", userId, online, lastSeenAt?}` | a user sharing a family with you: their first socket opened / last socket closed (then with `lastSeenAt`, Unix ms, also kept as the directory's `lastSeenAt`) |
-| `{type:"ack", id, seq, createdAt, disappearSecs?}` | your `send` was stored (or had been stored before); `disappearSecs` is the timer the server stamped, when there is one; also to every socket of yours when one of your scheduled messages is delivered |
+| `{type:"ack", id, seq, createdAt, disappearSecs}` | your `send` was stored (or had been stored before); `disappearSecs` is the timer the server stamped (`null`: none; an older server leaves it out); also to every socket of yours when one of your scheduled messages is delivered |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
 | `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |

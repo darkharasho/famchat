@@ -135,7 +135,8 @@ class LocalScheduled extends Table {
 
   /// `local` (not on the server yet: uploading or waiting to be sent there), or the server's
   /// `pending`, `needs_resend` or `failed`. A `failed` row that isn't [onServer] was refused before
-  /// the server took it (an upload or the schedule call).
+  /// the server took it (an upload or the schedule call). `cancelling`: cancelled here while the
+  /// server couldn't be told; hidden, never sent, and the cancel is retried on the next refresh.
   TextColumn get state => text()();
 
   /// The server holds it.
@@ -518,6 +519,7 @@ class ChatDb extends _$ChatDb {
 
   /// Inserts or updates a chat from the server and replaces its member list; keeps local sync state.
   Future<void> upsertChat(ChatDto c) => transaction(() async {
+        final before = await chatById(c.id);
         await into(localChats).insert(
           LocalChatsCompanion.insert(
             id: c.id,
@@ -569,8 +571,15 @@ class ChatDb extends _$ChatDb {
         if (me != null) {
           await (update(localChats)..where((t) => t.id.equals(c.id) & t.myLastReadSeq.isSmallerThanValue(me.lastReadSeq)))
               .write(LocalChatsCompanion(myLastReadSeq: Value(me.lastReadSeq)));
-          // Read on another of my devices while this one was away.
-          await stampRead(c.id, me.lastReadSeq);
+          // Read on another of my devices while this one was away: by the server's lastReadAt at the
+          // latest, not when this device came back.
+          await stampRead(c.id, me.lastReadSeq, at: c.lastReadAt);
+          final at = c.lastReadAt;
+          // It covers everything this device counts as read only when the server is as far along.
+          if (at != null && me.lastReadSeq >= (before?.myLastReadSeq ?? 0)) {
+            final known = _readAt[c.id];
+            _readAt[c.id] = known == null || known < at ? at : known;
+          }
         }
       });
 
@@ -578,6 +587,13 @@ class ChatDb extends _$ChatDb {
 
   /// Lets [upsertChat] take this user's read position from the server's member list.
   set myUserId(String id) => _myUserId = id;
+
+  /// Per chat, a time (Unix ms) by which I had read everything up to my read position, when known.
+  final _readAt = <String, int>{};
+
+  /// When I had read [chatId] up to my read position by, at the latest: the server's `lastReadAt`
+  /// or a read here, whichever came later; null when unknown (then "now" is the safe answer).
+  int? myReadAt(String chatId) => _readAt[chatId];
 
   /// The time (Unix ms) read positions are stamped with (see [stampRead]); the sync engine's clock.
   int Function() clock = () => DateTime.now().millisecondsSinceEpoch;
@@ -605,21 +621,24 @@ class ChatDb extends _$ChatDb {
         await (update(localChats)..where((c) => c.id.equals(chatId) & c.myLastReadSeq.isSmallerThanValue(seq)))
             .write(LocalChatsCompanion(myLastReadSeq: Value(seq)));
         await stampRead(chatId, seq);
+        _readAt[chatId] = clock();
       });
 
   // --- disappearing messages ---
 
   /// My read position in [chatId] reached [seq]: others' messages with a timer up to it now expire
-  /// [clock] + their timer, unless they already expire sooner (read earlier, or the backstop).
-  /// Only rows whose time moves are written, so a repeat changes nothing.
-  Future<void> stampRead(String chatId, int seq) async {
+  /// [clock] (or [at], when read by then) + their timer, unless they already expire sooner (read
+  /// earlier, or the backstop). Only rows whose time moves are written, so a repeat changes nothing.
+  Future<void> stampRead(String chatId, int seq, {int? at}) async {
     final me = _myUserId;
     if (me == null) return;
+    final now = clock();
+    final when = at != null && at < now ? at : now;
     await customUpdate(
       'UPDATE local_messages SET expires_at = ?1 + disappear_secs * 1000 '
       'WHERE chat_id = ?2 AND seq IS NOT NULL AND seq <= ?3 AND sender_user_id != ?4 AND disappear_secs IS NOT NULL '
       'AND (expires_at IS NULL OR expires_at > ?1 + disappear_secs * 1000)',
-      variables: [Variable.withInt(clock()), Variable.withString(chatId), Variable.withInt(seq), Variable.withString(me)],
+      variables: [Variable.withInt(when), Variable.withString(chatId), Variable.withInt(seq), Variable.withString(me)],
       updates: {localMessages},
     );
   }
@@ -874,9 +893,9 @@ class ChatDb extends _$ChatDb {
         ..orderBy([(s) => OrderingTerm(expression: s.id)]))
       .get();
 
-  /// [chatId]'s scheduled messages, soonest first.
+  /// [chatId]'s scheduled messages, soonest first (not ones being cancelled).
   Stream<List<ScheduledRow>> watchScheduled(String chatId) => (select(localScheduled)
-        ..where((s) => s.chatId.equals(chatId))
+        ..where((s) => s.chatId.equals(chatId) & s.state.equals('cancelling').not())
         ..orderBy([(s) => OrderingTerm(expression: s.deliverAt), (s) => OrderingTerm(expression: s.id)]))
       .watch();
 

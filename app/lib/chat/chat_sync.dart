@@ -346,7 +346,7 @@ class ChatSync {
       // my devices after a key change (then it shows "sent late" here too).
       final sched = m.senderUserId == me.userId ? await db.scheduledById(m.id) : null;
       row = (decrypted ?? await _decrypt(m)).copyWith(
-        expiresAt: Value(_expiryOf(m, chat.myLastReadSeq)),
+        expiresAt: Value(_expiryOf(m, chat.myLastReadSeq, db.myReadAt(m.chatId))),
         scheduledFor: Value(sched?.state == 'needs_resend' ? sched!.deliverAt : null),
       );
       await db.insertMessageIfAbsent(row);
@@ -360,14 +360,16 @@ class ChatSync {
 
   /// When this device deletes [m] (docs/protocol.md "Disappearing messages"), or null for no timer:
   /// my own at sent + timer; someone else's at my read time + timer once my read position
-  /// ([myLastReadSeq]) passed it, until then at the backstop (sent + timer + 30 days).
-  int? _expiryOf(MessageDto m, int myLastReadSeq) {
+  /// ([myLastReadSeq]) passed it, until then at the backstop (sent + timer + 30 days). [readAt]: a
+  /// time I had read up to [myLastReadSeq] by (see [ChatDb.myReadAt]); now when unknown or later.
+  int? _expiryOf(MessageDto m, int myLastReadSeq, int? readAt) {
     final secs = m.disappearSecs;
     if (secs == null) return null;
     if (m.senderUserId == me.userId) return m.createdAt + secs * 1000;
     final backstop = m.createdAt + secs * 1000 + disappearBackstop.inMilliseconds;
     if (m.seq > myLastReadSeq) return backstop;
-    final read = _now().millisecondsSinceEpoch + secs * 1000;
+    final now = _now().millisecondsSinceEpoch;
+    final read = (readAt != null && readAt < now ? readAt : now) + secs * 1000;
     return read < backstop ? read : backstop;
   }
 
@@ -747,13 +749,18 @@ class ChatSync {
     }
     if (!ok) return; // waits for the epoch's key (a keys/chat event or the next sync retries)
     final env = await _encrypt(chat, row.id, row.body!);
+    final change = changeKinds.contains(row.kind);
+    // A change lives as long as its target: it takes the target's timer (none included), not the
+    // chat's as it is now. Unknown until the target is stored: then the chat's, as the target gets.
+    final target = change && row.targetId != null ? await db.messageById(row.targetId!) : null;
     if (hub.send({
       'type': 'send',
       'id': row.id,
       'chatId': row.chatId,
       'envelope': env.toJson(),
       // Changes to other messages notify no one (docs/protocol.md "send").
-      if (changeKinds.contains(row.kind)) 'silent': true,
+      if (change) 'silent': true,
+      if (target != null && target.seq != null) 'disappearSecs': target.disappearSecs,
       // The server can't read the text: it needs these to push the people mentioned.
       if (_mentionsOf(row) case final m when m.isNotEmpty) 'mentions': m,
     })) {
@@ -1190,8 +1197,8 @@ class ChatSync {
   /// A `needs_resend` frame for [id].
   Future<void> _needsResend(String id) async {
     final s = await db.scheduledById(id);
-    if (s == null || !s.onServer) {
-      await _refreshScheduledNow(); // brings it, and re-sends it
+    if (s == null || !s.onServer || s.state == 'cancelling') {
+      await _refreshScheduledNow(); // brings it and re-sends it, or finishes cancelling it
       return;
     }
     await _resend(s.copyWith(state: 'needs_resend'));
@@ -1253,6 +1260,7 @@ class ChatSync {
   Future<void> refreshScheduled() => _onSchedLane(_refreshScheduledNow);
 
   Future<void> _refreshScheduledNow() async {
+    await _retryCancels();
     final list = await api.scheduled();
     final ids = {for (final d in list) d.id};
     for (final local in await db.allScheduled()) {
@@ -1300,10 +1308,26 @@ class ChatSync {
         } on ApiException catch (e) {
           if (e.status != 404) rethrow; // 404: gone already, or never handed over
         } catch (_) {
-          if (s.onServer) rethrow; // offline: the server would still send it
+          // Offline: the server may hold it (or get it from a hand-off whose answer was lost). It
+          // goes from the list now and the cancel is retried on the next refresh.
+          await db.setScheduledState(id, 'cancelling');
+          return;
         }
         await db.deleteScheduled(id);
       });
+
+  /// Cancels left waiting for the server ([cancelScheduled] offline); throws while still offline.
+  Future<void> _retryCancels() async {
+    for (final s in await db.allScheduled()) {
+      if (s.state != 'cancelling') continue;
+      try {
+        await api.deleteScheduled(s.id);
+      } on ApiException catch (e) {
+        if (e.status != 404) rethrow;
+      }
+      await db.deleteScheduled(s.id);
+    }
+  }
 
   /// Sends my scheduled message [id] now.
   Future<void> sendScheduledNow(String id) => _onSchedLane(() async {
@@ -1433,11 +1457,16 @@ class ChatSync {
   }
 
   /// Sets (or moves) my reminder on [messageId] to [at]: on the server, then here. Throws
-  /// [ArgumentError] when [at] isn't [scheduleMin] to [scheduleMax] ahead, and the API's errors
-  /// (offline, or the message is gone).
+  /// [ArgumentError] when [at] isn't [scheduleMin] to [scheduleMax] ahead, [ReminderAfterExpiry]
+  /// when the message disappears from this device before then, and the API's errors (offline, or
+  /// the message is gone).
   Future<void> setReminder(String chatId, String messageId, DateTime at) {
     if (!canScheduleAt(at)) throw ArgumentError.value(at, 'at', 'not between a minute and 366 days ahead');
     return _onReminderLane(() async {
+      final expires = (await db.messageById(messageId))?.expiresAt;
+      if (expires != null && at.millisecondsSinceEpoch >= expires) {
+        throw ReminderAfterExpiry(DateTime.fromMillisecondsSinceEpoch(expires));
+      }
       await api.setReminder(chatId, messageId, at.millisecondsSinceEpoch);
       await db.putReminder(chatId, messageId, at.millisecondsSinceEpoch);
     });
@@ -1522,7 +1551,14 @@ class ChatSync {
   /// Deletes messages [ids] here for good, with their changes, stars and media (see
   /// [ChatDb.purgeMessages]); returns the rows removed.
   Future<List<MessageRow>> purge(Iterable<String> ids) async {
-    final rows = await db.purgeMessages(ids);
+    final wanted = ids.toSet();
+    final reminded = [for (final r in await db.allReminders()) if (wanted.contains(r.messageId)) r];
+    final rows = await db.purgeMessages(wanted);
+    // The server would otherwise still remind me (with a preview) of a message my devices deleted.
+    // Best effort: the server also drops reminders for messages past my copy's time.
+    for (final r in reminded) {
+      unawaited(_onReminderLane(() => api.clearReminder(r.chatId, r.messageId)).catchError((_) {}));
+    }
     if (rows.isEmpty) return rows;
     final f = _onPurged;
     if (f != null) {
@@ -1787,4 +1823,13 @@ class ChatSync {
     await _refreshChat(chatId);
     await keys.ensureCurrentEpoch(chatId);
   }
+}
+
+/// A reminder asked for after the message disappears from this device ([expiresAt]).
+class ReminderAfterExpiry implements Exception {
+  ReminderAfterExpiry(this.expiresAt);
+  final DateTime expiresAt;
+
+  @override
+  String toString() => 'ReminderAfterExpiry($expiresAt)';
 }

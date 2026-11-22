@@ -11,7 +11,7 @@ import { familyPeers } from "./lib/family";
 import { evictOldest } from "./lib/media";
 import { messageOut } from "./lib/messages";
 import {
-  ALL_READ_SQL, BACKSTOP_MS, MAX_ATTEMPTS, retryDelay, TOMBSTONE_KEEP_MS, validAhead,
+  ALL_READ_SQL, BACKSTOP_MS, DISAPPEAR_SECS, MAX_ATTEMPTS, retryDelay, TOMBSTONE_KEEP_MS, validAhead,
 } from "./lib/timing";
 
 /** A message for members with no open socket: a job on the push queue (src/push/consumer.ts). */
@@ -151,6 +151,11 @@ interface Delivery {
   scheduled: boolean;
   /** The sending socket, which gets an ack instead of the `msg`. */
   exclude?: WebSocket;
+  /**
+   * A silent change's own timer (its target's: null for none), instead of the chat's. Absent: the
+   * chat's.
+   */
+  disappearSecs?: number | null;
 }
 
 /** A scheduled message as `PUT /me/scheduled/:id` takes it (checked by the route). */
@@ -478,14 +483,18 @@ export class FamilyHub extends DurableObject<Env> {
       db.prepare(
         `INSERT INTO messages (chat_id, seq, id, sender_user_id, sender_device_id, envelope, created_at, silent,
            disappear_secs, delete_at, scheduled)
-         SELECT id, last_seq, ?1, ?2, ?3, ?4, ?5, ?6, disappear_secs,
-           CASE WHEN disappear_secs IS NULL THEN NULL
+         SELECT id, last_seq, ?1, ?2, ?3, ?4, ?5, ?6, t.secs,
+           CASE WHEN t.secs IS NULL THEN NULL
              WHEN EXISTS (SELECT 1 FROM chat_members o WHERE o.chat_id = chats.id AND o.user_id <> ?2)
-               THEN ?5 + disappear_secs * 1000 + ?7
-             ELSE ?5 + disappear_secs * 1000 END,
+               THEN ?5 + t.secs * 1000 + ?7
+             ELSE ?5 + t.secs * 1000 END,
            ?8
-         FROM chats WHERE id = ?9 RETURNING seq, disappear_secs, delete_at`,
-      ).bind(d.id, d.userId, d.deviceId, envJson, now, silent ? 1 : 0, BACKSTOP_MS, d.scheduled ? 1 : 0, d.chatId),
+         FROM chats, (SELECT CASE WHEN ?10 THEN ?11 ELSE (SELECT disappear_secs FROM chats WHERE id = ?9) END AS secs) t
+         WHERE id = ?9 RETURNING seq, disappear_secs, delete_at`,
+      ).bind(
+        d.id, d.userId, d.deviceId, envJson, now, silent ? 1 : 0, BACKSTOP_MS, d.scheduled ? 1 : 0, d.chatId,
+        d.disappearSecs !== undefined ? 1 : 0, d.disappearSecs ?? null,
+      ),
       ...(d.scheduled ? [db.prepare("DELETE FROM scheduled_messages WHERE id = ?").bind(d.id)] : []),
     ]);
     const row = inserted.results[0] as { seq: number; disappear_secs: number | null; delete_at: number | null };
@@ -536,7 +545,10 @@ export class FamilyHub extends DurableObject<Env> {
     const env = m.envelope;
     await this.prune(ws);
     const mentions = parseMentions(m.mentions);
-    if (!isUlid(id) || typeof chatId !== "string" || !validEnvelope(env) || mentions === false) {
+    // Only a silent change may carry its own timer (its target's): null or an allowed value.
+    const ownTimer = m.silent === true && "disappearSecs" in m;
+    const badTimer = ownTimer && m.disappearSecs !== null && !DISAPPEAR_SECS.has(m.disappearSecs as number);
+    if (!isUlid(id) || typeof chatId !== "string" || !validEnvelope(env) || mentions === false || badTimer) {
       return send(ws, { type: "error", id: typeof id === "string" ? id : undefined, error: "invalid_request" });
     }
     const db = this.env.DB;
@@ -561,6 +573,7 @@ export class FamilyHub extends DurableObject<Env> {
     const r = await this.deliver({
       userId: att.userId, deviceId: att.deviceId, chatId, id, envelope: env,
       silent: m.silent === true, mentions: mentions ?? undefined, scheduled: !!sched, exclude: ws,
+      ...(ownTimer ? { disappearSecs: m.disappearSecs as number | null } : {}),
     });
     if ("error" in r) return send(ws, { type: "error", id, error: r.error });
     send(ws, ackFrame(id, r));
@@ -625,7 +638,16 @@ export class FamilyHub extends DurableObject<Env> {
       const row = await this.env.DB.prepare(
         "DELETE FROM scheduled_messages WHERE id = ? AND sender_user_id = ? RETURNING chat_id",
       ).bind(id, userId).first<{ chat_id: string }>();
-      if (!row) return { error: "not_found" as const };
+      if (!row) {
+        // Never handed over (or a PUT whose answer was lost and then cancelled): blobs the caller
+        // uploaded for it go too, unless it was delivered as a message that uses them.
+        const { results } = await this.env.DB.prepare(
+          `DELETE FROM media WHERE message_id = ? AND uploader_id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE id = ?)
+             AND NOT EXISTS (SELECT 1 FROM scheduled_messages WHERE id = ?) RETURNING key`,
+        ).bind(id, userId, id, id).all<{ key: string }>();
+        if (results.length) await this.env.MEDIA.delete(results.map((r) => r.key)).catch((e) => console.error("R2 delete failed", e));
+        return { error: "not_found" as const };
+      }
       await this.dropScheduledMedia(row.chat_id, id, userId);
       await this.rearm();
       await this.notify([userId], { type: "scheduled" });
@@ -777,11 +799,16 @@ export class FamilyHub extends DurableObject<Env> {
    */
   private async fireReminder(r: ReminderRow): Promise<void> {
     const db = this.env.DB;
+    // Not for a disappearing message the owner's own copy is past: their devices deleted it at
+    // sent + timer (their own) or read + timer, and last_read_at is no earlier than that read.
     const msg = await db.prepare(
       `SELECT m.sender_user_id, m.sender_device_id, m.envelope FROM messages m
-       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
-       WHERE m.id = ? AND m.chat_id = ?`,
-    ).bind(r.user_id, r.message_id, r.chat_id).first<{ sender_user_id: string; sender_device_id: string; envelope: string }>();
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?1
+       WHERE m.id = ?2 AND m.chat_id = ?3
+         AND NOT (m.disappear_secs IS NOT NULL AND (
+           (m.sender_user_id = ?1 AND m.created_at + m.disappear_secs * 1000 <= ?4)
+           OR (cm.last_read_seq >= m.seq AND cm.last_read_at + m.disappear_secs * 1000 <= ?4)))`,
+    ).bind(r.user_id, r.message_id, r.chat_id, this.now()).first<{ sender_user_id: string; sender_device_id: string; envelope: string }>();
     if (msg) {
       await this.notify([r.user_id], { type: "reminder", chatId: r.chat_id, messageId: r.message_id, at: r.remind_at });
       const { results } = await db.prepare(
@@ -923,15 +950,18 @@ export class FamilyHub extends DurableObject<Env> {
     ).bind(m.chatId, att.userId).first<{ last_read_seq: number; joined_seq: number; muted_until: number | null }>();
     if (!before) return;
     const row = await this.env.DB.prepare(
-      `UPDATE chat_members SET last_read_seq = MIN(?, (SELECT last_seq FROM chats WHERE id = ?))
+      `UPDATE chat_members SET last_read_seq = MIN(?, (SELECT last_seq FROM chats WHERE id = ?)), last_read_at = ?
        WHERE chat_id = ? AND user_id = ? AND last_read_seq < MIN(?, (SELECT last_seq FROM chats WHERE id = ?))
        RETURNING last_read_seq`,
-    ).bind(m.seq, m.chatId, m.chatId, att.userId, m.seq, m.chatId).first<{ last_read_seq: number }>();
+    ).bind(m.seq, m.chatId, this.now(), m.chatId, att.userId, m.seq, m.chatId).first<{ last_read_seq: number }>();
     if (!row) return;
-    // Disappearing messages everyone has now read start their clock (one UPDATE per read).
-    const { results: moved } = await this.env.DB.prepare(`${ALL_READ_SQL} RETURNING delete_at`)
-      .bind(this.now(), m.chatId, before.last_read_seq, row.last_read_seq).all<{ delete_at: number }>();
-    if (moved.length) await this.armAt(Math.min(...moved.map((r) => r.delete_at)));
+    // Disappearing messages everyone has now read start their clock (one UPDATE per read). In the
+    // hub's queue: a rearm() in flight elsewhere would otherwise overwrite the sooner alarm.
+    await this.serial(async () => {
+      const { results: moved } = await this.env.DB.prepare(`${ALL_READ_SQL} RETURNING delete_at`)
+        .bind(this.now(), m.chatId, before.last_read_seq, row.last_read_seq).all<{ delete_at: number }>();
+      if (moved.length) await this.armAt(Math.min(...moved.map((r) => r.delete_at)));
+    });
     await this.notify(await this.memberIds(m.chatId), {
       type: "read", chatId: m.chatId, userId: att.userId, seq: row.last_read_seq,
     });
@@ -997,5 +1027,6 @@ type AckInfo = { seq: number; createdAt: number; disappearSecs?: number | null }
 
 /** The `ack` frame; carries the disappearing timer the server stamped, when there is one. */
 function ackFrame(id: string, r: AckInfo): Record<string, unknown> {
-  return { type: "ack", id, seq: r.seq, createdAt: r.createdAt, ...(r.disappearSecs != null ? { disappearSecs: r.disappearSecs } : {}) };
+  // Always present (null: no timer), so a client never falls back to a chat timer it may hold stale.
+  return { type: "ack", id, seq: r.seq, createdAt: r.createdAt, disappearSecs: r.disappearSecs ?? null };
 }

@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../chat/chat_sync.dart' show ReminderAfterExpiry;
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
@@ -989,6 +990,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _snack('Reminder set for ${whenLabel(at, h24: h24)}');
     } on ArgumentError {
       _snack('That time is too close now. Pick another.');
+    } on ReminderAfterExpiry catch (e) {
+      _snack('This message disappears before then (${whenLabel(e.expiresAt, h24: h24)}). Pick an earlier time.');
     } catch (_) {
       _snack("Couldn't set the reminder. Check your connection.");
     }

@@ -335,4 +335,59 @@ void main() {
     expect(mediaKeysOf(r({'kind': 'text', 'text': 'x', 'preview': {'image': {'mediaKey': 'P'}}})), {'P'});
     expect(mediaKeysOf(r({'kind': 'text', 'text': 'x'})), isEmpty);
   });
+
+  test('a device that was away takes the read time from the server, not from when it comes back', () async {
+    final (alice, bob, chatId) = await timedPair();
+    backend.readClock = () => clock.ms;
+    final bob2 = await start(await backend.addDevice(bob.d.userId));
+    final id = await sent(alice, chatId, 'read on the phone', to: bob);
+    await until(() async => await bob2.row(id) != null);
+    // Bob's desktop is off; he reads on his phone, then the desktop comes back three days later.
+    await stopNode(bob);
+    nodes.remove(bob);
+    await bob.mediaDb.close();
+    clock.advance(const Duration(hours: 1));
+    await bob2.sync.markRead(chatId);
+    final readAt = clock.ms;
+    await until(() => backend.chatDto(chatId, bob.d.userId).lastReadAt == readAt, reason: 'the server has the read');
+    clock.advance(const Duration(days: 3));
+    final desk = await start(bob.d);
+    await desk.sync.idle;
+    expect(await desk.row(id), isNull, reason: 'read + 24h passed two days ago');
+    expect(desk.d.db.myReadAt(chatId), readAt);
+
+    // Older history fetched later takes the same read time.
+    final id2 = await sent(alice, chatId, 'second', to: desk);
+    await bob2.sync.markRead(chatId);
+    expect((await desk.row(id2))!.expiresAt, isNot(lessThan(clock.ms)), reason: 'a fresh read: from now');
+  });
+
+  test("a change takes its target's timer, not the chat's as it is now", () async {
+    final (alice, bob, chatId) = await timedPair();
+    final id = await sent(alice, chatId, 'pin me', to: bob);
+    await alice.sync.setDisappearing(chatId, null);
+    await until(() async => (await bob.d.db.chatById(chatId))?.disappearSecs == null);
+    final pin = await alice.sync.pinMessage(chatId, id, pinned: true);
+    await until(() async => (await alice.row(pin))?.state == 'sent', reason: 'pin acked');
+    expect((await alice.row(pin))!.disappearSecs, daySecs, reason: 'the ack says what was stamped');
+    await until(() async => await bob.row(pin) != null);
+    expect((await bob.row(pin))!.disappearSecs, daySecs);
+    // And a timer turned on later doesn't put one on a change to a message without one.
+    final plain = await sent(alice, chatId, 'no timer', to: bob);
+    await alice.sync.setDisappearing(chatId, daySecs);
+    await until(() async => (await bob.d.db.chatById(chatId))?.disappearSecs == daySecs);
+    final pin2 = await alice.sync.pinMessage(chatId, plain, pinned: true);
+    await until(() async => (await alice.row(pin2))?.state == 'sent', reason: 'second pin acked');
+    expect(((await alice.row(pin2))!.disappearSecs, (await alice.row(pin2))!.expiresAt), (null, null));
+  });
+
+  test("an ack with no timer means none, whatever this device last heard of the chat's", () async {
+    final (alice, bob, chatId) = await timedPair();
+    // The timer went off while Alice's device hadn't heard yet: its chat row still says 24 hours.
+    await bob.sync.setDisappearing(chatId, null);
+    await until(() async => (await alice.d.db.chatById(chatId))?.disappearSecs == null);
+    await alice.d.db.customStatement('UPDATE local_chats SET disappear_secs = ? WHERE id = ?', [daySecs, chatId]);
+    final id = await sent(alice, chatId, 'kept', to: bob);
+    expect(((await alice.row(id))!.disappearSecs, (await alice.row(id))!.expiresAt), (null, null));
+  });
 }

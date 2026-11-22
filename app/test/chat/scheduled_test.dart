@@ -280,6 +280,23 @@ void main() {
     expect(await alice.sched(id), isNull);
     expect(backend.scheduledDto(id), isNull);
   });
+
+  test('a cancel while offline hides it at once and reaches the server when back', () async {
+    final (alice, _, chatId) = await pair();
+    final id = await scheduled(alice, chatId, 'oops');
+    alice.d.api.offlineCalls.add('DELETE /me/scheduled/$id');
+    await alice.sync.cancelScheduled(id);
+    expect(await alice.list(chatId), isEmpty);
+    expect((await alice.sched(id))!.state, 'cancelling');
+    expect(backend.scheduledDto(id), isNotNull, reason: 'the server still has it');
+    // A refresh while still offline keeps it cancelling (and doesn't bring it back).
+    await expectLater(alice.sync.refreshScheduled(), throwsA(anything));
+    expect(await alice.list(chatId), isEmpty);
+    alice.d.api.offlineCalls.clear();
+    await alice.sync.refreshScheduled();
+    expect(backend.scheduledDto(id), isNull);
+    expect(await alice.sched(id), isNull);
+  });
 }
 
 /// A scheduled row as a message row (for its text).

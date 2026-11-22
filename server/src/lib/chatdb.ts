@@ -35,6 +35,11 @@ export interface ChatOut {
   archivedAt: number | null;
   /** The caller marked the chat as unread. */
   markedUnread: boolean;
+  /**
+   * When the caller's read position last moved (Unix ms), or null. Their copies of disappearing
+   * messages up to it were read by then at the latest (docs/protocol.md "Disappearing messages").
+   */
+  lastReadAt: number | null;
   /** A group's photo (GET /chats/:id/avatar?v=<avatarKey>), or null. */
   avatarKey: string | null;
   /** The disappearing-message timer in seconds, or null (off). */
@@ -47,9 +52,15 @@ export interface ChatOut {
 }
 
 /** The caller's own state for a chat (mute, pin, archive, marked unread). */
-type Mine = { muted_until: number | null; pinned_at: number | null; archived_at: number | null; marked_unread: number };
+type Mine = {
+  muted_until: number | null;
+  pinned_at: number | null;
+  archived_at: number | null;
+  marked_unread: number;
+  last_read_at: number | null;
+};
 
-const NOT_MINE: Mine = { muted_until: null, pinned_at: null, archived_at: null, marked_unread: 0 };
+const NOT_MINE: Mine = { muted_until: null, pinned_at: null, archived_at: null, marked_unread: 0, last_read_at: null };
 
 type ChatRow = {
   id: string;
@@ -90,6 +101,7 @@ function toOut(r: ChatRow, members: MemberOut[], mine: Mine): ChatOut {
     pinnedAt: mine.pinned_at,
     archivedAt: mine.archived_at,
     markedUnread: mine.marked_unread === 1,
+    lastReadAt: mine.last_read_at,
     avatarKey: r.avatar_key,
     disappearSecs: r.disappear_secs,
     disappearChangedBy: r.disappear_changed_by,
@@ -121,7 +133,7 @@ export async function chatsOf(db: D1Database, userId: string): Promise<ChatOut[]
   return (chats.results as ChatRow[]).map((r) => toOut(r, byChat.get(r.id) ?? [], mine.get(r.id) ?? NOT_MINE));
 }
 
-const MINE_COLS = "muted_until, pinned_at, archived_at, marked_unread";
+const MINE_COLS = "muted_until, pinned_at, archived_at, marked_unread, last_read_at";
 
 type MemberRow = Mine & { chat_id: string; user_id: string; joined_seq: number; last_read_seq: number };
 

@@ -205,7 +205,12 @@ class ChatDto {
     this.disappearChangedBy,
     this.disappearChangedAt,
     this.disappearChangedSeq,
+    this.lastReadAt,
   });
+
+  /// When this user's read position here last moved (Unix ms, server time), or null: everything up
+  /// to their `lastReadSeq` was read by then at the latest.
+  final int? lastReadAt;
 
   /// The chat's disappearing-message timer in seconds (docs/protocol.md "Disappearing messages"), or
   /// null when it's off.
@@ -266,6 +271,7 @@ class ChatDto {
         disappearChangedBy: j['disappearChangedBy'] is String ? j['disappearChangedBy'] as String : null,
         disappearChangedAt: j['disappearChangedAt'] is int ? j['disappearChangedAt'] as int : null,
         disappearChangedSeq: j['disappearChangedSeq'] is int ? j['disappearChangedSeq'] as int : null,
+        lastReadAt: j['lastReadAt'] is int ? j['lastReadAt'] as int : null,
       );
 }
 
