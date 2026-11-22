@@ -15,8 +15,8 @@ class SearchHit {
 
 /// Text messages whose current text contains [query] (ignoring case), newest first, and polls whose
 /// question or an option does (their text: "📊 question · option · option"), files whose name
-/// does ("📎 name"), and voice messages whose transcript does ("🎤 transcript"). Deleted messages, and
-/// text only an earlier version had, don't match.
+/// does ("📎 name"), and voice messages whose transcript does ("🎤 transcript": the sender's, else
+/// one made on this device). Deleted messages, and text only an earlier version had, don't match.
 Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId, int limit = 50}) async {
   final q = query.trim();
   if (q.isEmpty) return const [];
@@ -27,7 +27,9 @@ Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId,
     final c = messageChanges([m, ...await db.changesTo(m.chatId, m.id)]);
     final poll = c.isDeleted(m.id) ? null : pollOf(m);
     final file = c.isDeleted(m.id) ? null : fileOf(m);
-    final transcript = c.transcriptOf(m);
+    // The sender's transcript, else one made on this device.
+    final transcript = c.transcriptOf(m) ??
+        (m.kind == 'voice' && !c.isDeleted(m.id) ? await db.localTranscriptOf(m.id) : null);
     final text = poll != null
         ? '📊 ${[poll.question, ...poll.options].join(' · ')}'
         : file != null

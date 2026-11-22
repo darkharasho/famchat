@@ -16,6 +16,7 @@ import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/files.dart' show fileOf;
 import '../../chat/forward.dart';
+import '../../transcripts/model_download_dialog.dart';
 import '../../transcripts/transcripts_service.dart';
 import '../../chat/mentions.dart';
 import '../../chat/wire.dart' show FetchedPreview;
@@ -1254,6 +1255,22 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (report.problem case final p?) _snack(p);
   }
 
+  /// Transcribe in the menu: on this device, after offering the model download if it's missing.
+  Future<void> _transcribe(MessageRow m) async {
+    final service = ref.read(transcriptsServiceProvider);
+    if (service == null || !await ensureTranscriptModel(context, ref) || !mounted) return;
+    switch (await service.transcribeMessage(m)) {
+      case TranscribeOutcome.done:
+        break;
+      case TranscribeOutcome.noSpeech:
+        _snack('No speech found in that voice message.');
+      case TranscribeOutcome.gone:
+        _snack('That voice message is no longer available.');
+      case TranscribeOutcome.failed:
+        _snack("Couldn't transcribe that voice message.");
+    }
+  }
+
   void _snack(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
@@ -1480,6 +1497,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final pinnedIds = changes.pinned.toSet();
     final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
     final reminders = ref.watch(remindersProvider(chatId)).value ?? const <String, int>{};
+    final localTranscripts = kIsWeb ? const <String, String>{} : ref.watch(localTranscriptsProvider(chatId)).value ?? const <String, String>{};
+    final transcribingIds = kIsWeb ? const <String>{} : ref.watch(transcribingProvider).value ?? const <String>{};
+    final canTranscribe = !kIsWeb && ref.watch(transcriptsServiceProvider) != null;
     final polls = ref.watch(pollsProvider(chatId));
     Widget? pollIn(MessageRow m) {
       final PollState? state = m.kind == 'poll' ? polls[m.id] : null;
@@ -1573,7 +1593,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   if (group && mentionsOf(m).isNotEmpty) everyoneName,
                 ],
                 linkPreview: changes.previewOf(m),
-                transcript: changes.transcriptOf(m),
+                // The sender's transcript wins over one made here.
+                transcript: changes.transcriptOf(m) ?? (changes.isDeleted(m.id) ? null : localTranscripts[m.id]),
+                localTranscript: changes.transcriptOf(m) == null && localTranscripts.containsKey(m.id),
+                transcribing: transcribingIds.contains(m.id),
+                onTranscribe: canTranscribe &&
+                        m.kind == 'voice' &&
+                        !changes.isDeleted(m.id) &&
+                        changes.transcriptOf(m) == null &&
+                        !localTranscripts.containsKey(m.id) &&
+                        !transcribingIds.contains(m.id)
+                    ? () => unawaited(_transcribe(m))
+                    : null,
                 custom: pollIn(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,

@@ -5776,7 +5776,8 @@ class ScheduledRow extends DataClass implements Insertable<ScheduledRow> {
 
   /// `local` (not on the server yet: uploading or waiting to be sent there), or the server's
   /// `pending`, `needs_resend` or `failed`. A `failed` row that isn't [onServer] was refused before
-  /// the server took it (an upload or the schedule call).
+  /// the server took it (an upload or the schedule call). `cancelling`: cancelled here while the
+  /// server couldn't be told; hidden, never sent, and the cancel is retried on the next refresh.
   final String state;
 
   /// The server holds it.
@@ -6404,6 +6405,318 @@ class LocalRemindersCompanion extends UpdateCompanion<ReminderRow> {
   }
 }
 
+class $LocalTranscriptsTable extends LocalTranscripts
+    with TableInfo<$LocalTranscriptsTable, LocalTranscriptRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalTranscriptsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
+  @override
+  late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
+    'chat_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'body',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [messageId, chatId, body, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_transcripts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalTranscriptRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('chat_id')) {
+      context.handle(
+        _chatIdMeta,
+        chatId.isAcceptableOrUnknown(data['chat_id']!, _chatIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chatIdMeta);
+    }
+    if (data.containsKey('body')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['body']!, _bodyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bodyMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {messageId};
+  @override
+  LocalTranscriptRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalTranscriptRow(
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      chatId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chat_id'],
+      )!,
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}body'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalTranscriptsTable createAlias(String alias) {
+    return $LocalTranscriptsTable(attachedDatabase, alias);
+  }
+}
+
+class LocalTranscriptRow extends DataClass
+    implements Insertable<LocalTranscriptRow> {
+  final String messageId;
+  final String chatId;
+  final String body;
+  final int createdAt;
+  const LocalTranscriptRow({
+    required this.messageId,
+    required this.chatId,
+    required this.body,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['message_id'] = Variable<String>(messageId);
+    map['chat_id'] = Variable<String>(chatId);
+    map['body'] = Variable<String>(body);
+    map['created_at'] = Variable<int>(createdAt);
+    return map;
+  }
+
+  LocalTranscriptsCompanion toCompanion(bool nullToAbsent) {
+    return LocalTranscriptsCompanion(
+      messageId: Value(messageId),
+      chatId: Value(chatId),
+      body: Value(body),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory LocalTranscriptRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalTranscriptRow(
+      messageId: serializer.fromJson<String>(json['messageId']),
+      chatId: serializer.fromJson<String>(json['chatId']),
+      body: serializer.fromJson<String>(json['body']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'messageId': serializer.toJson<String>(messageId),
+      'chatId': serializer.toJson<String>(chatId),
+      'body': serializer.toJson<String>(body),
+      'createdAt': serializer.toJson<int>(createdAt),
+    };
+  }
+
+  LocalTranscriptRow copyWith({
+    String? messageId,
+    String? chatId,
+    String? body,
+    int? createdAt,
+  }) => LocalTranscriptRow(
+    messageId: messageId ?? this.messageId,
+    chatId: chatId ?? this.chatId,
+    body: body ?? this.body,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  LocalTranscriptRow copyWithCompanion(LocalTranscriptsCompanion data) {
+    return LocalTranscriptRow(
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      chatId: data.chatId.present ? data.chatId.value : this.chatId,
+      body: data.body.present ? data.body.value : this.body,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalTranscriptRow(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('body: $body, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(messageId, chatId, body, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalTranscriptRow &&
+          other.messageId == this.messageId &&
+          other.chatId == this.chatId &&
+          other.body == this.body &&
+          other.createdAt == this.createdAt);
+}
+
+class LocalTranscriptsCompanion extends UpdateCompanion<LocalTranscriptRow> {
+  final Value<String> messageId;
+  final Value<String> chatId;
+  final Value<String> body;
+  final Value<int> createdAt;
+  final Value<int> rowid;
+  const LocalTranscriptsCompanion({
+    this.messageId = const Value.absent(),
+    this.chatId = const Value.absent(),
+    this.body = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalTranscriptsCompanion.insert({
+    required String messageId,
+    required String chatId,
+    required String body,
+    required int createdAt,
+    this.rowid = const Value.absent(),
+  }) : messageId = Value(messageId),
+       chatId = Value(chatId),
+       body = Value(body),
+       createdAt = Value(createdAt);
+  static Insertable<LocalTranscriptRow> custom({
+    Expression<String>? messageId,
+    Expression<String>? chatId,
+    Expression<String>? body,
+    Expression<int>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (messageId != null) 'message_id': messageId,
+      if (chatId != null) 'chat_id': chatId,
+      if (body != null) 'body': body,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalTranscriptsCompanion copyWith({
+    Value<String>? messageId,
+    Value<String>? chatId,
+    Value<String>? body,
+    Value<int>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return LocalTranscriptsCompanion(
+      messageId: messageId ?? this.messageId,
+      chatId: chatId ?? this.chatId,
+      body: body ?? this.body,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (chatId.present) {
+      map['chat_id'] = Variable<String>(chatId.value);
+    }
+    if (body.present) {
+      map['body'] = Variable<String>(body.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalTranscriptsCompanion(')
+          ..write('messageId: $messageId, ')
+          ..write('chatId: $chatId, ')
+          ..write('body: $body, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MetaTable extends Meta with TableInfo<$MetaTable, MetaRow> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -6627,6 +6940,9 @@ abstract class _$ChatDb extends GeneratedDatabase {
   late final $LocalStarsTable localStars = $LocalStarsTable(this);
   late final $LocalScheduledTable localScheduled = $LocalScheduledTable(this);
   late final $LocalRemindersTable localReminders = $LocalRemindersTable(this);
+  late final $LocalTranscriptsTable localTranscripts = $LocalTranscriptsTable(
+    this,
+  );
   late final $MetaTable meta = $MetaTable(this);
   late final Index localMessagesChatSeq = Index(
     'local_messages_chat_seq',
@@ -6654,6 +6970,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localStars,
     localScheduled,
     localReminders,
+    localTranscripts,
     meta,
     localMessagesChatSeq,
     localMessagesExpiresAt,
@@ -9949,6 +10266,202 @@ typedef $$LocalRemindersTableProcessedTableManager =
       ReminderRow,
       PrefetchHooks Function()
     >;
+typedef $$LocalTranscriptsTableCreateCompanionBuilder =
+    LocalTranscriptsCompanion Function({
+      required String messageId,
+      required String chatId,
+      required String body,
+      required int createdAt,
+      Value<int> rowid,
+    });
+typedef $$LocalTranscriptsTableUpdateCompanionBuilder =
+    LocalTranscriptsCompanion Function({
+      Value<String> messageId,
+      Value<String> chatId,
+      Value<String> body,
+      Value<int> createdAt,
+      Value<int> rowid,
+    });
+
+class $$LocalTranscriptsTableFilterComposer
+    extends Composer<_$ChatDb, $LocalTranscriptsTable> {
+  $$LocalTranscriptsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalTranscriptsTableOrderingComposer
+    extends Composer<_$ChatDb, $LocalTranscriptsTable> {
+  $$LocalTranscriptsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chatId => $composableBuilder(
+    column: $table.chatId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalTranscriptsTableAnnotationComposer
+    extends Composer<_$ChatDb, $LocalTranscriptsTable> {
+  $$LocalTranscriptsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get chatId =>
+      $composableBuilder(column: $table.chatId, builder: (column) => column);
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$LocalTranscriptsTableTableManager
+    extends
+        RootTableManager<
+          _$ChatDb,
+          $LocalTranscriptsTable,
+          LocalTranscriptRow,
+          $$LocalTranscriptsTableFilterComposer,
+          $$LocalTranscriptsTableOrderingComposer,
+          $$LocalTranscriptsTableAnnotationComposer,
+          $$LocalTranscriptsTableCreateCompanionBuilder,
+          $$LocalTranscriptsTableUpdateCompanionBuilder,
+          (
+            LocalTranscriptRow,
+            BaseReferences<
+              _$ChatDb,
+              $LocalTranscriptsTable,
+              LocalTranscriptRow
+            >,
+          ),
+          LocalTranscriptRow,
+          PrefetchHooks Function()
+        > {
+  $$LocalTranscriptsTableTableManager(_$ChatDb db, $LocalTranscriptsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalTranscriptsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalTranscriptsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalTranscriptsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> messageId = const Value.absent(),
+                Value<String> chatId = const Value.absent(),
+                Value<String> body = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalTranscriptsCompanion(
+                messageId: messageId,
+                chatId: chatId,
+                body: body,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String messageId,
+                required String chatId,
+                required String body,
+                required int createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalTranscriptsCompanion.insert(
+                messageId: messageId,
+                chatId: chatId,
+                body: body,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LocalTranscriptsTable, LocalTranscriptRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$ChatDb,
+                    $LocalTranscriptsTable,
+                    LocalTranscriptRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalTranscriptsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ChatDb,
+      $LocalTranscriptsTable,
+      LocalTranscriptRow,
+      $$LocalTranscriptsTableFilterComposer,
+      $$LocalTranscriptsTableOrderingComposer,
+      $$LocalTranscriptsTableAnnotationComposer,
+      $$LocalTranscriptsTableCreateCompanionBuilder,
+      $$LocalTranscriptsTableUpdateCompanionBuilder,
+      (
+        LocalTranscriptRow,
+        BaseReferences<_$ChatDb, $LocalTranscriptsTable, LocalTranscriptRow>,
+      ),
+      LocalTranscriptRow,
+      PrefetchHooks Function()
+    >;
 typedef $$MetaTableCreateCompanionBuilder = MetaCompanion Function({
   required String key,
   required String value,
@@ -10106,5 +10619,7 @@ class $ChatDbManager {
       $$LocalScheduledTableTableManager(_db, _db.localScheduled);
   $$LocalRemindersTableTableManager get localReminders =>
       $$LocalRemindersTableTableManager(_db, _db.localReminders);
+  $$LocalTranscriptsTableTableManager get localTranscripts =>
+      $$LocalTranscriptsTableTableManager(_db, _db.localTranscripts);
   $$MetaTableTableManager get meta => $$MetaTableTableManager(_db, _db.meta);
 }

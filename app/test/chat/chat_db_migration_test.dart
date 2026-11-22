@@ -38,6 +38,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -82,6 +83,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -124,6 +126,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -165,6 +168,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -204,6 +208,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -242,6 +247,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -280,6 +286,7 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -339,6 +346,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -393,6 +401,7 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -433,6 +442,7 @@ void main() {
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -462,6 +472,7 @@ void main() {
       raw
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute('DROP INDEX local_messages_expires_at')
         ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
@@ -501,6 +512,7 @@ void main() {
       raw
         ..execute('DROP TABLE local_scheduled')
         ..execute('DROP TABLE local_reminders')
+        ..execute('DROP TABLE local_transcripts')
         ..execute('ALTER TABLE local_messages DROP COLUMN scheduled_for')
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
@@ -530,6 +542,28 @@ void main() {
     await db.deleteChat('C');
     expect(await db.allScheduled(), isEmpty, reason: 'a chat that goes takes its scheduled messages');
     expect(await db.allReminders(), isEmpty, reason: 'and its reminders');
+  });
+
+  test('schema 13 to 14: a table for transcripts made on this device; rows kept', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('DROP TABLE local_transcripts')
+        ..execute("INSERT INTO local_messages (id, chat_id, seq, sender_user_id, sender_device_id, kind, body, created_at, state) "
+            "VALUES ('M', 'C', 4, 'B', 'D', 'voice', '{}', 5, 'sent')")
+        ..execute('PRAGMA user_version = 13');
+    }));
+    addTearDown(db.close);
+    expect(await db.messageById('M'), isNotNull);
+    expect(await db.localTranscriptOf('M'), isNull);
+    await db.putLocalTranscript('C', 'M', 'hello');
+    expect(await db.watchLocalTranscripts('C').first, {'M': 'hello'});
   });
 
   test('family pins: replaced as a whole, families absent from the map are dropped', () async {

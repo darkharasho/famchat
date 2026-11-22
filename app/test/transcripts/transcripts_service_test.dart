@@ -34,7 +34,7 @@ RecordedVoice _clip(int seconds) =>
     RecordedVoice(bytes: Uint8List.fromList([1, 2, 3]), duration: Duration(seconds: seconds), waveform: const [1]);
 
 VoiceBody _voice() => VoiceBody(
-    mediaKey: 'mk', key: Uint8List(32), sha256: Uint8List(32), durationMs: 1000, waveform: const [1], bytes: 3);
+    mediaKey: '01JABCDEFGHJKMNPQRSTVWXYZ0', key: Uint8List(32), sha256: Uint8List(32), durationMs: 1000, waveform: const [1], bytes: 3);
 
 void main() {
   late FakeChatBackend backend;
@@ -62,8 +62,13 @@ void main() {
     await tmp.delete(recursive: true);
   });
 
-  TranscriptsService service(Transcriber t, {bool on = true, ModelState model = const ModelReady(_paths)}) =>
-      TranscriptsService(sync: aliceSync, transcriber: t, model: () async => model, enabled: () async => on, tempDir: () async => tmp);
+  TranscriptsService service(Transcriber t, {bool on = true, ModelState model = const ModelReady(_paths)}) => TranscriptsService(
+      sync: aliceSync,
+      transcriber: t,
+      model: () async => model,
+      enabled: () async => on,
+      tempDir: () async => tmp,
+      loadClip: (_) async => Uint8List.fromList([1, 2, 3]));
 
   Future<List<MessageRow>> transcripts(ChatDb db) async =>
       [for (final r in await db.watchMessages(chatId).first) if (r.kind == 'transcript') r];
@@ -111,6 +116,45 @@ void main() {
     final fake = _FakeTranscriber('hello', before: () => aliceSync.deleteMessage(chatId, id));
     await service(fake).afterVoiceSent(chatId, id, _clip(5), scheduled: false);
     expect(await transcripts(alice.db), isEmpty);
+  });
+
+  group('Transcribe from the menu', () {
+    var n = 0;
+    // A row as if it came from Bob (sent and received), straight into Alice's store.
+    Future<MessageRow> fromBob(String kind, {String? target}) async {
+      final row = MessageRow(
+          id: 'bob-${n++}', chatId: chatId, seq: 100 + n, senderUserId: bob.userId, senderDeviceId: 'bd', kind: kind,
+          body: kind == 'voice' ? jsonEncode(_voice().toJson()) : '{}', targetId: target, envelope: null,
+          createdAt: n, state: 'sent');
+      await alice.db.insertMessageIfAbsent(row);
+      return row;
+    }
+
+    test("others' clips are kept here; my clip is sent", () async {
+      final bobs = await fromBob('voice');
+      final s = service(_FakeTranscriber('from bob'));
+      expect(await s.transcribeMessage(bobs), TranscribeOutcome.done);
+      expect(await alice.db.localTranscriptOf(bobs.id), 'from bob');
+      expect(await transcripts(alice.db), isEmpty, reason: "nothing is sent for someone else's clip");
+
+      final mine = await aliceSync.enqueueMessage(chatId, _voice());
+      expect(await service(_FakeTranscriber('from me')).transcribeMessage((await alice.db.messageById(mine))!), TranscribeOutcome.done);
+      expect((await transcripts(alice.db)).single.targetId, mine);
+      expect(await alice.db.localTranscriptOf(mine), isNull);
+    });
+
+    test('a clip deleted while transcribing stores nothing', () async {
+      final bobs = await fromBob('voice');
+      final fake = _FakeTranscriber('x', before: () => fromBob('delete', target: bobs.id));
+      expect(await service(fake).transcribeMessage(bobs), TranscribeOutcome.gone);
+      expect(await alice.db.localTranscriptOf(bobs.id), isNull);
+    });
+
+    test('no speech, no transcript', () async {
+      final mine = await aliceSync.enqueueMessage(chatId, _voice());
+      expect(await service(_FakeTranscriber(' ')).transcribeMessage((await alice.db.messageById(mine))!), TranscribeOutcome.noSpeech);
+      expect(await transcripts(alice.db), isEmpty);
+    });
   });
 
   test('marks the clip as transcribing while it runs', () async {

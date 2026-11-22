@@ -17,11 +17,17 @@ final clip = VoiceBody(
   bytes: 100,
 );
 
-Future<void> pump(WidgetTester tester, {String? transcript}) => tester.pumpWidget(ProviderScope(
+Future<void> pump(WidgetTester tester, {String? transcript, bool local = false, bool transcribing = false}) =>
+    tester.pumpWidget(ProviderScope(
       overrides: [mediaServiceProvider.overrideWithValue(null)],
       child: MaterialApp(
         theme: buildTheme(Brightness.light),
-        home: Scaffold(body: SingleChildScrollView(child: VoiceBubble(body: clip, messageId: 'v', transcript: transcript))),
+        home: Scaffold(body: SingleChildScrollView(child: VoiceBubble(
+                body: clip,
+                messageId: 'v',
+                transcript: transcript,
+                localTranscript: local,
+                transcribing: transcribing))),
       ),
     ));
 
@@ -48,5 +54,19 @@ void main() {
   testWidgets('no transcript, no text', (tester) async {
     await pump(tester);
     expect(find.byKey(const Key('voice-transcript')), findsNothing);
+  });
+
+  testWidgets('a local transcript says it was made on this device', (tester) async {
+    await pump(tester, transcript: 'hello', local: true);
+    expect(find.text('Transcribed on this device'), findsOneWidget);
+    await pump(tester, transcript: 'hello');
+    expect(find.text('Transcribed on this device'), findsNothing);
+  });
+
+  testWidgets('shows Transcribing… while one is being made', (tester) async {
+    await pump(tester, transcribing: true);
+    expect(find.text('Transcribing…'), findsOneWidget);
+    await pump(tester, transcript: 'done', transcribing: true);
+    expect(find.text('Transcribing…'), findsNothing);
   });
 }

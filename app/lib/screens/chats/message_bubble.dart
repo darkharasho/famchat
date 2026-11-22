@@ -59,7 +59,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, pin, star, remind, forward, save, copy, readBy, edit, delete }
+enum MessageAction { reply, pin, star, remind, forward, save, transcribe, copy, readBy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -98,6 +98,9 @@ class MessageBubble extends StatefulWidget {
     this.mentionNames = const [],
     this.linkPreview,
     this.transcript,
+    this.localTranscript = false,
+    this.transcribing = false,
+    this.onTranscribe,
     this.edited = false,
     this.deleted = false,
     this.quote,
@@ -188,6 +191,12 @@ class MessageBubble extends StatefulWidget {
   /// A voice message's transcript, shown under the clip.
   final String? transcript;
 
+  /// [transcript] was made on this device; [transcribing]: one is being made now.
+  final bool localTranscript, transcribing;
+
+  /// Voice messages without a transcript: "Transcribe" (on this device).
+  final VoidCallback? onTranscribe;
+
   /// Shows "edited" in the bubble; [deleted] shows the message as deleted.
   final bool edited, deleted;
 
@@ -231,6 +240,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       widget.onReply != null ||
       widget.onForward != null ||
       widget.onSave != null ||
+      widget.onTranscribe != null ||
       widget.onEdit != null ||
       widget.onDelete != null ||
       _copyText != null;
@@ -265,6 +275,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (widget.onRemind != null) MessageAction.remind,
         if (widget.onForward != null) MessageAction.forward,
         if (widget.onSave != null) MessageAction.save,
+        if (widget.onTranscribe != null) MessageAction.transcribe,
         if (_copyText != null) MessageAction.copy,
         if (widget.onReadBy != null) MessageAction.readBy,
         if (widget.onEdit != null) MessageAction.edit,
@@ -282,6 +293,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             : (Icons.notification_add_outlined, 'Remind me'),
         MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.save => (Icons.download_rounded, hoverReactions ? 'Save as…' : 'Save'),
+        MessageAction.transcribe => (Icons.subtitles_outlined, 'Transcribe'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
         MessageAction.readBy => (Icons.done_all_rounded, 'Read by'),
         MessageAction.edit => (Icons.edit_outlined, 'Edit'),
@@ -340,6 +352,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onForward?.call();
       case MessageAction.save:
         widget.onSave?.call();
+      case MessageAction.transcribe:
+        widget.onTranscribe?.call();
       case MessageAction.copy:
         final text = _copyText;
         if (text == null) return;
@@ -574,7 +588,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       ]);
     } else if (voice != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-        VoiceBubble(body: voice, messageId: m.id, mine: mine, transcript: widget.transcript),
+        VoiceBubble(
+            body: voice,
+            messageId: m.id,
+            mine: mine,
+            transcript: widget.transcript,
+            localTranscript: widget.localTranscript,
+            transcribing: widget.transcribing),
         if (showEdited) edited,
       ]);
     } else {
