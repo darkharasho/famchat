@@ -53,13 +53,17 @@ class VoiceTranscriptsGroup extends ConsumerWidget {
           key: const Key('transcripts-cancel'),
           leading: const TileIcon(Icons.close_rounded),
           title: const Text('Cancel download'),
-          onTap: notifier.cancel,
+          // Without the model nothing gets transcribed, so the setting goes off with it.
+          onTap: () async {
+            notifier.cancel();
+            await ref.read(voiceTranscriptsProvider.notifier).set(false);
+          },
         ),
-      if (model is ModelFailed)
+      if (model is ModelFailed || (on && model is ModelAbsent))
         ListTile(
           key: const Key('transcripts-retry'),
-          leading: const TileIcon(Icons.refresh_rounded),
-          title: const Text('Try again'),
+          leading: TileIcon(model is ModelFailed ? Icons.refresh_rounded : Icons.download_rounded),
+          title: Text(model is ModelFailed ? 'Try again' : 'Download the speech model'),
           onTap: notifier.download,
         ),
       if (model is ModelReady)

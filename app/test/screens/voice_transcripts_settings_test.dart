@@ -69,6 +69,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.cancels, 1);
     expect(find.byKey(const Key('transcripts-progress')), findsNothing);
+    // No model, so nothing would be transcribed: the setting goes off.
+    expect(await SharedPreferencesAsync().getBool(voiceTranscriptsPrefKey), isFalse);
+  });
+
+  testWidgets('on without the model offers the download', (tester) async {
+    await SharedPreferencesAsync().setBool(voiceTranscriptsPrefKey, true);
+    final fake = await pump(tester, const ModelAbsent());
+    expect(find.text('Download the speech model'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('transcripts-retry')));
+    await tester.pumpAndSettle();
+    expect(fake.downloads, 1);
   });
 
   testWidgets('remove model only when ready, and asks first', (tester) async {

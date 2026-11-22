@@ -7,11 +7,15 @@ import 'dart:typed_data';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
+import '../audio_init.dart' show disposeWithin;
+
 int _seq = 0;
 
-/// [m4aPath]'s audio as 16 kHz mono float samples. Throws on a file libmpv can't play.
+/// [m4aPath]'s audio as 16 kHz mono float samples. Throws on a file libmpv can't play, or when it
+/// takes longer than [timeout]. The samples are written beside [m4aPath] (in the app's own cache,
+/// never a shared /tmp) and deleted after.
 Future<Float32List> decodeWithMpv(String m4aPath, {Duration timeout = const Duration(seconds: 60)}) async {
-  final out = File(p.join(Directory.systemTemp.path, 'famchat-pcm-$pid-${_seq++}.f32'));
+  final out = File(p.join(p.dirname(m4aPath), '${p.basenameWithoutExtension(m4aPath)}-${_seq++}.f32'));
   final player = Player();
   var disposed = false;
   try {
@@ -36,18 +40,21 @@ Future<Float32List> decodeWithMpv(String m4aPath, {Duration timeout = const Dura
     });
     final done = player.stream.completed.firstWhere((c) => c);
     try {
-      await player.open(Media(m4aPath));
-      await Future.any([done, failed.future]).timeout(timeout);
+      await Future(() async {
+        await player.open(Media(m4aPath));
+        await Future.any([done, failed.future]);
+      }).timeout(timeout);
     } finally {
       await errors.cancel();
     }
-    // Disposing closes the output file, so it's complete to read.
+    // Disposing closes the output file, so it's complete to read. libmpv has hung in dispose: a
+    // leaked player beats a transcriber stuck for good.
     disposed = true;
-    await player.dispose();
+    await disposeWithin(player.dispose, timeout: const Duration(seconds: 5));
     final bytes = await out.readAsBytes();
     return Float32List.view(Uint8List.fromList(bytes).buffer, 0, bytes.length ~/ 4);
   } finally {
-    if (!disposed) await player.dispose();
+    if (!disposed) await disposeWithin(player.dispose, timeout: const Duration(seconds: 5));
     if (await out.exists()) await out.delete();
   }
 }

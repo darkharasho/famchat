@@ -122,9 +122,13 @@ class TranscriptModel extends Notifier<ModelState> {
       final file = File(p.join(dir.path, f.name));
       if (!await file.exists() || await file.length() != f.size) return null;
     }
+    // The VAD ships with the app; it's copied out (sherpa reads files), whole or not at all.
     final vad = File(p.join(dir.path, 'silero_vad.onnx'));
-    if (!await vad.exists() || await vad.length() == 0) {
-      await vad.writeAsBytes(await ref.read(vadBytesProvider)(), flush: true);
+    final vadBytes = await ref.read(vadBytesProvider)();
+    if (!await vad.exists() || await vad.length() != vadBytes.length) {
+      final tmp = File('${vad.path}.tmp');
+      await tmp.writeAsBytes(vadBytes, flush: true);
+      await tmp.rename(vad.path);
     }
     String path(String suffix) => p.join(dir.path, files.firstWhere((f) => f.name.endsWith(suffix)).name);
     return ModelPaths(encoder: path('encoder.int8.onnx'), decoder: path('decoder.int8.onnx'), tokens: path('tokens.txt'), vad: vad.path);
@@ -137,34 +141,46 @@ class TranscriptModel extends Notifier<ModelState> {
     final files = ref.read(modelFilesProvider);
     final total = files.fold<int>(0, (s, f) => s + f.size);
     _set(run, ModelDownloading(0, total));
-    final dir = await _dir;
-    await dir.create(recursive: true);
     var received = 0;
+    File? part;
     try {
+      final dir = await _dir;
+      await dir.create(recursive: true);
+      // Leftovers of a run the app was killed in (a cancelled run deletes its own).
+      await for (final e in dir.list()) {
+        if (e is File && e.path.endsWith('.part') && !e.path.endsWith('.$run.part')) {
+          try {
+            await e.delete();
+          } on FileSystemException {
+            // Another run's, just renamed or deleted.
+          }
+        }
+      }
       for (final f in files) {
         final dest = File(p.join(dir.path, f.name));
         if (await dest.exists() && await dest.length() == f.size) {
           received += f.size;
           continue;
         }
-        final part = File('${dest.path}.part');
+        part = File('${dest.path}.$run.part');
         final ok = await _fetch(f, part, run, (n) {
           received += n;
           _set(run, ModelDownloading(received, total));
         });
         if (!ok) {
-          if (await part.exists()) await part.delete();
+          await _deletePart(part);
           _set(run, const ModelFailed('The download was damaged. Try again.'));
           return;
         }
         await part.rename(dest.path);
+        part = null;
       }
       final paths = await _readyPaths();
       _set(run, paths == null ? const ModelFailed('The download was damaged. Try again.') : ModelReady(paths));
     } on _Cancelled {
-      await _deleteParts(dir);
+      await _deletePart(part);
     } catch (_) {
-      await _deleteParts(dir);
+      await _deletePart(part);
       _set(run, const ModelFailed("Couldn't download the speech model. Check your connection and try again."));
     }
   }
@@ -172,8 +188,12 @@ class TranscriptModel extends Notifier<ModelState> {
   /// Streams [f] into [part]; false when its size or hash is wrong.
   Future<bool> _fetch(ModelFile f, File part, int run, void Function(int) progress) async {
     final res = await ref.read(modelHttpClientProvider).send(http.Request('GET', Uri.parse('${ref.read(modelBaseUrlProvider)}/${f.name}')));
-    if (run != _run) throw const _Cancelled();
-    if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
+    if (run != _run || res.statusCode != 200) {
+      // Close the connection: nothing will read this body.
+      unawaited(res.stream.listen(null).cancel());
+      if (run != _run) throw const _Cancelled();
+      throw HttpException('HTTP ${res.statusCode}');
+    }
     final sink = part.openWrite();
     final digest = _DigestSink();
     final hasher = sha256.startChunkedConversion(digest);
@@ -202,11 +222,9 @@ class TranscriptModel extends Notifier<ModelState> {
     return size == f.size && digest.value.toString() == f.sha256;
   }
 
-  Future<void> _deleteParts(Directory dir) async {
+  Future<void> _deletePart(File? part) async {
     try {
-      await for (final e in dir.list()) {
-        if (e is File && e.path.endsWith('.part')) await e.delete();
-      }
+      if (part != null && await part.exists()) await part.delete();
     } on FileSystemException {
       // Already gone (removed meanwhile).
     }

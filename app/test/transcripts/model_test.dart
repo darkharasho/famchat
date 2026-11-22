@@ -111,4 +111,47 @@ void main() {
     expect(c.read(transcriptModelProvider), isA<ModelAbsent>());
     expect(await dir.exists(), isFalse);
   });
+
+  test('a truncated VAD copy is written again, whole', () async {
+    final c = container(serving(_bodies));
+    await settled(c);
+    await c.read(transcriptModelProvider.notifier).download();
+    final vad = File(p.join(dir.path, 'silero_vad.onnx'));
+    await vad.writeAsBytes([1]);
+    expect(await settled(c), isA<ModelReady>());
+    expect(await vad.readAsBytes(), [1, 2, 3]);
+  });
+
+  test("a killed run's partial file is cleared by the next download", () async {
+    await File(p.join(dir.path, 'base-tokens.txt.7.part')).writeAsBytes([9, 9]);
+    final c = container(serving(_bodies));
+    await settled(c);
+    await c.read(transcriptModelProvider.notifier).download();
+    expect(c.read(transcriptModelProvider), isA<ModelReady>());
+    expect(dir.listSync().where((e) => e.path.endsWith('.part')), isEmpty);
+  });
+
+  test('cancel, then download again at once, succeeds', () async {
+    final hang = StreamController<List<int>>();
+    var first = true;
+    final ok = serving(_bodies);
+    final c = container(MockClient.streaming((req, body) async {
+      if (first) {
+        first = false;
+        return http.StreamedResponse(hang.stream, 200);
+      }
+      return ok.send(http.Request(req.method, req.url));
+    }));
+    await settled(c);
+    final n = c.read(transcriptModelProvider.notifier);
+    final one = n.download();
+    await pumpEventQueue();
+    hang.add([1, 2, 3]);
+    await pumpEventQueue();
+    n.cancel();
+    final two = n.download();
+    await Future.wait([one, two]).timeout(const Duration(seconds: 5));
+    expect(c.read(transcriptModelProvider), isA<ModelReady>());
+    expect(dir.listSync().where((e) => e.path.endsWith('.part')), isEmpty);
+  });
 }

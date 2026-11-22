@@ -50,7 +50,13 @@ Future<String> forwardMessage({
       if (id == null) throw const ForwardException('media expired');
       // A clip's shared transcript goes with it, as the forwarder's own (only the sender's counts).
       final transcript = changes.transcriptOf(message);
-      if (body is VoiceBody && transcript != null) await sync.sendTranscript(toChatId, id, transcript);
+      // The clip went either way: a transcript that fails isn't a failed forward (a retry would
+      // send the clip twice).
+      if (body is VoiceBody && transcript != null) {
+        try {
+          await sync.sendTranscript(toChatId, id, transcript);
+        } catch (_) {}
+      }
       return id;
     default:
       throw const ForwardException('not forwardable');

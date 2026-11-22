@@ -74,7 +74,7 @@ class TranscriptsService {
   /// downloaded). My own clip's transcript is sent to the chat, as the sender's; anyone else's is
   /// kept on this device only.
   Future<TranscribeOutcome> transcribeMessage(MessageRow m) async {
-    if (m.kind != 'voice' || m.body == null || transcribing.value.contains(m.id)) return TranscribeOutcome.failed;
+    if (_disposed || m.kind != 'voice' || m.body == null || transcribing.value.contains(m.id)) return TranscribeOutcome.failed;
     try {
       final model = await this.model();
       if (model is! ModelReady) return TranscribeOutcome.failed;
@@ -93,10 +93,8 @@ class TranscriptsService {
       if (m.senderUserId == sync.me.userId) {
         return await sync.sendTranscript(m.chatId, m.id, text, lang: r.lang) == null ? TranscribeOutcome.gone : TranscribeOutcome.done;
       }
-      var local = text;
-      if (local.length > maxTranscriptLength) local = local.substring(0, maxTranscriptLength);
-      await sync.db.putLocalTranscript(m.chatId, m.id, local);
-      return TranscribeOutcome.done;
+      // Kept only if the message is still here (the check and the write are one transaction).
+      return await sync.db.putLocalTranscript(m.chatId, m.id, clipTranscript(text)) ? TranscribeOutcome.done : TranscribeOutcome.gone;
     } catch (e) {
       debugPrint('transcribe failed: $e');
       return TranscribeOutcome.failed;
@@ -104,21 +102,45 @@ class TranscriptsService {
   }
 
   Future<TranscriptResult> _transcribe(String messageId, Uint8List clip, ModelPaths paths) async {
-    transcribing.value = {...transcribing.value, messageId};
-    final dir = Directory(p.join((await tempDir()).path, 'voice-transcribe'));
+    _setTranscribing({...transcribing.value, messageId});
+    final dir = await _workDir();
     final file = File(p.join(dir.path, '${DateTime.now().microsecondsSinceEpoch}-${_seq++}.m4a'));
     try {
       await dir.create(recursive: true);
       await file.writeAsBytes(clip, flush: true);
       return await transcriber.transcribe(file.path, paths);
     } finally {
-      transcribing.value = {...transcribing.value}..remove(messageId);
+      _setTranscribing({...transcribing.value}..remove(messageId));
       if (await file.exists()) await file.delete();
     }
   }
 
-  void dispose() => transcribing.dispose();
+  /// Where clips wait to be transcribed (with the decoder's output beside them). Its leftovers
+  /// (from a run the app was killed in) are deleted the first time it's used.
+  Future<Directory> _workDir() => _work ??= () async {
+        final dir = Directory(p.join((await tempDir()).path, 'transcribe'));
+        try {
+          if (await dir.exists()) await dir.delete(recursive: true);
+        } catch (_) {}
+        await dir.create(recursive: true);
+        return dir;
+      }();
+  Future<Directory>? _work;
+
+  bool _disposed = false;
+  void _setTranscribing(Set<String> ids) {
+    if (!_disposed) transcribing.value = ids;
+  }
+
+  void dispose() {
+    _disposed = true;
+    transcribing.dispose();
+  }
 }
+
+/// The app's own cache directory for voice clips (per user, never a shared /tmp), as
+/// lib/voice/voice_io_native.dart uses.
+Future<Directory> _voiceCacheDir() async => Directory(p.join((await getApplicationCacheDirectory()).path, 'voice'));
 
 final transcriptsServiceProvider = Provider<TranscriptsService?>((ref) {
   final sync = ref.watch(chatSyncProvider);
@@ -131,7 +153,7 @@ final transcriptsServiceProvider = Provider<TranscriptsService?>((ref) {
       return ref.read(transcriptModelProvider);
     },
     enabled: () => ref.read(voiceTranscriptsProvider.future),
-    tempDir: getTemporaryDirectory,
+    tempDir: _voiceCacheDir,
     loadClip: (v) async => ref.read(mediaServiceProvider)?.load(v.ref),
   );
   ref.onDispose(s.dispose);

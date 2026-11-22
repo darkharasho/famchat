@@ -11,8 +11,10 @@ Future<bool> ensureTranscriptModel(BuildContext context, WidgetRef ref) async {
   await ref.read(transcriptModelProvider.notifier).refresh();
   if (ref.read(transcriptModelProvider) is ModelReady) return true;
   if (!context.mounted) return false;
+  // Already downloading (from Settings): just wait for it.
+  final already = ref.read(transcriptModelProvider) is ModelDownloading;
   final mb = (modelDownloadBytes / 1e6).round();
-  final yes = await showDialog<bool>(
+  final yes = already || await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Download the speech model?'),
@@ -22,8 +24,9 @@ Future<bool> ensureTranscriptModel(BuildContext context, WidgetRef ref) async {
         TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Download')),
       ],
     ),
-  );
-  if (yes != true || !context.mounted) return false;
+      ) ==
+      true;
+  if (!yes || !context.mounted) return false;
   final n = ref.read(transcriptModelProvider.notifier);
   if (ref.read(transcriptModelProvider) is! ModelDownloading) {
     // ignore: discarded_futures

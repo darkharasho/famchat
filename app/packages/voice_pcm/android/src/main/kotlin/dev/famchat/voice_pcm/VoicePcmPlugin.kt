@@ -1,4 +1,5 @@
-// Decodes a voice clip to mono Float32 at its own sample rate with MediaExtractor and MediaCodec.
+// Decodes a voice clip to 16 kHz mono Float32 with MediaExtractor and MediaCodec, resampling as it
+// goes (a 44.1 kHz clip at its own rate would need almost three times the memory).
 package dev.famchat.voice_pcm
 
 import android.media.AudioFormat
@@ -25,6 +26,7 @@ class VoicePcmPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.setMethodCallHandler(null)
         channel = null
+        worker.shutdown()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -37,8 +39,9 @@ class VoicePcmPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             try {
                 val (samples, rate) = decode(path)
                 main.post { result.success(mapOf("samples" to samples, "sampleRate" to rate)) }
-            } catch (e: Exception) {
-                main.post { result.error("decode_failed", e.message, null) }
+            } catch (e: Throwable) {
+                // Throwable: a clip too big for memory fails the transcript, not the app.
+                main.post { result.error("decode_failed", e.toString(), null) }
             }
         }
     }
@@ -59,8 +62,23 @@ class VoicePcmPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(format, null, null, 0)
             codec.start()
-            var out = FloatArray(1 shl 16)
+            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+            var out = FloatArray((durationUs * OUT_RATE / 1_000_000L).toInt().coerceIn(0, 1 shl 26) + 4096)
             var n = 0
+            // Linear resampling, streamed: [pos] is the next output sample's time in input samples.
+            var pos = 0.0
+            var k = -1L
+            var prev = 0f
+            fun push(cur: Float) {
+                k++
+                while (pos <= k) {
+                    val v = if (k == 0L) cur else prev + (cur - prev) * (pos - (k - 1)).toFloat()
+                    if (n == out.size) out = out.copyOf(out.size + out.size / 2 + 4096)
+                    out[n++] = v
+                    pos += rate.toDouble() / OUT_RATE
+                }
+                prev = cur
+            }
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             while (true) {
@@ -89,20 +107,26 @@ class VoicePcmPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     buf.position(info.offset)
                     buf.limit(info.offset + info.size)
                     val ordered = buf.order(ByteOrder.nativeOrder())
-                    val floats = if (isFloat) ordered.asFloatBuffer() else null
-                    val shorts = if (isFloat) null else ordered.asShortBuffer()
-                    val frames = (floats?.remaining() ?: shorts!!.remaining()) / channels
-                    if (n + frames > out.size) out = out.copyOf(maxOf(out.size * 2, n + frames))
-                    for (f in 0 until frames) {
-                        var sum = 0f
-                        for (c in 0 until channels) sum += floats?.get() ?: (shorts!!.get() / 32768f)
-                        out[n++] = sum / channels
+                    if (isFloat) {
+                        val floats = ordered.asFloatBuffer()
+                        for (f in 0 until floats.remaining() / channels) {
+                            var sum = 0f
+                            for (c in 0 until channels) sum += floats.get()
+                            push(sum / channels)
+                        }
+                    } else {
+                        val shorts = ordered.asShortBuffer()
+                        for (f in 0 until shorts.remaining() / channels) {
+                            var sum = 0f
+                            for (c in 0 until channels) sum += shorts.get() / 32768f
+                            push(sum / channels)
+                        }
                     }
                     codec.releaseOutputBuffer(o, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
                 }
             }
-            return Pair(out.copyOf(n), rate)
+            return Pair(out.copyOf(n), OUT_RATE)
         } finally {
             codec?.let {
                 try { it.stop() } catch (_: Exception) {}
@@ -110,5 +134,9 @@ class VoicePcmPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             extractor.release()
         }
+    }
+
+    private companion object {
+        const val OUT_RATE = 16000
     }
 }

@@ -726,9 +726,28 @@ class ChatDb extends _$ChatDb {
 
   // --- transcripts made on this device ---
 
-  Future<void> putLocalTranscript(String chatId, String messageId, String text) =>
-      into(localTranscripts).insertOnConflictUpdate(LocalTranscriptRow(
-          messageId: messageId, chatId: chatId, body: text, createdAt: DateTime.now().millisecondsSinceEpoch));
+  /// Keeps [text] as voice message [messageId]'s transcript on this device, if the message is still
+  /// here: not purged, expired or deleted by its sender. The check and the write are one
+  /// transaction, so a purge can't slip between them and leave the text behind. Returns whether it
+  /// was kept.
+  Future<bool> putLocalTranscript(String chatId, String messageId, String text) => transaction(() async {
+        final m = await messageById(messageId);
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (m == null || m.chatId != chatId || m.kind != 'voice') return false;
+        if (m.expiresAt != null && m.expiresAt! <= now) return false;
+        final deleted = await (select(localMessages)
+              ..where((r) =>
+                  r.targetId.equals(messageId) &
+                  r.kind.equals('delete') &
+                  r.senderUserId.equals(m.senderUserId) &
+                  r.state.equals('failed').not())
+              ..limit(1))
+            .getSingleOrNull();
+        if (deleted != null) return false;
+        await into(localTranscripts).insertOnConflictUpdate(
+            LocalTranscriptRow(messageId: messageId, chatId: chatId, body: text, createdAt: now));
+        return true;
+      });
 
   /// [chatId]'s local transcripts, by message id.
   Stream<Map<String, String>> watchLocalTranscripts(String chatId) =>

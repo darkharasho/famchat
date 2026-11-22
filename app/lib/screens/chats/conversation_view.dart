@@ -96,6 +96,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
   /// Where a recording goes, fixed when it starts: the clip still sends if the user leaves the chat
   /// while the recorder is finishing (when `ref` can no longer be used).
   MediaService? _voiceTarget;
+  TranscriptsService? _transcriptsTarget;
   bool _empty = true;
   RecordingStatus _recStatus = RecordingStatus.idle;
 
@@ -724,6 +725,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (_emojiPopover.isShowing) _emojiPopover.hide();
     unawaited(ref.read(voicePlaybackProvider.notifier).stop());
     _voiceTarget = ref.read(mediaServiceProvider);
+    _transcriptsTarget = ref.read(transcriptsServiceProvider);
     await _recording.start();
     switch (_recording.status) {
       case RecordingStatus.denied:
@@ -746,6 +748,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
   Future<void> _sendVoice(RecordedVoice clip) async {
     final media = _voiceTarget;
+    final transcripts = _transcriptsTarget;
     if (media == null) {
       _snack("Couldn't send that voice message.");
       return;
@@ -764,7 +767,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       }
       final id = await media.sendVoice(widget.chatId, clip);
       // The transcript follows the clip; it never holds it up.
-      unawaited(ref.read(transcriptsServiceProvider)?.afterVoiceSent(widget.chatId, id, clip, scheduled: false));
+      unawaited(transcripts?.afterVoiceSent(widget.chatId, id, clip, scheduled: false));
     } on ArgumentError {
       _snack("That voice message can't be sent.");
     } catch (_) {
