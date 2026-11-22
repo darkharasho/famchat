@@ -19,6 +19,7 @@ MessageRow msg(String id, String from, DateTime at) => MessageRow(
 String describe(List<TimelineEntry> t) => t
     .map((e) => switch (e) {
           DayEntry(:final day) => '[${day.month}/${day.day}]',
+          UnreadEntry() => '|new|',
           MessageEntry(:final message, :final firstInGroup, :final lastInGroup) =>
             '${message.id}${firstInGroup ? '<' : ''}${lastInGroup ? '>' : ''}',
         })
@@ -27,6 +28,17 @@ String describe(List<TimelineEntry> t) => t
 void main() {
   group('buildTimeline', () {
     test('empty in, empty out', () => expect(buildTimeline(const []), isEmpty));
+
+    test('the "New messages" line goes above its message, after the day, and splits the run', () {
+      final t = buildTimeline([
+        msg('a', 'u1', DateTime(2026, 3, 3, 9, 0)),
+        msg('b', 'u1', DateTime(2026, 3, 3, 9, 1)),
+        msg('c', 'u1', DateTime(2026, 3, 3, 9, 2)),
+        msg('d', 'u1', DateTime(2026, 3, 4, 9, 0)),
+      ], unreadFrom: 'b');
+      expect(describe(t), '[3/3] a<> |new| b< c> [3/4] d<>');
+      expect(describe(buildTimeline([msg('d', 'u1', DateTime(2026, 3, 4, 9, 0))], unreadFrom: 'd')), '[3/4] |new| d<>');
+    });
 
     test('a lone message starts a day and is a group of one', () {
       expect(describe(buildTimeline([msg('a', 'u1', DateTime(2026, 3, 3, 9))])), '[3/3] a<>');

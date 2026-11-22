@@ -146,7 +146,13 @@ describe("presence", () => {
     expect(hello.online).toEqual(expect.arrayContaining([a.userId, b.userId]));
     expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: true });
     cb.ws.close(1000, "bye");
-    expect(await ca.next("presence")).toEqual({ type: "presence", userId: b.userId, online: false });
+    const off = await ca.next("presence");
+    expect(off).toEqual({ type: "presence", userId: b.userId, online: false, lastSeenAt: expect.any(Number) });
+    // The directory has it too, once the hub saved it.
+    await expect.poll(async () => {
+      const dir = await (await api(a.accessToken, "GET", "/users")).json<{ users: { id: string; lastSeenAt: number | null }[] }>();
+      return dir.users.find((u) => u.id === b.userId)?.lastSeenAt;
+    }).toBe(off.lastSeenAt);
   });
 
   it("a second device of an online user does not repeat presence", async () => {
@@ -617,7 +623,7 @@ describe("send", () => {
     await ca.next("ack");
     expect(await cc.closed).toBe(4002);
     expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: true }); // c joining
-    expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: false });
+    expect(await cb.next("presence")).toEqual({ type: "presence", userId: c.userId, online: false, lastSeenAt: expect.any(Number) });
     await cb.next("msg");
     for (let i = 0; i < 50 && jobs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
     expect(jobs).toEqual([{ chatId: chat.id, senderUserId: a.userId, messageId: id, userIds: [c.userId], deviceIds: [c.deviceId], preview: previewOf(a, envelope()) }]);

@@ -297,6 +297,7 @@ void main() {
       createdBy: 'A',
       currentEpoch: 1,
       epochReady: true,
+      markedUnread: false,
       lastSeq: 1,
       createdAt: 0,
       myLastReadSeq: 0,

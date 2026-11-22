@@ -85,9 +85,24 @@ void main() {
     await tester.enterText(find.byKey(const Key('composer')), '@');
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(composerText(tester), '@Carol ', reason: 'members by name: Bob, then Carol');
+    expect(composerText(tester), '@Carol ', reason: '@everyone, then members by name: Bob, then Carol');
+  });
+
+  chatTestWidgets('@everyone mentions every other member', (tester) async {
+    await open(tester, groupId);
+    await tester.enterText(find.byKey(const Key('composer')), 'dinner @ev');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('mention-*everyone')));
+    await tester.pump();
+    expect(composerText(tester), 'dinner @everyone ');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    final body = Plaintext.decode(utf8.encode(sent.body!)) as TextBody;
+    expect(body.mentions, unorderedEquals([bob.userId, carol.userId]));
   });
 
   chatTestWidgets('no suggestions in a direct chat, and nothing is mentioned there', (tester) async {

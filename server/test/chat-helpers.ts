@@ -15,6 +15,10 @@ export type ChatOut = {
   createdAt: number;
   familyId: number | null;
   mutedUntil: number | null;
+  pinnedAt: number | null;
+  archivedAt: number | null;
+  markedUnread: boolean;
+  avatarKey: string | null;
   members: { userId: string; joinedSeq: number; lastReadSeq: number }[];
 };
 

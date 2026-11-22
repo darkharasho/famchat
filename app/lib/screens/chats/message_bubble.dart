@@ -55,7 +55,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, forward, copy, edit, delete }
+enum MessageAction { reply, forward, copy, readBy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -102,8 +102,12 @@ class MessageBubble extends StatefulWidget {
     this.forwarded = false,
     this.onEdit,
     this.onDelete,
+    this.onReadBy,
     this.highlighted = false,
   });
+
+  /// My sent messages in groups: who has read it.
+  final VoidCallback? onReadBy;
 
   final MessageRow message;
   final bool mine;
@@ -209,6 +213,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (widget.onReply != null) MessageAction.reply,
         if (widget.onForward != null) MessageAction.forward,
         if (_copyText != null) MessageAction.copy,
+        if (widget.onReadBy != null) MessageAction.readBy,
         if (widget.onEdit != null) MessageAction.edit,
         if (widget.onDelete != null) MessageAction.delete,
       ];
@@ -217,6 +222,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         MessageAction.reply => (Icons.reply_rounded, 'Reply'),
         MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
+        MessageAction.readBy => (Icons.done_all_rounded, 'Read by'),
         MessageAction.edit => (Icons.edit_outlined, 'Edit'),
         MessageAction.delete => (Icons.delete_outline_rounded, 'Delete'),
       };
@@ -270,6 +276,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (text == null) return;
         unawaited(Clipboard.setData(ClipboardData(text: text)));
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Copied')));
+      case MessageAction.readBy:
+        widget.onReadBy?.call();
       case MessageAction.edit:
         widget.onEdit?.call();
       case MessageAction.delete:
@@ -396,12 +404,16 @@ class _MessageBubbleState extends State<MessageBubble> {
           const SizedBox(width: 3),
           Tooltip(
             message: r.label,
-            child: Icon(
-              r.read ? Icons.done_all_rounded : Icons.done_rounded,
-              key: Key(r.read ? 'read-icon' : 'sent-icon'),
-              size: 15,
-              color: r.read ? scheme.primary : dim,
-              semanticLabel: r.label,
+            child: GestureDetector(
+              onTap: widget.onReadBy,
+              behavior: HitTestBehavior.opaque,
+              child: Icon(
+                r.read ? Icons.done_all_rounded : Icons.done_rounded,
+                key: Key(r.read ? 'read-icon' : 'sent-icon'),
+                size: 15,
+                color: r.read ? scheme.primary : dim,
+                semanticLabel: r.label,
+              ),
             ),
           ),
         ],
@@ -715,6 +727,31 @@ class DaySeparator extends StatelessWidget {
             child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: s.onSurfaceVariant)),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "New messages": above the first message that was unread when the chat was opened.
+class UnreadDivider extends StatelessWidget {
+  const UnreadDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: Space.sm),
+      child: Semantics(
+        header: true,
+        child: Row(children: [
+          Expanded(child: Divider(color: s.primary.withValues(alpha: 0.5), height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.md),
+            child: Text('New messages', style: theme.textTheme.labelMedium?.copyWith(color: s.primary, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(child: Divider(color: s.primary.withValues(alpha: 0.5), height: 1)),
+        ]),
       ),
     );
   }

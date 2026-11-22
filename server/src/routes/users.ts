@@ -39,7 +39,7 @@ users.get("/", async (c) => {
        WHERE family_id IN (SELECT family_id FROM family_members WHERE user_id = ?)`,
     ).bind(me),
     db.prepare(
-      `SELECT id, name, identity_pub, deleted_at, avatar_key FROM users WHERE ${VISIBLE_SQL} ORDER BY created_at`,
+      `SELECT id, name, identity_pub, deleted_at, avatar_key, last_seen_at FROM users WHERE ${VISIBLE_SQL} ORDER BY created_at`,
     ).bind(...vb),
     db.prepare(
       `SELECT id, user_id, name, platform, enc_pub, sign_pub, cert_sig, revoked_at FROM devices
@@ -87,7 +87,7 @@ users.get("/", async (c) => {
     });
     byUser.set(x.user_id, list);
   }
-  type U = { id: string; name: string; identity_pub: string; deleted_at: number | null; avatar_key: string | null };
+  type U = { id: string; name: string; identity_pub: string; deleted_at: number | null; avatar_key: string | null; last_seen_at: number | null };
   return c.json({
     users: (u.results as U[]).map((x) => {
       // Rows from family_members are family peers; anyone else listed is a former chat partner.
@@ -108,6 +108,8 @@ users.get("/", async (c) => {
         deleted: x.deleted_at !== null,
         // Their profile photo (GET /users/:id/avatar?v=<avatarKey>), or null.
         avatarKey: x.avatar_key,
+        // When their last socket closed (Unix ms), for family peers only (like presence), or null.
+        lastSeenAt: families.length > 0 ? x.last_seen_at : null,
         // Only the families shared with the caller.
         families,
         former: families.length === 0 && x.id !== me,

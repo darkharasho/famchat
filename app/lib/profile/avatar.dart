@@ -54,3 +54,18 @@ final userPhotoProvider = Provider.autoDispose.family<Uint8List?, String>((ref, 
   if (key == null) return null;
   return ref.watch(avatarBytesProvider((userId, key))).value;
 });
+
+/// Group [chatId]'s photo [key] (a JPEG), from the local cache or downloaded once.
+final chatAvatarBytesProvider = FutureProvider.autoDispose.family<Uint8List?, (String, String)>((ref, id) async {
+  final (chatId, key) = id;
+  final cache = ref.watch(mediaDbProvider);
+  final cacheKey = chatAvatarCacheKey(chatId, key);
+  final cached = await cache.cacheGet(cacheKey);
+  if (cached != null) return cached;
+  final bytes = await ref.watch(chatApiProvider).chatAvatar(chatId, key);
+  await cache.cachePut(cacheKey, bytes, maxBytes: mediaCacheBytes);
+  return bytes;
+});
+
+/// The cache key a group photo is kept under (so a photo just set shows without a download).
+String chatAvatarCacheKey(String chatId, String key) => 'chat-avatar|$chatId|$key';

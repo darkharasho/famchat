@@ -20,6 +20,7 @@ ChatListItem item(String id, int unread, {DateTime? mutedUntil}) => ChatListItem
         lastSeq: 10,
         createdAt: 0,
         myLastReadSeq: 0,
+        markedUnread: false,
         syncedSeq: 0,
         mutedUntil: mutedUntil?.millisecondsSinceEpoch,
       ),

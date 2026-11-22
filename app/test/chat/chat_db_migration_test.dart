@@ -28,6 +28,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
         ..execute('PRAGMA user_version = 1');
@@ -57,6 +62,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 2');
     }));
@@ -82,6 +92,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('PRAGMA user_version = 3');
@@ -107,6 +122,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('PRAGMA user_version = 4');
@@ -131,6 +151,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 5');
     }));
@@ -153,6 +178,11 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN former')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('PRAGMA user_version = 6');
     }));
@@ -176,7 +206,12 @@ void main() {
         ..execute('DROP TABLE local_family_admins')
         ..execute('DROP TABLE local_revoked_proofs')
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
-        ..execute('ALTER TABLE local_users DROP COLUMN family_ids');
+        ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at');
       seed(raw);
       raw.execute('PRAGMA user_version = 7');
     }));
@@ -213,6 +248,11 @@ void main() {
       raw
         ..execute('ALTER TABLE local_chats DROP COLUMN family_id')
         ..execute('ALTER TABLE local_users DROP COLUMN family_ids')
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute('ALTER TABLE local_family_admins DROP COLUMN proof_sig')
         ..execute('DROP TABLE local_revoked_proofs')
         ..execute("INSERT INTO local_families (id) VALUES (1)")
@@ -243,6 +283,41 @@ void main() {
     });
     await db.updateFamilyPins({1: {}});
     expect(await db.revokedProofs(), {(1, 'A', 's1')});
+  });
+
+  test('schema 9 to 10: chats get pin, archive, marked-unread and photo state, users a last seen time; rows kept', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('ALTER TABLE local_chats DROP COLUMN pinned_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
+        ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
+        ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
+        ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
+            "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute('PRAGMA user_version = 9');
+    }));
+    addTearDown(db.close);
+    final chat = (await db.chatById('C'))!;
+    expect(chat.title, 'Us');
+    expect(chat.pinnedAt, isNull);
+    expect(chat.archivedAt, isNull);
+    expect(chat.markedUnread, isFalse);
+    expect(chat.avatarKey, isNull);
+    expect((await db.userById('A'))!.lastSeenAt, isNull);
+    await db.setChatState('C', pinnedAt: const Value(5), markedUnread: true);
+    await db.setLastSeen('A', 7);
+    expect((await db.chatById('C'))!.pinnedAt, 5);
+    expect((await db.chatById('C'))!.markedUnread, isTrue);
+    expect((await db.userById('A'))!.lastSeenAt, 7);
   });
 
   test('family pins: replaced as a whole, families absent from the map are dropped', () async {

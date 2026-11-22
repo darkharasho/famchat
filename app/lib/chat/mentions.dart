@@ -61,8 +61,25 @@ List<(int, int)> mentionRanges(String text, Iterable<String> names) {
   return taken..sort((a, b) => a.$1.compareTo(b.$1));
 }
 
-/// The ids of [people] (id → name) that [text] mentions.
+/// `@everyone`: mentions every other member of the group.
+const everyoneName = 'everyone';
+
+/// The suggestion id for `@everyone` (never a user id: those are ULIDs).
+const everyoneId = '*everyone';
+
+/// Whether [text] has `@everyone` in it, as a whole word.
+bool mentionsEveryone(String text) => mentionRanges(text, const [everyoneName]).isNotEmpty;
+
+/// People (id → name) to suggest for [query], with `@everyone` first when it matches and there are
+/// at least two people to mention.
+List<({String id, String name})> mentionSuggestionsFor(String query, Map<String, String> people) => [
+      if (people.length >= 2 && everyoneName.startsWith(query.toLowerCase())) (id: everyoneId, name: everyoneName),
+      ...matchingPeople(query, people),
+    ];
+
+/// The ids of [people] (id → name) that [text] mentions; all of them for `@everyone`.
 List<String> mentionsIn(String text, Map<String, String> people) {
+  if (people.isNotEmpty && mentionsEveryone(text)) return people.keys.toList();
   final ranges = mentionRanges(text, people.values);
   final found = <String>[];
   for (final (s, e) in ranges) {

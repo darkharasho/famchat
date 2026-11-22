@@ -1,12 +1,19 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../api/models.dart' show Family;
+import '../../chat/chat_sync.dart' show ChatSync;
 import '../../chat/db/chat_db.dart';
 import '../../chat/providers.dart';
+import '../../media/photo.dart';
+import '../../media/photo_picker.dart';
+import '../../media/providers.dart';
+import '../../profile/avatar.dart';
 import '../sign_out.dart' show apiErrorMessage;
-import '../../settings/time_format.dart' show clockTime;
+import '../../settings/time_format.dart' show clockTime, lastSeenLabel;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
@@ -94,6 +101,73 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     await _run(() => sync.mute(chat.id, picked == 0 ? null : picked));
   }
 
+  void _snack(String text) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Asks for a new group name, then renames.
+  Future<void> _rename(ChatRow chat) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final title = await showDialog<String>(context: context, builder: (context) => _RenameGroupDialog(title: chat.title ?? ''));
+    final t = title?.trim();
+    if (t == null || t.isEmpty || t == chat.title) return;
+    await _run(() => sync.renameChat(chat.id, t));
+  }
+
+  /// Choose, take or remove the group's photo.
+  Future<void> _photo(ChatRow chat) async {
+    final sync = ref.read(chatSyncProvider);
+    if (sync == null) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose a photo'),
+            onTap: () => Navigator.pop(context, 'choose'),
+          ),
+          if (cameraAvailable)
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(context, 'take'),
+            ),
+          if (chat.avatarKey != null)
+            ListTile(
+              leading: Icon(Icons.delete_outline_rounded, color: Theme.of(context).colorScheme.error),
+              title: Text('Remove photo', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              onTap: () => Navigator.pop(context, 'remove'),
+            ),
+        ]),
+      ),
+    );
+    if (action == null || !mounted) return;
+    if (action == 'remove') {
+      await _run(() => sync.setChatAvatar(chat.id, null));
+      return;
+    }
+    await _run(() async {
+      final picked = await ref.read(photoPickerProvider)(action == 'take' ? PickSource.camera : PickSource.library);
+      final original = picked.whereType<PickedPhoto>().firstOrNull;
+      if (original == null) {
+        if (picked.isNotEmpty) _snack('Pick a photo, not a video.');
+        return;
+      }
+      final Uint8List jpeg;
+      try {
+        jpeg = await avatarJpeg(ref.read(photoProcessorProvider), original.bytes, offload: ref.read(mediaOffloadProvider));
+      } on UnsupportedImageException {
+        _snack("That image can't be used.");
+        return;
+      }
+      final key = await sync.setChatAvatar(chat.id, jpeg);
+      // Shown from the cache at once, never downloaded back.
+      if (key != null) await ref.read(mediaDbProvider).cachePut(chatAvatarCacheKey(chat.id, key), jpeg, maxBytes: mediaCacheBytes);
+    });
+  }
+
   /// Runs [f]; shows the error and returns false if it throws.
   Future<bool> _run(Future<void> Function() f) async {
     setState(() => _busy = true);
@@ -106,6 +180,15 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// "Created the group" and/or when they were last seen.
+  Widget? _memberSubtitle(bool created, int? lastSeenAt) {
+    final seen = lastSeenAt == null
+        ? null
+        : lastSeenLabel(DateTime.fromMillisecondsSinceEpoch(lastSeenAt), h24: MediaQuery.alwaysUse24HourFormatOf(context));
+    final parts = [if (created) 'Created the group', ?seen];
+    return parts.isEmpty ? null : Text(parts.join(' · '));
   }
 
   @override
@@ -141,18 +224,53 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const SizedBox(height: Space.lg),
             Center(
-              child: PersonAvatar(
-                label: title,
-                colorKey: group ? chat.id : (otherMember(chat, members, me) ?? chat.id),
-                userId: group ? null : otherMember(chat, members, me),
-                group: group,
-                radius: 44,
-              ),
+              child: Stack(clipBehavior: Clip.none, children: [
+                Material(
+                  type: MaterialType.transparency,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    key: const Key('group-photo'),
+                    onTap: group && !_busy && sync != null ? () => _photo(chat) : null,
+                    child: PersonAvatar(
+                      label: title,
+                      colorKey: group ? chat.id : (otherMember(chat, members, me) ?? chat.id),
+                      userId: group ? null : otherMember(chat, members, me),
+                      group: group,
+                      chatId: chat.id,
+                      chatPhotoKey: chat.avatarKey,
+                      radius: 44,
+                    ),
+                  ),
+                ),
+                if (group)
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: IgnorePointer(
+                      child: CircleAvatar(
+                        radius: 15,
+                        backgroundColor: s.primary,
+                        child: Icon(Icons.photo_camera_outlined, size: 16, color: s.onPrimary, semanticLabel: 'Change group photo'),
+                      ),
+                    ),
+                  ),
+              ]),
             ),
             const SizedBox(height: Space.md),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: Space.xl),
-              child: Text(title, textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                if (group) const SizedBox(width: 40),
+                Flexible(child: Text(title, textAlign: TextAlign.center, style: theme.textTheme.headlineSmall)),
+                if (group)
+                  IconButton(
+                    key: const Key('rename-group'),
+                    tooltip: 'Rename group',
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    onPressed: _busy || sync == null ? null : () => _rename(chat),
+                  ),
+              ]),
             ),
             if (familyName != null)
               Padding(
@@ -198,7 +316,9 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     ringColor: theme.cardTheme.color,
                   ),
                   title: Text(m.userId == me ? '${users[m.userId]?.name ?? 'You'} (you)' : users[m.userId]?.name ?? 'Unknown'),
-                  subtitle: m.userId == chat.createdBy ? const Text('Created the group') : null,
+                  subtitle: _memberSubtitle(m.userId == chat.createdBy, m.userId != me && !online.contains(m.userId)
+                      ? users[m.userId]?.lastSeenAt
+                      : null),
                   trailing: group && creator && m.userId != me
                       ? IconButton(
                           tooltip: 'Remove ${users[m.userId]?.name ?? ''}',
@@ -234,4 +354,44 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
       ]),
     );
   }
+}
+
+class _RenameGroupDialog extends StatefulWidget {
+  const _RenameGroupDialog({required this.title});
+  final String title;
+
+  @override
+  State<_RenameGroupDialog> createState() => _RenameGroupDialogState();
+}
+
+class _RenameGroupDialogState extends State<_RenameGroupDialog> {
+  late final _text = TextEditingController(text: widget.title);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  String get _value => _text.text.trim();
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Group name'),
+        content: TextField(
+          key: const Key('rename-group-field'),
+          controller: _text,
+          autofocus: true,
+          maxLength: ChatSync.maxTitleLength,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) {
+            if (_value.isNotEmpty) Navigator.pop(context, _value);
+          },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: _value.isEmpty ? null : () => Navigator.pop(context, _value), child: const Text('Save')),
+        ],
+      );
 }

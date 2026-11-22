@@ -131,6 +131,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             colorKey: widget.chatId != null || !group ? m.senderUserId : m.chatId,
             userId: widget.chatId != null || !group ? m.senderUserId : null,
             group: widget.chatId == null && group,
+            chatId: m.chatId,
+            chatPhotoKey: item?.chat.avatarKey,
             radius: 20,
           ),
           title: Row(children: [

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import type { AppEnv } from "../env";
 import { deleteAccount } from "../lib/delete-account";
 import { FAMILY_ONE, familyPeers } from "../lib/family";
@@ -63,13 +63,19 @@ async function swapAvatar(db: D1Database, userId: string, key: string | null): P
 }
 
 /** Sets the caller's profile photo: the raw JPEG as the body. Answers the new avatarKey. */
-me.put("/avatar", async (c) => {
+/** The request body as a photo for an avatar: a JPEG of at most [MAX_AVATAR_BYTES]. */
+export async function readAvatarJpeg(c: Context<AppEnv>): Promise<Uint8Array> {
   if (c.req.header("content-type") !== "image/jpeg") throw new ApiError("invalid_request");
   // Refused before reading the body when it says it's too big.
   if (Number(c.req.header("content-length") ?? 0) > MAX_AVATAR_BYTES) throw new ApiError("too_large");
   const body = new Uint8Array(await c.req.arrayBuffer());
   if (body.length > MAX_AVATAR_BYTES) throw new ApiError("too_large");
   if (body.length < 3 || body[0] !== 0xff || body[1] !== 0xd8 || body[2] !== 0xff) throw new ApiError("invalid_request");
+  return body;
+}
+
+me.put("/avatar", async (c) => {
+  const body = await readAvatarJpeg(c);
   const userId = c.get("userId");
   const key = newId();
   await c.env.MEDIA.put(avatarObject(userId, key), body, {

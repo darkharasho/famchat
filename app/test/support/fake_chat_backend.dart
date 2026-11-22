@@ -40,6 +40,7 @@ class _User {
   final resets = <_Reset>[];
   String? avatarKey;
   Uint8List? avatar;
+  int? lastSeenAt;
 }
 
 /// A signed reset (server/src/routes/admin.ts, auth.ts redeem).
@@ -79,13 +80,16 @@ class _Member {
   _Member(this.joinedSeq, this.joinedAt);
   final int joinedSeq, joinedAt;
   int lastReadSeq = 0;
-  int? mutedUntil;
+  int? mutedUntil, pinnedAt, archivedAt;
+  bool markedUnread = false;
 }
 
 class _Chat {
   _Chat(this.id, this.kind, this.title, this.createdBy, this.directKey, this.createdAt);
   final String id, kind, createdBy;
-  final String? title, directKey;
+  final String? directKey;
+  String? title, avatarKey;
+  Uint8List? avatar;
   final int createdAt;
   int currentEpoch = 1, lastSeq = 0;
   int? lastMessageAt;
@@ -107,6 +111,10 @@ class _Chat {
         lastMessageAt: lastMessageAt,
         createdAt: createdAt,
         mutedUntil: members[viewer]?.mutedUntil,
+        pinnedAt: members[viewer]?.pinnedAt,
+        archivedAt: members[viewer]?.archivedAt,
+        markedUnread: members[viewer]?.markedUnread ?? false,
+        avatarKey: avatarKey,
         familyId: familyId,
         members: [
           for (final e in members.entries)
@@ -382,7 +390,7 @@ class FakeChatBackend {
     }
   }
 
-  ChatDto chatDto(String id) => _chats[id]!.dto();
+  ChatDto chatDto(String id, [String? viewer]) => _chats[id]!.dto(viewer);
   List<MessageDto> storedMessages(String chatId) => List.of(_chats[chatId]!.messages);
   bool hasWrap(String chatId, int epoch, String deviceId) => _wraps.containsKey('$chatId|$epoch|$deviceId');
   int wrapCount() => _wraps.length;
@@ -618,6 +626,7 @@ class FakeChatApi implements ChatApi {
                 : [if (u.inFamily1) FamilyRoleDto(id: 1, admin: u.isAdmin, adminProof: u.adminProof), ...u.otherFamilies],
             deleted: u.deleted,
             avatarKey: u.avatarKey,
+            lastSeenAt: u.lastSeenAt,
             identityPub: b64url(u.identityPub),
             devices: [
               for (final d in b._devices.values.where((d) => d.userId == u.id))
@@ -721,6 +730,53 @@ class FakeChatApi implements ChatApi {
   Future<void> muteChat(String chatId, int? until) => _run('PUT /chats/$chatId/mute', () {
         b._memberChat(chatId, userId).members[userId]!.mutedUntil = until;
         b._notify([userId], {'type': 'chat', 'chatId': chatId});
+      });
+
+  @override
+  Future<void> setChatState(String chatId, {bool? pinned, bool? archived, bool? unread}) =>
+      _run('PATCH /chats/$chatId/me', () {
+        final m = b._memberChat(chatId, userId).members[userId]!;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (pinned != null) m.pinnedAt = pinned ? now : null;
+        if (archived != null) m.archivedAt = archived ? now : null;
+        if (unread != null) m.markedUnread = unread;
+        b._notify([userId], {'type': 'chat', 'chatId': chatId});
+      });
+
+  @override
+  Future<ChatDto> renameChat(String chatId, String title) => _run('PATCH /chats/$chatId', () {
+        final c = b._memberChat(chatId, userId);
+        if (c.kind != 'group') throw ApiException(400, 'invalid_request');
+        c.title = title.trim();
+        b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+        return c.dto(userId);
+      });
+
+  @override
+  Future<String> setChatAvatar(String chatId, Uint8List jpeg) => _run('PUT /chats/$chatId/avatar', () {
+        final c = b._memberChat(chatId, userId);
+        if (c.kind != 'group') throw ApiException(400, 'invalid_request');
+        c
+          ..avatarKey = b._id('A')
+          ..avatar = jpeg;
+        b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+        return c.avatarKey!;
+      });
+
+  @override
+  Future<void> removeChatAvatar(String chatId) => _run('DELETE /chats/$chatId/avatar', () {
+        final c = b._memberChat(chatId, userId);
+        c
+          ..avatarKey = null
+          ..avatar = null;
+        b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+      });
+
+  @override
+  Future<Uint8List> chatAvatar(String chatId, String key) => _run('GET /chats/$chatId/avatar', () {
+        final c = b._memberChat(chatId, userId);
+        if (c.avatarKey != key || c.avatar == null) throw ApiException(404, 'not_found');
+        return c.avatar!;
       });
 
   @override

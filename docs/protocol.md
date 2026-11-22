@@ -44,7 +44,9 @@ Reset     = {id, signerUserId, signerKind: "admin"|"recovery", signerPub, recove
              claimSig: string|null, completedAt: number|null}            ("Account resets")
 Device    = {id, name, platform, encPub, signPub, certSig, revoked}
 Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
-             lastSeq, lastMessageAt: number|null, createdAt, mutedUntil: number|null, members: Member[]}
+             lastSeq, lastMessageAt: number|null, createdAt, mutedUntil: number|null,
+             pinnedAt: number|null, archivedAt: number|null, markedUnread: boolean, avatarKey: string|null,
+             members: Member[]}
 Member    = {userId, joinedSeq, lastReadSeq}
 Message   = {chatId, seq, id, senderUserId, senderDeviceId, envelope: Envelope, createdAt}
 Envelope  = {v: 1, epoch, nonce, ct, sig}                                  (spec "Messages")
@@ -91,6 +93,8 @@ A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"
 In a group, a text may @mention members: `{"kind":"text","text":"@Mom can you?","mentions":["<userId>"]}`.
 The text holds `@<name>`; `mentions` lists who that is. The `send` frame repeats the list (the server
 can't read the text) so mentioned members are pushed even when they muted the chat.
+`@everyone` in a group mentions every other member: the text holds `@everyone` and `mentions` lists
+them all (clients bold `@everyone` when a text has mentions).
 
 Edits and deletes are messages too, and count only when their sender is the target's sender:
 
@@ -484,6 +488,8 @@ appears and is `404 not_found`.
   accept only through resets they verify ("Account resets"). A deleted account stays listed to the
   people who shared a family with it, with `deleted: true`, name `"Deleted user"` and every device
   revoked; don't offer it for new chats. `avatarKey` names the user's profile photo, or is null.
+- `lastSeenAt`: when the user's last socket closed (Unix ms), for people sharing a family with the
+  caller (and the caller); `null` for former chat partners and anyone never seen.
 - `families: {id, role: "admin"|"member", adminProof: {byUserId, signerPub, sig} | null}[]` lists
   only the families that user shares with the caller (a person's other families are never shown).
   `adminProof` is set for admins who have a signed proof. Reviewers see the hidden reviewer family
@@ -706,6 +712,19 @@ writes an `events` row (audit log; not exposed by the API yet).
 - `PUT /chats/:id/mute {until: number|null}` → 204. Your own mute: no pushes from this chat until
   `until` (Unix ms, 0 to 253402300799000; "until I turn it back on" is a far-off time), or `null` to
   unmute. Shown only to you as the chat's `mutedUntil`; your own sockets get a `chat` event.
+- `PATCH /chats/:id/me {pinned?, archived?, unread?}` (booleans, at least one) → 204. Your own chat
+  list state, shown only to you as `pinnedAt` / `archivedAt` (Unix ms when set, else `null`) and
+  `markedUnread`; your own sockets get a `chat` event. Clients list pinned chats first, newest pin
+  first. An archived chat returns to the list once a message newer than `archivedAt` arrives, unless
+  it's muted. `unread: true` is "mark as unread": clients show it as unread until it's opened, then
+  send `unread: false`. Marked chats don't add to the app-icon badge.
+- `PATCH /chats/:id {title}` → `{chat}`. Groups only; any member renames (1–60 characters, no control
+  characters). Every member's sockets get a `chat` event.
+- `PUT /chats/:id/avatar` (raw JPEG body, as for profile photos) → `{avatarKey}`; `DELETE
+  /chats/:id/avatar` → 204. A group's photo; any member sets or removes it, and every member gets a
+  `chat` event. `GET /chats/:id/avatar?v=<avatarKey>` → the JPEG for members, cacheable for good; 404
+  once replaced. `Chat.avatarKey` is the current one or `null`. Titles and group photos aren't
+  end-to-end encrypted, like names and profile photos.
 - `POST /chats/:id/epochs {epoch, wraps}` → `201 {chat}`. Creates the current epoch's key: `epoch` must
   equal `currentEpoch` and wraps must cover exactly the live devices of current members. The first
   member device wins; the rest get `epoch_exists` and fetch the wraps instead.
@@ -771,7 +790,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 | frame | when |
 |---|---|
 | `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
-| `{type:"presence", userId, online}` | a user sharing a family with you: their first socket opened / last socket closed |
+| `{type:"presence", userId, online, lastSeenAt?}` | a user sharing a family with you: their first socket opened / last socket closed (then with `lastSeenAt`, Unix ms, also kept as the directory's `lastSeenAt`) |
 | `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |

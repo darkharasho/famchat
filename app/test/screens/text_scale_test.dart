@@ -83,6 +83,8 @@ void main() {
               'A long message that wraps over several lines when the text is twice as big as usual'));
           await alice.db.insertMessageIfAbsent(text('m2', 'group1', 2, alice.userId, 'Sounds good'));
           await alice.db.insertMessageIfAbsent(text('m3', 'group1', null, alice.userId, 'oops', state: 'failed', device: alice.deviceId));
+          // Read already: a chat with unread messages opens at its "New messages" line instead.
+          await alice.db.setMyLastRead('group1', 2);
         });
 
     void go(WidgetTester tester, String path) =>

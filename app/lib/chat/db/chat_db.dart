@@ -34,6 +34,18 @@ class LocalChats extends Table {
   /// Every message with seq ≤ this is stored locally (the `after=` cursor).
   IntColumn get syncedSeq => integer().withDefault(const Constant(0))();
 
+  /// This user's pin (Unix ms; see [ChatDto.pinnedAt]), or null.
+  IntColumn get pinnedAt => integer().nullable()();
+
+  /// When this user archived the chat (Unix ms; see [ChatDto.archivedAt]), or null.
+  IntColumn get archivedAt => integer().nullable()();
+
+  /// This user marked the chat as unread (see [ChatDto.markedUnread]).
+  BoolColumn get markedUnread => boolean().withDefault(const Constant(false))();
+
+  /// A group's photo key (see [ChatDto.avatarKey]), or null.
+  TextColumn get avatarKey => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -121,6 +133,9 @@ class LocalUsers extends Table {
 
   /// JSON list of the ids of the families they share with this user, ascending; empty for former users.
   TextColumn get familyIds => text().withDefault(const Constant('[]'))();
+
+  /// When they were last online (Unix ms; see [UserDto.lastSeenAt]), or null.
+  IntColumn get lastSeenAt => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -233,6 +248,29 @@ class ChatListItem {
   final int unread;
 
   int get activity => [chat.createdAt, chat.lastMessageAt ?? 0, last?.createdAt ?? 0].reduce((a, b) => a > b ? a : b);
+
+  /// In the Archive: archived, and nothing newer since (a muted chat stays archived whatever comes).
+  bool archivedAt(DateTime now) {
+    final at = chat.archivedAt;
+    if (at == null) return false;
+    return (chat.mutedUntil ?? 0) > now.millisecondsSinceEpoch || activity <= at;
+  }
+
+  bool get pinned => chat.pinnedAt != null;
+
+  /// Shown as unread: unread messages, or marked as unread.
+  bool get looksUnread => unread > 0 || chat.markedUnread;
+}
+
+/// Pinned chats first (newest pin first), then newest activity first.
+int compareChatListItems(ChatListItem a, ChatListItem b) {
+  final pa = a.chat.pinnedAt, pb = b.chat.pinnedAt;
+  if (pa != null || pb != null) {
+    if (pa == null) return 1;
+    if (pb == null) return -1;
+    if (pa != pb) return pb.compareTo(pa);
+  }
+  return b.activity.compareTo(a.activity);
 }
 
 @DriftDatabase(tables: [
@@ -252,7 +290,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -286,6 +324,14 @@ class ChatDb extends _$ChatDb {
             // Made with its proof column above when coming from before schema 8.
             if (from == 8) await m.addColumn(localFamilyAdmins, localFamilyAdmins.proofSig);
             await m.createTable(localRevokedProofs);
+          }
+          if (from < 10) {
+            // Filled in by the next chat sync and directory refresh.
+            await m.addColumn(localChats, localChats.pinnedAt);
+            await m.addColumn(localChats, localChats.archivedAt);
+            await m.addColumn(localChats, localChats.markedUnread);
+            await m.addColumn(localChats, localChats.avatarKey);
+            await m.addColumn(localUsers, localUsers.lastSeenAt);
           }
         },
       );
@@ -335,6 +381,10 @@ class ChatDb extends _$ChatDb {
             createdAt: c.createdAt,
             mutedUntil: Value(c.mutedUntil),
             familyId: Value(c.familyId),
+            pinnedAt: Value(c.pinnedAt),
+            archivedAt: Value(c.archivedAt),
+            markedUnread: Value(c.markedUnread),
+            avatarKey: Value(c.avatarKey),
           ),
           onConflict: DoUpdate((_) => LocalChatsCompanion(
                 kind: Value(c.kind),
@@ -346,6 +396,10 @@ class ChatDb extends _$ChatDb {
                 lastMessageAt: Value(c.lastMessageAt),
                 mutedUntil: Value(c.mutedUntil),
                 familyId: Value(c.familyId),
+                pinnedAt: Value(c.pinnedAt),
+                archivedAt: Value(c.archivedAt),
+                markedUnread: Value(c.markedUnread),
+                avatarKey: Value(c.avatarKey),
               )),
         );
         await (delete(localMembers)..where((m) => m.chatId.equals(c.id))).go();
@@ -469,6 +523,24 @@ class ChatDb extends _$ChatDb {
   Future<void> setMutedUntil(String chatId, int? until) =>
       (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(mutedUntil: Value(until)));
 
+  /// This user's chat list state, as the server now has it (null arguments stay as they are).
+  Future<void> setChatState(String chatId, {Value<int?> pinnedAt = const Value.absent(), Value<int?> archivedAt = const Value.absent(), bool? markedUnread}) =>
+      (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(
+        pinnedAt: pinnedAt,
+        archivedAt: archivedAt,
+        markedUnread: markedUnread == null ? const Value.absent() : Value(markedUnread),
+      ));
+
+  Future<void> setChatTitle(String chatId, String title) =>
+      (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(title: Value(title)));
+
+  Future<void> setChatAvatarKey(String chatId, String? key) =>
+      (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(avatarKey: Value(key)));
+
+  /// [userId] went offline at [at] (a `presence` frame).
+  Future<void> setLastSeen(String userId, int at) =>
+      (update(localUsers)..where((u) => u.id.equals(userId))).write(LocalUsersCompanion(lastSeenAt: Value(at)));
+
   /// Every row in [chatId] that changes [targetId] (its reactions, edits and deletes), in order.
   Future<List<MessageRow>> changesTo(String chatId, String targetId) => (select(localMessages)
         ..where((m) => m.chatId.equals(chatId) & m.targetId.equals(targetId))
@@ -546,7 +618,7 @@ class ChatDb extends _$ChatDb {
         unread: unread.read<int>('n'),
       ));
     }
-    items.sort((a, b) => b.activity.compareTo(a.activity));
+    items.sort(compareChatListItems);
     return items;
   }
 

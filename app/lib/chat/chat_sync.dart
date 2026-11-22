@@ -505,6 +505,7 @@ class ChatSync {
       case 'presence':
         final u = e['userId'] as String;
         _setOnline(e['online'] == true ? {..._online, u} : ({..._online}..remove(u)));
+        if (e['lastSeenAt'] case final int at) await db.setLastSeen(u, at);
     }
   }
 
@@ -787,6 +788,48 @@ class ChatSync {
     await db.setMutedUntil(chatId, until);
   }
 
+  /// Pins [chatId] to the top of this user's chat list, or unpins it.
+  Future<void> pin(String chatId, bool pinned) async {
+    await api.setChatState(chatId, pinned: pinned);
+    // The `chat` event that follows brings the server's time.
+    await db.setChatState(chatId, pinnedAt: Value(pinned ? _now().millisecondsSinceEpoch : null));
+  }
+
+  /// Archives [chatId] for this user (it comes back when a newer message arrives), or unarchives it.
+  Future<void> archive(String chatId, bool archived) async {
+    await api.setChatState(chatId, archived: archived);
+    await db.setChatState(chatId, archivedAt: Value(archived ? _now().millisecondsSinceEpoch : null));
+  }
+
+  /// "Mark as unread" (until the chat is opened), or clears it.
+  Future<void> markUnread(String chatId, bool unread) async {
+    await db.setChatState(chatId, markedUnread: unread);
+    await api.setChatState(chatId, unread: unread);
+  }
+
+  /// Renames group [chatId].
+  Future<void> renameChat(String chatId, String title) async {
+    final chat = await api.renameChat(chatId, title.trim());
+    await db.upsertChat(chat);
+  }
+
+  /// Longest group title (the server's limit).
+  static const maxTitleLength = 60;
+
+  /// Sets group [chatId]'s photo ([jpeg], see `lib/profile/avatar.dart`), or removes it when null;
+  /// returns the new photo's key.
+  Future<String?> setChatAvatar(String chatId, Uint8List? jpeg) async {
+    final String? key;
+    if (jpeg == null) {
+      await api.removeChatAvatar(chatId);
+      key = null;
+    } else {
+      key = await api.setChatAvatar(chatId, jpeg);
+    }
+    await db.setChatAvatarKey(chatId, key);
+    return key;
+  }
+
   /// Sets this user's reaction on [messageId]; an empty [emoji] removes it.
   Future<void> react(String chatId, String messageId, String emoji) =>
       _enqueueMessage(chatId, ReactionBody(messageId, emoji), targetId: messageId);
@@ -860,6 +903,8 @@ class ChatSync {
   /// Marks everything stored in [chatId] as read (locally and on the server).
   Future<void> markRead(String chatId) async {
     final chat = await db.chatById(chatId);
+    // Opening a chat clears "mark as unread" (here and on the server, for my other devices).
+    if (chat != null && chat.markedUnread) unawaited(markUnread(chatId, false).catchError((_) {}));
     final newest = await db.maxSeq(chatId);
     if (chat == null || newest == null || newest <= chat.myLastReadSeq) return;
     await db.setMyLastRead(chatId, newest);

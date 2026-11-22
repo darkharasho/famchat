@@ -1,4 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:famchat/chat/providers.dart';
+import 'package:famchat/media/photo_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
@@ -26,9 +30,9 @@ void main() {
 
   ProviderContainer c(WidgetTester tester) => ProviderScope.containerOf(tester.element(find.byType(FamChatApp)));
 
-  Future<String> openInfo(WidgetTester tester, Future<String> Function(ProviderContainer) make) async {
+  Future<String> openInfo(WidgetTester tester, Future<String> Function(ProviderContainer) make, {MediaPicker? picker}) async {
     setWindow(tester, const Size(400, 800));
-    await pumpChatApp(tester, alice);
+    await pumpChatApp(tester, alice, picker: picker);
     final id = await inApp(tester, () => make(c(tester)));
     c(tester).read(routerProvider).go('/chats/$id/info');
     await settle(tester);
@@ -129,5 +133,50 @@ void main() {
   chatTestWidgets('a single-family user sees no family line', (tester) async {
     await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId]));
     expect(find.textContaining('Family:'), findsNothing);
+  });
+
+  chatTestWidgets('any member renames the group', (tester) async {
+    final id = await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId]));
+    await tester.tap(find.byKey(const Key('rename-group')));
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('rename-group-field')), '  The Cousins ');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    expect(backend.chatDto(id).title, 'The Cousins');
+    expect(find.text('The Cousins'), findsWidgets);
+  });
+
+  chatTestWidgets('a direct chat has no rename or photo button', (tester) async {
+    await openInfo(tester, (c) => c.read(chatSyncProvider)!.openDirect(bob.userId));
+    expect(find.byKey(const Key('rename-group')), findsNothing);
+    expect(find.bySemanticsLabel('Change group photo'), findsNothing);
+  });
+
+  chatTestWidgets('set a group photo, then remove it', (tester) async {
+    final png = Uint8List.fromList(img.encodePng(img.Image(width: 12, height: 8)));
+    final id = await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId]),
+        picker: (source) async => [PickedPhoto(png)]);
+    expect(find.byKey(const Key('avatar-photo')), findsNothing);
+    await tester.tap(find.byKey(const Key('group-photo')));
+    await settle(tester);
+    await tester.tap(find.text('Choose a photo'));
+    await settle(tester);
+    expect(backend.chatDto(id).avatarKey, isNotNull);
+    expect(find.byKey(const Key('avatar-photo')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('group-photo')));
+    await settle(tester);
+    await tester.tap(find.text('Remove photo'));
+    await settle(tester);
+    expect(backend.chatDto(id).avatarKey, isNull);
+    expect(find.byKey(const Key('avatar-photo')), findsNothing);
+  });
+
+  chatTestWidgets('members who are offline show when they were last seen', (tester) async {
+    final id = await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId, carol.userId]));
+    await inApp(tester, () => alice.db.setLastSeen(bob.userId, DateTime.now().subtract(const Duration(minutes: 5)).millisecondsSinceEpoch));
+    await settle(tester);
+    expect(find.textContaining('Last seen today at'), findsOneWidget);
+    expect(id, isNotEmpty);
   });
 }

@@ -58,4 +58,22 @@ void main() {
     expect(() => Plaintext.decode('{"kind":"text","text":"a","mentions":"u1"}'.codeUnits), throwsFormatException);
     expect(() => Plaintext.decode('{"kind":"text","text":"a","mentions":[1]}'.codeUnits), throwsFormatException);
   });
+
+  group('@everyone', () {
+    const people = {'u1': 'Mom', 'u2': 'Dad'};
+    test('mentions every other member', () {
+      expect(mentionsIn('@everyone dinner!', people), ['u1', 'u2']);
+      expect(mentionsIn('dinner @everyone', people), ['u1', 'u2']);
+      expect(mentionsIn('mail@everyone.com', people), isEmpty, reason: 'only as a whole word');
+      expect(mentionsIn('@everyones', people), isEmpty);
+      expect(mentionsIn('@everyone', const {}), isEmpty);
+    });
+
+    test('is suggested first in groups of three or more', () {
+      expect(mentionSuggestionsFor('', people).first, (id: everyoneId, name: everyoneName));
+      expect(mentionSuggestionsFor('ev', people).map((p) => p.id), [everyoneId]);
+      expect(mentionSuggestionsFor('m', people).map((p) => p.id), ['u1']);
+      expect(mentionSuggestionsFor('', const {'u1': 'Mom'}).map((p) => p.id), ['u1'], reason: 'one other: no @everyone');
+    });
+  });
 }

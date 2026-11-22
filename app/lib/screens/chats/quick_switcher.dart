@@ -137,6 +137,8 @@ class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
                             : (otherMember(item.chat, item.members, me) ?? item.chat.id),
                         userId: item.chat.kind == 'group' ? null : otherMember(item.chat, item.members, me),
                         group: item.chat.kind == 'group',
+                        chatId: item.chat.id,
+                        chatPhotoKey: item.chat.avatarKey,
                         radius: 18,
                       ),
                       title: Text(title(item), maxLines: 1, overflow: TextOverflow.ellipsis),

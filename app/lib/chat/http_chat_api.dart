@@ -100,6 +100,33 @@ class HttpChatApi implements ChatApi {
   Future<void> muteChat(String chatId, int? until) => _call('PUT', '/chats/${_seg(chatId)}/mute', {'until': until});
 
   @override
+  Future<void> setChatState(String chatId, {bool? pinned, bool? archived, bool? unread}) =>
+      _call('PATCH', '/chats/${_seg(chatId)}/me', {
+        'pinned': ?pinned,
+        'archived': ?archived,
+        'unread': ?unread,
+      });
+
+  @override
+  Future<ChatDto> renameChat(String chatId, String title) async =>
+      ChatDto.fromJson((await _call('PATCH', '/chats/${_seg(chatId)}', {'title': title}))!['chat'] as Map<String, Object?>);
+
+  @override
+  Future<String> setChatAvatar(String chatId, Uint8List jpeg) async {
+    final j = await _api.authedUpload('/chats/${_seg(chatId)}/avatar', bytes: jpeg, method: 'PUT', contentType: 'image/jpeg');
+    final key = j?['avatarKey'];
+    if (key is! String) throw const FormatException('bad avatarKey');
+    return key;
+  }
+
+  @override
+  Future<void> removeChatAvatar(String chatId) => _call('DELETE', '/chats/${_seg(chatId)}/avatar');
+
+  @override
+  Future<Uint8List> chatAvatar(String chatId, String key) =>
+      _api.authedBytes('/chats/${_seg(chatId)}/avatar', query: {'v': key}, maxBytes: 512 * 1024);
+
+  @override
   Future<void> createEpoch(String chatId, int epoch, List<ChatKeyWrap> wraps) => _call('POST', '/chats/${_seg(chatId)}/epochs', {
         'epoch': epoch,
         'wraps': [for (final w in wraps) w.toJson()],

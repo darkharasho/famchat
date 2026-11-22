@@ -28,8 +28,21 @@ export interface ChatOut {
   familyId: number | null;
   /** The caller's own mute: no pushes from this chat until then (Unix ms), or null. */
   mutedUntil: number | null;
+  /** The caller's own pin (Unix ms when pinned), or null. */
+  pinnedAt: number | null;
+  /** When the caller archived the chat (Unix ms), or null. */
+  archivedAt: number | null;
+  /** The caller marked the chat as unread. */
+  markedUnread: boolean;
+  /** A group's photo (GET /chats/:id/avatar?v=<avatarKey>), or null. */
+  avatarKey: string | null;
   members: MemberOut[];
 }
+
+/** The caller's own state for a chat (mute, pin, archive, marked unread). */
+type Mine = { muted_until: number | null; pinned_at: number | null; archived_at: number | null; marked_unread: number };
+
+const NOT_MINE: Mine = { muted_until: null, pinned_at: null, archived_at: null, marked_unread: 0 };
 
 type ChatRow = {
   id: string;
@@ -42,13 +55,14 @@ type ChatRow = {
   last_message_at: number | null;
   created_at: number;
   family_id: number | null;
+  avatar_key: string | null;
 };
 
-const CHAT_SELECT = `SELECT c.id, c.kind, c.title, c.created_by, c.current_epoch, c.last_seq, c.last_message_at, c.created_at, c.family_id,
+const CHAT_SELECT = `SELECT c.id, c.kind, c.title, c.created_by, c.current_epoch, c.last_seq, c.last_message_at, c.created_at, c.family_id, c.avatar_key,
   EXISTS (SELECT 1 FROM chat_epochs e WHERE e.chat_id = c.id AND e.epoch = c.current_epoch) AS epoch_ready
   FROM chats c`;
 
-function toOut(r: ChatRow, members: MemberOut[], mutedUntil: number | null): ChatOut {
+function toOut(r: ChatRow, members: MemberOut[], mine: Mine): ChatOut {
   return {
     id: r.id,
     kind: r.kind,
@@ -60,7 +74,11 @@ function toOut(r: ChatRow, members: MemberOut[], mutedUntil: number | null): Cha
     lastMessageAt: r.last_message_at,
     createdAt: r.created_at,
     familyId: r.family_id,
-    mutedUntil,
+    mutedUntil: mine.muted_until,
+    pinnedAt: mine.pinned_at,
+    archivedAt: mine.archived_at,
+    markedUnread: mine.marked_unread === 1,
+    avatarKey: r.avatar_key,
     members,
   };
 }
@@ -72,29 +90,31 @@ export async function chatsOf(db: D1Database, userId: string): Promise<ChatOut[]
       `${CHAT_SELECT} WHERE c.id IN (SELECT chat_id FROM chat_members WHERE user_id = ?) ORDER BY COALESCE(c.last_message_at, c.created_at) DESC`,
     ).bind(userId),
     db.prepare(
-      `SELECT m.chat_id, m.user_id, m.joined_seq, m.last_read_seq, m.muted_until FROM chat_members m
+      `SELECT m.chat_id, m.user_id, m.joined_seq, m.last_read_seq, ${MINE_COLS} FROM chat_members m
        WHERE m.chat_id IN (SELECT chat_id FROM chat_members WHERE user_id = ?) ORDER BY m.joined_at, m.user_id`,
     ).bind(userId),
   ]);
   const byChat = new Map<string, MemberOut[]>();
-  const muted = new Map<string, number | null>();
+  const mine = new Map<string, Mine>();
   for (const m of members.results as MemberRow[]) {
     const list = byChat.get(m.chat_id) ?? [];
     list.push({ userId: m.user_id, joinedSeq: m.joined_seq, lastReadSeq: m.last_read_seq });
     byChat.set(m.chat_id, list);
-    if (m.user_id === userId) muted.set(m.chat_id, m.muted_until);
+    if (m.user_id === userId) mine.set(m.chat_id, m);
   }
-  return (chats.results as ChatRow[]).map((r) => toOut(r, byChat.get(r.id) ?? [], muted.get(r.id) ?? null));
+  return (chats.results as ChatRow[]).map((r) => toOut(r, byChat.get(r.id) ?? [], mine.get(r.id) ?? NOT_MINE));
 }
 
-type MemberRow = { chat_id: string; user_id: string; joined_seq: number; last_read_seq: number; muted_until: number | null };
+const MINE_COLS = "muted_until, pinned_at, archived_at, marked_unread";
+
+type MemberRow = Mine & { chat_id: string; user_id: string; joined_seq: number; last_read_seq: number };
 
 /** The chat as [viewer] sees it (their own mute). */
 export async function chatOut(db: D1Database, chatId: string, viewer: string): Promise<ChatOut | null> {
   const [chat, members] = await db.batch([
     db.prepare(`${CHAT_SELECT} WHERE c.id = ?`).bind(chatId),
     db.prepare(
-      "SELECT chat_id, user_id, joined_seq, last_read_seq, muted_until FROM chat_members WHERE chat_id = ? ORDER BY joined_at, user_id",
+      `SELECT chat_id, user_id, joined_seq, last_read_seq, ${MINE_COLS} FROM chat_members WHERE chat_id = ? ORDER BY joined_at, user_id`,
     ).bind(chatId),
   ]);
   const r = chat.results[0] as ChatRow | undefined;
@@ -103,7 +123,7 @@ export async function chatOut(db: D1Database, chatId: string, viewer: string): P
   return toOut(
     r,
     rows.map((m) => ({ userId: m.user_id, joinedSeq: m.joined_seq, lastReadSeq: m.last_read_seq })),
-    rows.find((m) => m.user_id === viewer)?.muted_until ?? null,
+    rows.find((m) => m.user_id === viewer) ?? NOT_MINE,
   );
 }
 

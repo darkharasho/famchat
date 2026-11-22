@@ -38,6 +38,7 @@ import '../../media/providers.dart';
 import '../../voice/providers.dart';
 import '../../voice/recording.dart';
 import '../../voice/waveform.dart';
+import '../../settings/time_format.dart' show lastSeenLabel;
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/person_avatar.dart';
@@ -232,10 +233,101 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       _schedulePreview();
     });
     unawaited(_loadDraft());
+    unawaited(_loadReadPosition());
     _webPaste = listenForPastedFiles(() => mounted && _focus.hasFocus, (files) async {
       final sorted = await pickedFromFiles(files);
       await _confirmPaste(sorted.media);
     });
+  }
+
+  /// Where I had read up to when the chat opened (from my join point), before this view marks it read.
+  int? _readAtOpen;
+  final _openedAt = DateTime.now();
+
+  /// The first message that was unread on opening: the "New messages" line goes above it. Looked
+  /// for until found, for a few seconds after opening (a catch-up may bring the unread ones).
+  String? _unreadFrom;
+  bool _unreadScrolled = false;
+  final _unreadKey = GlobalKey();
+
+  /// Read before the first frame, so before this view's own mark-read can move it.
+  Future<void> _loadReadPosition() async {
+    final db = ref.read(chatDbProvider);
+    final me = ref.read(myUserIdProvider);
+    final chat = await db.chatById(widget.chatId);
+    final joined = (await db.membersOf(widget.chatId)).where((m) => m.userId == me).firstOrNull?.joinedSeq ?? 0;
+    if (!mounted || chat == null) return;
+    setState(() => _readAtOpen = math.max(chat.myLastReadSeq, joined));
+  }
+
+  void _findUnread(List<MessageRow> visible, String? me) {
+    final read = _readAtOpen;
+    if (_unreadFrom != null || read == null || widget.jumpTo != null) return;
+    if (DateTime.now().difference(_openedAt) > const Duration(seconds: 5)) return;
+    _unreadFrom = visible.where((m) => m.senderUserId != me && m.seq != null && m.seq! > read).firstOrNull?.id;
+    if (_unreadFrom != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_scrollToUnread());
+      });
+    }
+  }
+
+  /// Brings the "New messages" line into view when it's above the screen, near the top.
+  Future<void> _scrollToUnread() async {
+    if (_unreadScrolled) return;
+    _unreadScrolled = true;
+    for (var i = 0; i < 60; i++) {
+      final ctx = _unreadKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        final box = ctx.findRenderObject() as RenderBox?;
+        final viewport = _scroll.hasClients ? _scroll.position.context.storageContext.findRenderObject() as RenderBox? : null;
+        if (box != null && viewport != null) {
+          final top = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+          if (top >= 0) return; // already on screen
+        }
+        await Scrollable.ensureVisible(ctx, alignment: 0.9);
+        return;
+      }
+      if (!_scroll.hasClients) return;
+      final pos = _scroll.position;
+      if (pos.pixels >= pos.maxScrollExtent) return;
+      _scroll.jumpTo(math.min(pos.pixels + pos.viewportDimension * 0.8, pos.maxScrollExtent));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  /// Who of the chat's other members has read [m] (mine, sent).
+  Future<void> _showReaders(MessageRow m, List<MemberRow> members, Map<String, UserRow> users, String? me) async {
+    final others = members.where((o) => o.userId != me).toList()
+      ..sort((a, b) => (users[a.userId]?.name ?? '').compareTo(users[b.userId]?.name ?? ''));
+    final read = [for (final o in others) if (o.lastReadSeq >= (m.seq ?? 1 << 62)) o];
+    final unread = [for (final o in others) if (o.lastReadSeq < (m.seq ?? 1 << 62)) o];
+    Widget person(MemberRow o) => ListTile(
+          leading: PersonAvatar(label: users[o.userId]?.name ?? '?', colorKey: o.userId, userId: o.userId, radius: 16),
+          title: Text(users[o.userId]?.name ?? 'Someone'),
+        );
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        Widget heading(String text) => Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, Space.xs),
+              child: Text(text, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            );
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+            child: ListView(shrinkWrap: true, key: const Key('readers-sheet'), children: [
+              heading(read.isEmpty ? 'Read by nobody yet' : 'Read by'),
+              for (final o in read) person(o),
+              if (unread.isNotEmpty) ...[heading('Not read yet'), for (final o in unread) person(o)],
+              const SizedBox(height: Space.sm),
+            ]),
+          ),
+        );
+      },
+    );
   }
 
   /// Web: photos and videos pasted into the composer.
@@ -287,7 +379,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final start = mq?.start ?? q?.start;
     if (start != _dismissedAt) _dismissedAt = null;
     final dismissed = start != null && start == _dismissedAt;
-    final people = mq == null || dismissed ? const <Person>[] : matchingPeople(mq.query, _people).take(6).toList();
+    final people = mq == null || dismissed ? const <Person>[] : mentionSuggestionsFor(mq.query, _people).take(6).toList();
     final matches = q == null || dismissed ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
     final key = mq != null ? '@${mq.start}:${mq.query}' : (q != null ? ':${q.start}:${q.query}' : null);
     final same = key == _suggestKey;
@@ -1106,7 +1198,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     _canStartGame = !group && !readOnly && other != null;
     final active = group ? const <GameState>[] : activeGames(ref.watch(gamesProvider(chatId)));
     final otherOnline = other != null && online.contains(other);
-    final subtitle = group ? membersLabel(members.length) : (otherOnline ? 'Online' : null);
+    final otherSeen = other == null ? null : users[other]?.lastSeenAt;
+    final subtitle = group
+        ? membersLabel(members.length)
+        : otherOnline
+        ? 'Online'
+        : otherSeen == null
+        ? null
+        : lastSeenLabel(DateTime.fromMillisecondsSinceEpoch(otherSeen), h24: MediaQuery.alwaysUse24HourFormatOf(context));
     final resets = ref.watch(resetBannersProvider(chatId)).value ?? const <ResetRow>[];
     final changed = [
       for (final m in members)
@@ -1151,13 +1250,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
-    final entries = buildTimeline(visible).reversed.toList(); // the list runs bottom-up
+    _findUnread(visible, me);
+    final entries = buildTimeline(visible, unreadFrom: _unreadFrom).reversed.toList(); // the list runs bottom-up
     final now = DateTime.now();
     final sync = ref.read(chatSyncProvider);
     const avatarSpace = 40.0;
 
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
+          UnreadEntry() => KeyedSubtree(key: const ValueKey('unread-line'), child: UnreadDivider(key: _unreadKey)),
           MessageEntry(message: final m) when gameEvents.containsKey(m.id) => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1190,7 +1291,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
-                mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
+                mentionNames: [
+                  for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name,
+                  if (group && mentionsOf(m).isNotEmpty) everyoneName,
+                ],
                 linkPreview: changes.previewOf(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
@@ -1199,6 +1303,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 forwarded: isForwarded(m),
                 onEdit: m.senderUserId == me && m.kind == 'text' && !changes.isDeleted(m.id) ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
+                onReadBy: group && m.senderUserId == me && m.seq != null && others.isNotEmpty
+                    ? () => _showReaders(m, members, users, me)
+                    : null,
                 mine: m.senderUserId == me,
                 senderName: group && m.senderUserId != me && firstInGroup ? users[m.senderUserId]?.name ?? 'Someone' : null,
                 reactions: reactions[m.id] ?? const {},
@@ -1235,6 +1342,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               colorKey: group ? chat.id : (other ?? chat.id),
               userId: group ? null : other,
               group: group,
+              chatId: chat.id,
+              chatPhotoKey: chat.avatarKey,
               online: otherOnline,
               radius: 20,
             ),
@@ -1321,6 +1430,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         colorKey: group ? chat.id : (other ?? chat.id),
                         userId: group ? null : other,
                         group: group,
+                        chatId: chat.id,
+                        chatPhotoKey: chat.avatarKey,
                         radius: 36,
                       ),
                       title: 'Say hello 👋',
@@ -1339,6 +1450,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         final i = entries.indexWhere((e) => switch (e) {
                               MessageEntry(:final message) => message.id == id,
                               DayEntry(:final day) => 'day-${day.millisecondsSinceEpoch}' == id,
+                              UnreadEntry() => id == 'unread-line',
                             });
                         return i < 0 ? null : i;
                       },
