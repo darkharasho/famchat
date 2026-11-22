@@ -79,6 +79,13 @@ Map<String, PollState> pollStates(Iterable<MessageRow> rows) {
   };
 }
 
+/// The poll [m] carries, or null (not a poll, or a body this version can't read).
+PollBody? pollOf(MessageRow m) {
+  if (m.kind != 'poll') return null;
+  final p = _decode(m);
+  return p is PollBody ? p : null;
+}
+
 Plaintext? _decode(MessageRow m) {
   if (m.body == null) return null;
   try {
