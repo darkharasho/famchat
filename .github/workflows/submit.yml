@@ -52,6 +52,9 @@ jobs:
       BUNDLE_ID: dev.famchat.app
       ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      # scripts/review-required.sh: what can't reach the App Store's live version as a patch
+      NATIVE_TAG_PREFIX: shorebird
+      NATIVE_CHECK: scripts/shorebird-native-check.sh
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
