@@ -81,6 +81,8 @@ dependencies:
   chess: 0.8.1
   app_badge_plus: ^1.4.0
   pasteboard: ^0.6.2
+  file_picker: ^13.4.1
+  open_filex: ^5.0.0
 
 dev_dependencies:
   flutter_test:

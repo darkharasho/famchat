@@ -20,6 +20,7 @@ import 'theme/presets.dart';
 import 'theme/system_bars.dart';
 import 'update/update_banner.dart';
 import 'media/video_io.dart';
+import 'media/file_actions.dart' show sweepOpenedFiles;
 import 'session/app_links.dart';
 import 'settings/appearance.dart';
 import 'settings/time_format_tile.dart';
@@ -40,6 +41,7 @@ Future<void> main() async {
   // Recordings and decrypted voice clips a crash or kill left behind.
   unawaited(sweepVoiceFiles());
   unawaited(sweepVideoFiles());
+  unawaited(sweepOpenedFiles());
   final invite = kIsWeb ? inviteTokenFromUri(Uri.base) : null;
   // FCM on Android, iOS and the web once Firebase is configured; otherwise null and push is off.
   final push = await initPush();

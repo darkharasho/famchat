@@ -7,6 +7,9 @@ import 'package:material_ui/material_ui.dart';
 
 import '../chat/providers.dart';
 import '../push/providers.dart' show rootMessengerKeyProvider;
+import '../media/file_actions.dart' show OutgoingFile;
+import '../media/providers.dart' show mediaServiceProvider;
+import '../media/send_files.dart';
 import '../media/staged_media.dart';
 import '../share/share.dart';
 import '../theme/tokens.dart';
@@ -37,6 +40,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     final db = ref.read(chatDbProvider);
     final messenger = ref.read(rootMessengerKeyProvider).currentState;
     final pending = ref.read(pendingShareProvider.notifier), source = ref.read(shareSourceProvider);
+    final media = ref.read(mediaServiceProvider);
     // Text waits in the composer, to read over (or edit) before sending.
     // Added to what's already typed there, never replacing it.
     if (share.text case final text? when text.trim().isNotEmpty) {
@@ -51,6 +55,11 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
       }
     }
     if (mounted) context.go('/chats/$chatId');
+    // Other files go at once, as they are (there's no caption to wait for).
+    if (share.files.isNotEmpty && media != null) {
+      final report = await sendFiles(media, chatId, [for (final f in share.files) OutgoingFile.xfile(f)]);
+      if (report.problem case final p?) messenger?.showSnackBar(SnackBar(content: Text(p)));
+    }
     _finish(pending, source);
   }
 

@@ -109,8 +109,11 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
         if let content = extensionContext!.inputItems[0] as? NSExtensionItem {
             if let contents = content.attachments {
                 for (index, attachment) in (contents).enumerated() {
+                    // FamChat: whether one of the plugin's types took this attachment.
+                    var matched = false
                     for type in SharedMediaType.allCases {
                         if attachment.hasItemConformingToTypeIdentifier(type.toUTTypeIdentifier) {
+                            matched = true
                             attachment.loadItem(forTypeIdentifier: type.toUTTypeIdentifier) { [weak self] data, error in
                                 guard let this = self, error == nil else {
                                     self?.dismissWithError()
@@ -123,6 +126,11 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
                                                          type: type,
                                                          index: index,
                                                          content: content)
+                                    } else if let url = data as? URL, url.isFileURL {
+                                        // FamChat: a text file (.txt, .csv) goes as a file.
+                                        this.handleMedia(forFile: url, type: .file, index: index, content: content)
+                                    } else {
+                                        this.completeAttachment(index: index, content: content)
                                     }
                                 case .url:
                                     if let url = data as? URL {
@@ -148,6 +156,24 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
                             }
                             break
                         }
+                    }
+                    // FamChat: any other file (a PDF, a document from Files) goes as a file.
+                    if !matched && attachment.hasItemConformingToTypeIdentifier("public.data") {
+                        attachment.loadItem(forTypeIdentifier: "public.data") { [weak self] data, error in
+                            guard let this = self, error == nil else {
+                                self?.dismissWithError()
+                                return
+                            }
+                            if let url = data as? URL, url.isFileURL {
+                                this.handleMedia(forFile: url, type: .file, index: index, content: content)
+                            } else if let bytes = data as? Data {
+                                this.handleMedia(forData: bytes, name: attachment.suggestedName, index: index, content: content)
+                            } else {
+                                this.completeAttachment(index: index, content: content)
+                            }
+                        }
+                    } else if !matched {
+                        completeAttachment(index: index, content: content)
                     }
                 }
             }
@@ -197,7 +223,27 @@ open class RSIShareViewController: UIViewController, RSIComposeViewDelegate {
         completeAttachment(index: index, content: content)
     }
     
+    /// FamChat: a file handed over as bytes, written to the App Group under its suggested name.
+    private func handleMedia(forData bytes: Data, name: String?, index: Int, content: NSExtensionItem) {
+        let fileName = (name?.isEmpty ?? true) ? UUID().uuidString : name!.replacingOccurrences(of: "/", with: "_")
+        let newPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent(fileName)
+        do {
+            try bytes.write(to: newPath)
+            sharedMedia.append(SharedMediaFile(
+                path: newPath.absoluteString.removingPercentEncoding!,
+                mimeType: newPath.mimeType(),
+                type: .file
+            ))
+        } catch {
+            print("Cannot write shared data: \(error)")
+        }
+        completeAttachment(index: index, content: content)
+    }
+
     private func handleMedia(forFile url: URL, type: SharedMediaType, index: Int, content: NSExtensionItem) {
+        // FamChat: files from other apps' storage (Files, iCloud Drive) may need their scope opened.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let fileName = getFileName(from: url, type: type)
         let newPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent(fileName)
         

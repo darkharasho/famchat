@@ -101,18 +101,19 @@ bool isImageFile(XFile f) {
   return dot >= 0 && imageExtensions.contains(name.substring(dot + 1).toLowerCase());
 }
 
-/// Dropped or shared files as photos and videos; anything else is counted in `skipped`.
-Future<({List<PickedMedia> media, int skipped})> pickedFromFiles(List<XFile> files) async {
+/// Dropped or shared files as photos and videos; anything else is in `others` (and counted in
+/// `skipped`), to send as files.
+Future<({List<PickedMedia> media, int skipped, List<XFile> others})> pickedFromFiles(List<XFile> files) async {
   final media = <PickedMedia>[];
-  var skipped = 0;
+  final others = <XFile>[];
   for (final f in files) {
     if (isVideoFile(f)) {
       media.add(PickedVideo(f));
     } else if (isImageFile(f)) {
       media.add(PickedPhoto(await f.readAsBytes()));
     } else {
-      skipped++;
+      others.add(f);
     }
   }
-  return (media: media, skipped: skipped);
+  return (media: media, skipped: others.length, others: others);
 }

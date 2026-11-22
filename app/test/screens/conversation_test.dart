@@ -497,8 +497,9 @@ void main() {
         await tester.tap(find.byTooltip('Attach'));
         await settle(tester);
         expect(find.byType(BottomSheet), findsNothing, reason: 'a menu by the button, not a sheet');
-        expect(find.byType(PopupMenuItem<Object>), findsNWidgets(3));
+        expect(find.byType(PopupMenuItem<Object>), findsNWidgets(4));
         expect(find.text('Photos and videos'), findsOneWidget);
+        expect(find.text('File'), findsOneWidget);
         expect(find.text('Poll'), findsOneWidget);
         expect(find.text('Take a photo'), findsNothing);
         expect(find.text('Record a video'), findsNothing);

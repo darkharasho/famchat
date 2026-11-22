@@ -43,12 +43,16 @@ class _PhoneShareSource implements ShareSource {
   }
 }
 
-/// The plugin's files as photos, videos and text (links come in as text).
+/// The plugin's files as photos, videos, other files and text (links come in as text).
 Future<IncomingShare> sharedToIncoming(List<SharedMediaFile> files) async {
   final media = <PickedMedia>[];
+  final others = <XFile>[];
   final texts = <String>[];
   for (final f in files) {
     switch (f.type) {
+      // Android calls a shared text file (.txt, .csv) "text" too, with its path.
+      case SharedMediaType.text when await _isFile(f.path):
+        others.add(XFile(f.path, mimeType: f.mimeType));
       case SharedMediaType.text || SharedMediaType.url:
         final t = f.path.trim();
         // A tapped invite link reaches the app as a "view" too: the invite listener handles it.
@@ -59,10 +63,27 @@ Future<IncomingShare> sharedToIncoming(List<SharedMediaFile> files) async {
       case SharedMediaType.video:
         media.add(PickedVideo(XFile(f.path, mimeType: f.mimeType)));
       case SharedMediaType.file:
-        media.addAll((await pickedFromFiles([XFile(f.path, mimeType: f.mimeType)])).media);
+        final sorted = await pickedFromFiles([XFile(f.path, mimeType: f.mimeType)]);
+        media.addAll(sorted.media);
+        others.addAll(sorted.others);
     }
     final message = f.message;
     if (message != null && message.trim().isNotEmpty && !texts.contains(message.trim())) texts.add(message.trim());
   }
-  return IncomingShare(media: media.take(maxPhotosPerPick).toList(), text: texts.isEmpty ? null : texts.join('\n'));
+  return IncomingShare(
+    media: media.take(maxPhotosPerPick).toList(),
+    files: others.take(maxPhotosPerPick).toList(),
+    text: texts.isEmpty ? null : texts.join('\n'),
+  );
+}
+
+/// Whether [path] is a file the plugin copied in (an absolute path that reads), not shared text.
+Future<bool> _isFile(String path) async {
+  if (!path.startsWith('/') || path.contains('\n')) return false;
+  try {
+    await XFile(path).length();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }

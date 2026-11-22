@@ -7,7 +7,12 @@ the extension must not link Flutter anyway.
 - `RSIComposeView.swift`: unmodified copy.
 - `RSIShareViewController.swift`: copy, modified in `redirectToHostApp` to call
   `UIApplication.open` through the Objective-C runtime (extensions must build with
-  `APPLICATION_EXTENSION_API_ONLY`, which rejects a direct call).
+  `APPLICATION_EXTENSION_API_ONLY`, which rejects a direct call). Also modified so other files
+  come through as `.file`: an attachment none of the plugin's types takes is loaded as
+  `public.data` (a URL, or bytes written to the App Group under the suggested name), a text
+  attachment that is a file URL goes as a file, each attachment always completes (an unmatched
+  last one used to leave the extension hanging), and file URLs are read inside their security
+  scope.
 - `SharedTypes.swift`: the constants and `SharedMediaFile`/`SharedMediaType` from the plugin's
   `ReceiveSharingIntentPlugin.swift`, without the Flutter plugin class.
 
