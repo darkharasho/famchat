@@ -460,7 +460,7 @@ export class FamilyHub extends DurableObject<Env> {
    * members. With [d.scheduled] the scheduled row of the same id is deleted in the same batch. The
    * caller has checked that the id is unused and sends the ack.
    */
-  private async deliver(d: Delivery): Promise<{ seq: number; createdAt: number } | { error: SendError }> {
+  private async deliver(d: Delivery): Promise<{ seq: number; createdAt: number; disappearSecs: number | null } | { error: SendError }> {
     const gate = await this.sendGate(d.userId, d.chatId, d.envelope.epoch);
     if (gate) return { error: gate };
     const db = this.env.DB;
@@ -510,7 +510,7 @@ export class FamilyHub extends DurableObject<Env> {
       for (const s of this.sockets(u, d.exclude)) trySend(s, msg);
       if (u !== d.userId) others.push(u);
     }
-    if (silent) return { seq, createdAt: now };
+    if (silent) return { seq, createdAt: now, disappearSecs: row.disappear_secs };
     // Mentioned members get their own job (other text, and it reaches them through a mute).
     const job: Omit<PushJob, "userIds"> = {
       chatId: d.chatId,
@@ -527,7 +527,7 @@ export class FamilyHub extends DurableObject<Env> {
         console.error("push hook failed", e),
       );
     }
-    return { seq, createdAt: now };
+    return { seq, createdAt: now, disappearSecs: row.disappear_secs };
   }
 
   private async handleSend(ws: WebSocket, att: Att, m: Incoming): Promise<void> {
@@ -541,13 +541,13 @@ export class FamilyHub extends DurableObject<Env> {
     }
     const db = this.env.DB;
     const prior = await db.prepare(
-      "SELECT chat_id, seq, sender_user_id, sender_device_id, created_at, scheduled FROM messages WHERE id = ?",
-    ).bind(id).first<{ chat_id: string; seq: number; sender_user_id: string; sender_device_id: string; created_at: number; scheduled: number }>();
+      "SELECT chat_id, seq, sender_user_id, sender_device_id, created_at, scheduled, disappear_secs FROM messages WHERE id = ?",
+    ).bind(id).first<{ chat_id: string; seq: number; sender_user_id: string; sender_device_id: string; created_at: number; scheduled: number; disappear_secs: number | null }>();
     if (prior) {
       // A scheduled message may be resent by any device of its sender (one of them delivered it).
       const mine = prior.sender_device_id === att.deviceId || (prior.scheduled === 1 && prior.sender_user_id === att.userId);
       if (prior.chat_id === chatId && mine) {
-        return send(ws, { type: "ack", id, seq: prior.seq, createdAt: prior.created_at });
+        return send(ws, ackFrame(id, { seq: prior.seq, createdAt: prior.created_at, disappearSecs: prior.disappear_secs }));
       }
       return send(ws, { type: "error", id, error: "conflict" });
     }
@@ -563,7 +563,7 @@ export class FamilyHub extends DurableObject<Env> {
       silent: m.silent === true, mentions: mentions ?? undefined, scheduled: !!sched, exclude: ws,
     });
     if ("error" in r) return send(ws, { type: "error", id, error: r.error });
-    send(ws, { type: "ack", id, seq: r.seq, createdAt: r.createdAt });
+    send(ws, ackFrame(id, r));
     if (sched) {
       this.ackOwn(att.userId, id, r, ws);
       await this.notify([att.userId], { type: "scheduled" });
@@ -572,8 +572,8 @@ export class FamilyHub extends DurableObject<Env> {
   }
 
   /** Sends `ack` for [id] to [userId]'s sockets but [exclude] (a scheduled message got delivered). */
-  private ackOwn(userId: string, id: string, r: { seq: number; createdAt: number }, exclude?: WebSocket): void {
-    const text = JSON.stringify({ type: "ack", id, seq: r.seq, createdAt: r.createdAt });
+  private ackOwn(userId: string, id: string, r: AckInfo, exclude?: WebSocket): void {
+    const text = JSON.stringify(ackFrame(id, r));
     for (const s of this.sockets(userId, exclude)) trySend(s, text);
   }
 
@@ -991,4 +991,11 @@ function trySend(ws: WebSocket, text: string): void {
   } catch {
     /* closing */
   }
+}
+
+type AckInfo = { seq: number; createdAt: number; disappearSecs?: number | null };
+
+/** The `ack` frame; carries the disappearing timer the server stamped, when there is one. */
+function ackFrame(id: string, r: AckInfo): Record<string, unknown> {
+  return { type: "ack", id, seq: r.seq, createdAt: r.createdAt, ...(r.disappearSecs != null ? { disappearSecs: r.disappearSecs } : {}) };
 }

@@ -859,7 +859,7 @@ delivered as (the envelope's signature binds it and `senderDeviceId`).
 
 **Delivery.** At `deliverAt` the hub delivers it through the same path as a `send` (checks, a new
 `seq`, `msg` fan-out, pushes, the chat's disappearing timer as it is then) and sends
-`{type:"ack", id, seq, createdAt}` to **every** socket of the sender; their sockets also get the
+`{type:"ack", id, seq, createdAt, disappearSecs?}` to **every** socket of the sender; their sockets also get the
 `msg` (unlike a socket `send`, no socket is excluded). Then the row is gone. Otherwise:
 
 - **The epoch moved on** (`stale_epoch`: someone left, a device was revoked): it becomes
@@ -1000,7 +1000,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 |---|---|
 | `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
 | `{type:"presence", userId, online, lastSeenAt?}` | a user sharing a family with you: their first socket opened / last socket closed (then with `lastSeenAt`, Unix ms, also kept as the directory's `lastSeenAt`) |
-| `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before); also to every socket of yours when one of your scheduled messages is delivered |
+| `{type:"ack", id, seq, createdAt, disappearSecs?}` | your `send` was stored (or had been stored before); `disappearSecs` is the timer the server stamped, when there is one; also to every socket of yours when one of your scheduled messages is delivered |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
 | `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |

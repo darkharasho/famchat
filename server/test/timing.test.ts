@@ -525,8 +525,11 @@ describe("disappearing messages", () => {
     const sb = await socket(b);
     const id = newId();
     sa.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
-    await sa.next("ack");
+    expect(await sa.next("ack")).toMatchObject({ id, disappearSecs: WEEK_S });
     expect(((await sb.next("msg")) as { message: Msg }).message.disappearSecs).toBe(WEEK_S);
+    // A resend acks again with the same timer.
+    sa.send({ type: "send", id, chatId: chat.id, envelope: envelope() });
+    expect(await sa.next("ack")).toMatchObject({ id, disappearSecs: WEEK_S });
     const row = await msgRow(id);
     expect(row).toMatchObject({ disappear_secs: WEEK_S, delete_at: row!.created_at + WEEK_S * 1000 + BACKSTOP_MS });
     expect(await alarmAt()).toBe(row!.delete_at);
