@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { hubStub } from "../hub";
-import { notify } from "../notify";
+import { notify, timersChanged } from "../notify";
 import { leaveGroupStmts, memberIds } from "./chatdb";
 import { ApiError } from "./errors";
 
@@ -195,5 +195,6 @@ export async function removeFromFamily(env: Env, familyId: number, userId: strin
   }
   await notifyFamily(env, familyId, [userId]);
   await sharesChanged(env);
+  if (chats.length) await timersChanged(env);
   return true;
 }

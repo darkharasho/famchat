@@ -7,11 +7,12 @@
 // objects go, their sockets close, and the family is told.
 import type { Env } from "../env";
 import { hubStub } from "../hub";
-import { notify } from "../notify";
+import { notify, timersChanged } from "../notify";
 import { memberIds } from "./chatdb";
 import { ApiError } from "./errors";
 import { familyPeers, NEXT_OWNER_SQL, notifyFamily, sharesChanged, sharingUserIds } from "./family";
 import { eventStmt } from "./reset";
+import { allReadAfterLeaveStmt } from "./timing";
 
 export const DELETED_USER_NAME = "Deleted user";
 export const DELETED_DEVICE_NAME = "Deleted device";
@@ -40,6 +41,9 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   const db = env.DB;
   // Who shares a chat with the user, before they leave them: they hear about the revoked devices.
   const sharing = (await sharingUserIds(db, userId)).filter((u) => u !== userId);
+
+  const chatsBefore = (await db.prepare("SELECT chat_id FROM chat_members WHERE user_id = ?").bind(userId)
+    .all<{ chat_id: string }>()).results.map((r) => r.chat_id);
 
   const avatar = await db.prepare("SELECT avatar_key FROM users WHERE id = ?").bind(userId)
     .first<string | null>("avatar_key");
@@ -98,6 +102,11 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
   ];
   const devIdx = 2, chatIdx = 5, msgIdx = 7, mediaIdx = 8, ownedIdx = 13;
   stmts.push(db.prepare(`DELETE FROM starred_messages WHERE user_id = ? AND ${guard}`).bind(userId, ...gb));
+  stmts.push(db.prepare(`DELETE FROM reminders WHERE user_id = ? AND ${guard}`).bind(userId, ...gb));
+  // Their scheduled messages go too (their media goes with the rest of their uploads).
+  stmts.push(db.prepare(`DELETE FROM scheduled_messages WHERE sender_user_id = ? AND ${guard}`).bind(userId, ...gb));
+  // Having left, they no longer hold back others' disappearing messages (the hub re-arms below).
+  for (const chatId of chatsBefore) stmts.push(allReadAfterLeaveStmt(db, chatId, now, { sql: guard, binds: gb }));
   stmts.push(eventStmt(db, {
     kind: "account_deleted",
     userId,
@@ -140,6 +149,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
     }
   }
   for (const chatId of chats) await notify(env, await memberIds(db, chatId), { type: "chat", chatId });
+  await timersChanged(env);
   for (const deviceId of revoked) await notify(env, sharing, { type: "device", userId, deviceId, revoked: true });
   // Their photos and voice messages: shown as gone, like quota eviction.
   const byChat = new Map<string, string[]>();

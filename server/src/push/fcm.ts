@@ -164,6 +164,48 @@ export function fcmPreviewMessage(token: string, n: Notification, p: PreviewData
   };
 }
 
+/** What a reminder push carries besides the visible text. */
+export interface ReminderData {
+  chatId: string;
+  messageId: string;
+  /** The reminder's time (Unix ms). */
+  at: number;
+}
+
+/**
+ * A reminder the user set came due. Like a message push it has a plain shape (a notification block,
+ * for devices without previews or when the envelope was too big) and a preview shape (data only, the
+ * envelope for the app to decrypt). Both carry `type: "reminder"`, `messageId` and `at` in `data`,
+ * and their own tag / thread (`reminder-<messageId>`) so they don't replace the chat's message
+ * notification. No badge: a reminder doesn't change the unread count.
+ */
+export function fcmReminderMessage(token: string, n: Notification, r: ReminderData, appOrigin: string, preview?: PreviewData) {
+  const tag = `reminder-${r.messageId}`;
+  const extra = { type: "reminder", messageId: r.messageId, at: String(r.at) };
+  const link = `${appOrigin}/chats/${r.chatId}`;
+  if (preview) {
+    const m = fcmPreviewMessage(token, n, preview, appOrigin);
+    return {
+      message: {
+        ...m.message,
+        data: { ...m.message.data, ...extra },
+        apns: { ...m.message.apns, payload: { aps: { ...m.message.apns.payload.aps, "thread-id": tag } } },
+        webpush: { fcm_options: { link } },
+      },
+    };
+  }
+  const m = fcmMessage(token, n, appOrigin);
+  return {
+    message: {
+      ...m.message,
+      data: { ...m.message.data, ...extra },
+      android: { ...m.message.android, notification: { ...m.message.android.notification, tag } },
+      apns: { ...m.message.apns, payload: { aps: { ...m.message.apns.payload.aps, "thread-id": tag } } },
+      webpush: { notification: { tag }, fcm_options: { link } },
+    },
+  };
+}
+
 /**
  * A quiet badge update (the user read chats on another device): nothing shows, only the app-icon
  * number changes. iOS: an `alert`-type push (APNs counts badge-only pushes as alerts) whose `aps`

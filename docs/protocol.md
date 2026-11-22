@@ -46,9 +46,11 @@ Device    = {id, name, platform, encPub, signPub, certSig, revoked}
 Chat      = {id, kind: "direct"|"group", title: string|null, createdBy, currentEpoch, epochReady,
              lastSeq, lastMessageAt: number|null, createdAt, mutedUntil: number|null,
              pinnedAt: number|null, archivedAt: number|null, markedUnread: boolean, avatarKey: string|null,
-             members: Member[]}
+             disappearSecs: number|null, disappearChangedBy: string|null, disappearChangedAt: number|null,
+             disappearChangedSeq: number|null, members: Member[]}       ("Disappearing messages")
 Member    = {userId, joinedSeq, lastReadSeq}
-Message   = {chatId, seq, id, senderUserId, senderDeviceId, envelope: Envelope, createdAt}
+Message   = {chatId, seq, id, senderUserId, senderDeviceId, envelope: Envelope, createdAt,
+             disappearSecs?}                       (present only when the message has a timer)
 Envelope  = {v: 1, epoch, nonce, ct, sig}                                  (spec "Messages")
 Wrap      = {chatId, epoch, recipientDeviceId, wrapperDeviceId, sealed, sig} (spec "Signed wraps")
 ```
@@ -413,6 +415,17 @@ Photos are re-encoded as JPEG at most 2048 px on the long side (EXIF dropped); t
   badge itself and shows nothing), and on iOS `apns-push-type: alert`, `apns-priority: 10` with
   `aps {badge: n}` only (no alert or sound, so iOS just changes the number). Failed devices are
   re-queued like message pushes. Off whenever push is off.
+- **Reminders** ("Reminders"): when a reminder fires, its owner's devices with a token and no open
+  socket get a push (devices with a socket get the `reminder` frame instead). Title "Reminder", body
+  "Message from <sender>" (direct), "<group title>: message from <sender>" (group), or "Your message"
+  / "<group title>: your message" for their own. Both shapes add `data.type = "reminder"`,
+  `data.messageId` and `data.at` (the reminder time, decimal string). Plain: `notification` and
+  `data {chatId, type, messageId, at}`. Preview (previews on, envelope ≤ 3000 bytes): the message
+  preview shape above (`env`, `epoch`, `senderUserId`, `senderDeviceId`, `title`, `body`, `preview:
+  "1"`) plus those three fields. It carries no badge, uses its own tag / `thread-id`
+  `reminder-<messageId>` (so it doesn't replace the chat's message notification), ignores mutes, and
+  is retried like message pushes. Apps that predate reminders show a preview one as a message preview
+  from the sender and a plain one as "Reminder".
 - Who gets one: every device of the other members (except those who muted the chat and weren't
   @mentioned, and none at all for a `silent` send) that has a token and **no open socket** when the
   message is stored (a phone is pushed even while the same user's desktop is connected). Sockets that
@@ -603,7 +616,8 @@ Required by app stores for apps with accounts. Two ways in, one transaction:
 What happens, atomically:
 - **Deleted:** every message the user sent (ciphertext rows: their texts, photos, voice messages and
   reactions, so `seq` gaps appear in history), every media object they uploaded (R2 object and row,
-  live or expired), every chat-key wrap addressed to their devices, their WebSocket tickets.
+  live or expired), every chat-key wrap addressed to their devices, their WebSocket tickets, their
+  scheduled messages and reminders.
 - **Revoked:** every device (refresh tokens and push tokens cleared, sockets closed with 4001, unclaimed
   pairings cancelled); device names become `"Deleted device"`.
 - **Left:** every chat they were in, direct ones included. Each chat moves to `currentEpoch + 1` with
@@ -789,8 +803,9 @@ writes an `events` row (audit log; not exposed by the API yet).
   first. An archived chat returns to the list once a message newer than `archivedAt` arrives, unless
   it's muted. `unread: true` is "mark as unread": clients show it as unread until it's opened, then
   send `unread: false`. Marked chats don't add to the app-icon badge.
-- `PATCH /chats/:id {title}` → `{chat}`. Groups only; any member renames (1–60 characters, no control
-  characters). Every member's sockets get a `chat` event.
+- `PATCH /chats/:id {title?, disappearSecs?}` (at least one) → `{chat}`. Any member. `title`: groups
+  only (1–60 characters, no control characters). `disappearSecs`: any chat, `null` (off), `86400`,
+  `604800` or `7776000`, else 400 ("Disappearing messages"). Every member's sockets get a `chat` event.
 - `PUT /chats/:id/avatar` (raw JPEG body, as for profile photos) → `{avatarKey}`; `DELETE
   /chats/:id/avatar` → 204. A group's photo; any member sets or removes it, and every member gets a
   `chat` event. `GET /chats/:id/avatar?v=<avatarKey>` → the JPEG for members, cacheable for good; 404
@@ -813,6 +828,117 @@ ids they starred, never content.
   is still in and messages the server still holds. Leaving a group or deleting the account drops them.
   Clients hide stars on messages that were deleted (unsent).
 
+### Scheduled messages
+
+A message can be held by the server until a time and then delivered exactly like a `send`. The
+sending device encrypts it when scheduling (current epoch, as for a send) and keeps the plaintext;
+the server stores only the envelope, ids and times. Nobody else sees anything until it is delivered.
+
+`Scheduled = {id, chatId, senderDeviceId, envelope: Envelope, silent, mentions: [userId], deliverAt,
+state: "pending"|"needs_resend"|"failed", createdAt, updatedAt}`. `id` is the message id it will be
+delivered as (the envelope's signature binds it and `senderDeviceId`).
+
+- `PUT /me/scheduled/:id {chatId, envelope, deliverAt, silent?, mentions?}` → `201 {scheduled}` when
+  new, `200 {scheduled}` when it replaced (edited) the caller's existing one or changed nothing (a
+  retry of the same body). `deliverAt` (Unix ms) must be at least 1 minute and at most 366 days ahead
+  (else 400); `envelope`, `silent` and `mentions` are checked as for `send` (400). Not a member: 404.
+  The envelope's epoch must be the current one (409 `stale_epoch`: re-encrypt, retry). A direct chat
+  without a shared family: 403 `no_shared_family`. An id already used by a message, or by someone
+  else's (or another chat's) scheduled message: 409 `conflict`. Replacing takes a new envelope
+  and/or time from any device of the sender (`senderDeviceId` becomes that device) and makes it
+  `pending` again.
+- `GET /me/scheduled` → `{scheduled: Scheduled[]}`: the caller's own, soonest first, in chats they
+  are still in, envelopes included so each of their devices can show and edit them (decrypting with
+  the chat key of `envelope.epoch`).
+- `DELETE /me/scheduled/:id` → 204 (cancel; 404 unless it's the caller's). Blobs the caller uploaded
+  under that message id are deleted (R2 objects and rows).
+- `POST /me/scheduled/:id/send` → `{id, seq, createdAt}`: deliver now with the stored envelope (404
+  unless the caller's; 409 `stale_epoch` after a key change, which also makes it `needs_resend`).
+- Any change to the list (created, edited, cancelled, delivered, dropped, state changed) sends
+  `{type:"scheduled"}` to all the sender's sockets: `GET /me/scheduled`.
+
+**Delivery.** At `deliverAt` the hub delivers it through the same path as a `send` (checks, a new
+`seq`, `msg` fan-out, pushes, the chat's disappearing timer as it is then) and sends
+`{type:"ack", id, seq, createdAt}` to **every** socket of the sender; their sockets also get the
+`msg` (unlike a socket `send`, no socket is excluded). Then the row is gone. Otherwise:
+
+- **The epoch moved on** (`stale_epoch`: someone left, a device was revoked): it becomes
+  `needs_resend` and the sender's sockets get `{type:"needs_resend", chatId, id}`. The hub never
+  retries it by itself. Any device of the sender re-encrypts it (from the plaintext it kept, or by
+  decrypting the stored envelope with the old epoch's key) and sends it with a normal
+  `{type:"send", id, ...}` **with the same id**: that delivers it at once (late), from that device.
+  A `send` from any device of the sender with the id of their scheduled message (in any state) is
+  "deliver now with this envelope". It is delivered exactly once: sends are serialized, and a
+  scheduled message's id, once delivered, acks again (same `seq`) when any device of its sender
+  sends it again (a plain message only acks again for its own device); everyone else gets `conflict`.
+- **The sender is no longer in the chat:** it is dropped (with its blobs).
+- **A direct chat with no shared family any more** (`no_shared_family`): `failed`.
+- **An unexpected error** (D1 outage): retried after 1, 2, 4, 8, 16 minutes; after 6 failures `failed`.
+  A `failed` message stays listed until cancelled; "send now" or a `send` with its id may still
+  deliver it.
+
+**Media.** Blobs are uploaded with `messageId` = the scheduled id when scheduling, and count toward
+the quota from then. Quota eviction never takes blobs of a message that is still scheduled. Replacing
+a scheduled message keeps earlier blobs under its id (they go with the message: cancelling, or
+disappearing, deletes them).
+
+### Reminders
+
+A reminder is private to its owner: the server stores only (user, chat, message id, time).
+
+- `PUT /chats/:id/messages/:messageId/reminder {at}` → 204: sets or moves the caller's reminder for
+  that message. `at` must be at least 1 minute and at most 366 days ahead (400). 404 unless the caller
+  is a member and the message is in that chat.
+- `DELETE /chats/:id/messages/:messageId/reminder` → 204 (idempotent; 404 unless a member).
+- `GET /me/reminders` → `{reminders: [{chatId, messageId, at}]}`, soonest first, only in chats the
+  caller is still in, for messages the server still holds.
+- Setting, moving or clearing sends `{type:"reminders"}` to the caller's own sockets:
+  `GET /me/reminders`.
+- **Firing:** at `at` the hub sends `{type:"reminder", chatId, messageId, at}` to every socket of the
+  owner, pushes their other devices ("Push", reminders), and deletes the row. Clients show a
+  reminder they had cached whose time passed while every device was off when they next open, since
+  the server no longer lists it. A reminder for a message that is gone (deleted account,
+  disappeared) or in a chat the owner left is dropped without notice; leaving a group deletes the
+  leaver's reminders there. Failures are retried with backoff and dropped after 6 tries.
+
+### Disappearing messages
+
+Per chat, any member sets a timer (`PATCH /chats/:id {disappearSecs}`): `null` (off), `86400`
+(24 hours), `604800` (7 days) or `7776000` (90 days). It's metadata the server needs to delete
+messages, so it isn't end-to-end encrypted (like the title).
+
+- **Who changed it.** A change records `disappearChangedBy` (user id), `disappearChangedAt` (Unix ms)
+  and `disappearChangedSeq` (the chat's `lastSeq` at that moment) on the `Chat`; all members get a
+  `chat` event. Clients show a line ("Mom turned on disappearing messages: 7 days" / "…turned off
+  disappearing messages") right after message `disappearChangedSeq` in the timeline. Only the latest
+  change is kept, so a device that missed several sees one line. Setting the value it already has
+  changes nothing (no new line). All three are `null` until the first change.
+- **Stamping.** Every message stored while a timer is set (silent changes and scheduled messages
+  too, with the setting at delivery) carries it: `Message.disappearSecs` in `msg` frames and history.
+  Turning the timer off or changing it doesn't touch messages already sent.
+- **Clients** delete their own copy `disappearSecs` after they read it (their read position passed
+  it, on any of their devices), their own messages that long after `createdAt`, and any message at
+  the backstop below at the latest.
+- **Server deletion** happens at the earlier of: (a) the moment every **current** member other than
+  the sender has `lastReadSeq ≥ seq`, plus the timer (the sender counts as having read their own
+  message; in a chat with only the sender, that's at once); (b) the backstop `createdAt + timer + 30
+  days`. A member leaving (or being removed, or deleting their account) no longer holds messages
+  back. The deletion time only ever moves earlier. Then the hub deletes the message row, its blobs
+  (R2 objects and `media` rows with that `message_id`), and stars and reminders on it, and sends
+  `{type:"gone", chatId, ids:[messageId]}` to the members' open sockets. History (`GET
+  /chats/:id/messages`) never returns a message past its deletion time, even before the hub got to
+  it; the `seq` hole is like any other (see `send` rules).
+- **Devices that were offline** learn of deletions from tombstones:
+  `GET /me/gone?after=<cursor>&limit=` (cursor 0 at first, `limit` 1–1000, default 500) →
+  `{gone: [{chatId, messageId, seq}], cursor}`, oldest first, for chats the caller is in. Store
+  `cursor` and pass it next time; a full page means ask again. Tombstones are kept 121 days (the
+  longest timer + the 30-day backstop + a day) and only hold ids. Why they are needed: a device that
+  was offline can't tell from history alone that a message it already holds is gone (it only asks
+  for `seq` above what it has), and the "everyone read it" deletion depends on other members' reads.
+  Beyond 121 days none is needed: any message deleted that long ago is past its backstop, which the
+  device applies itself.
+- Older apps ignore the timer and keep their copies; the server deletes its copy regardless.
+
 ### Media
 - `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
   (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
@@ -824,7 +950,8 @@ ids they starred, never content.
   otherwise); `media_expired` (410) once evicted.
 - Quota: the family's live media is capped at 8 GiB. The upload that passes it makes the server delete
   the oldest blobs (a message's blobs together) until the total is below 7.5 GiB; members of each
-  affected chat get `{type:"media_expired", chatId, keys}`.
+  affected chat get `{type:"media_expired", chatId, keys}`. Blobs of a message that is still scheduled
+  are never evicted ("Scheduled messages").
 - `GET /admin/usage` (admin) → `{usedBytes, capBytes, evictToBytes, files, expiredFiles}`.
 
 ### Keys
@@ -867,19 +994,24 @@ Frames are JSON text. One socket per device carries every chat.
 Presence (`hello`, `presence`), `typing`, `profile`, `reset` and `account_deleted` reach only people
 who share a family with the user they're about; `device` reaches only chat partners who also share
 one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat`, `removed`,
-`keys`, `media_expired`) follow chat membership.
+`keys`, `media_expired`, `gone`) follow chat membership.
 
 | frame | when |
 |---|---|
 | `{type:"hello", online:[userId]}` | right after connecting: who is online among the people sharing a family with you |
 | `{type:"presence", userId, online, lastSeenAt?}` | a user sharing a family with you: their first socket opened / last socket closed (then with `lastSeenAt`, Unix ms, also kept as the directory's `lastSeenAt`) |
-| `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before) |
+| `{type:"ack", id, seq, createdAt}` | your `send` was stored (or had been stored before); also to every socket of yours when one of your scheduled messages is delivered |
 | `{type:"error", id?, error}` | `invalid_request`, `not_member`, `stale_epoch`, `conflict`, `internal` |
 | `{type:"msg", message: Message, silent?, mentions?}` | a new message in one of your chats (not echoed to the sending socket); `silent: true` means don't notify; `mentions`: members @mentioned (notify them even if muted) |
 | `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
 | `{type:"stars"}` | (to your own sockets) your starred messages changed: `GET /me/stars` |
+| `{type:"scheduled"}` | (to your own sockets) your scheduled messages changed: `GET /me/scheduled` |
+| `{type:"needs_resend", chatId, id}` | (to your own sockets) your scheduled message's epoch moved on: re-encrypt it and `send` it with the same id ("Scheduled messages") |
+| `{type:"reminders"}` | (to your own sockets) your reminders changed: `GET /me/reminders` |
+| `{type:"reminder", chatId, messageId, at}` | (to your own sockets) one of your reminders came due: notify |
+| `{type:"gone", chatId, ids:[messageId]}` | the server deleted those disappearing messages: drop them ("Disappearing messages") |
 | `{type:"removed", chatId}` | you left or were removed |
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat and a family with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |
@@ -897,7 +1029,10 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 - In a **direct** chat, the sender and the other member must be live and share a family, else
   `no_shared_family`. A chat whose other member deleted their account is still allowed.
 - **Idempotent on `id`:** resending an id from the same device and chat returns the original `ack`
-  (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`.
+  (same `seq`) and doesn't fan out again. The same id anywhere else → `conflict`. A delivered
+  scheduled message acks again for any device of its sender.
+- **A scheduled message's id** (yours, same chat): delivers it now with this envelope, from this
+  device, and removes it from your scheduled list ("Scheduled messages"). Someone else's → `conflict`.
 - Sends are processed one at a time; `seq` per chat is assigned without gaps and `msg` frames go out in
   `seq` order (deleting an account later removes its messages, which leaves holes in history).
   Clients still treat a `seq` above `lastSeen + 1` as a gap and fetch `?after=lastSeen`.
@@ -907,12 +1042,18 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 ### Sync
 On every (re)connect: `GET /users`, `GET /chats`, `GET /keys/wraps`, then per chat
 `GET /chats/:id/messages?after=<highest seq stored>` until a short page, then `GET /keys/missing` and
-add wraps you can, then resend the outbox.
+add wraps you can, then resend the outbox. Also `GET /me/gone?after=<cursor>` (drop those messages),
+`GET /me/scheduled` and `GET /me/reminders`.
 
 ### Hooks for later plans
 - Push (plan 9, done): `FamilyHub.push.notify(job)` puts a job on the `famchat-push` queue; the Worker's
   `queue()` handler (`src/push/consumer.ts`) sends it through FCM. `FamilyHub.badges.update(job)` queues
-  badge updates on the same queue. See "Push" above.
+  badge updates on the same queue, and `FamilyHub.reminderPush.remind(job)` reminder pushes
+  (`{kind: "reminder", ...}`). See "Push" above.
+- One Durable Object alarm on the hub, set to the earliest of: pending scheduled messages' next try,
+  reminders' next try, and messages' deletion time (migration 0019). It is re-armed after every
+  insert, cancel and run; each run handles at most 50 of each kind and runs again at once if more are
+  due. One failing item is retried with backoff and never blocks the others.
 - Admin reset (plan 10) reuses plan 6: revoking the user's devices rotates every chat, and the
   `device` event plus missing-wrap repair restores history to the new device ("Account resets").
 

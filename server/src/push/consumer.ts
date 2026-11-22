@@ -3,13 +3,14 @@
 // the message, which the server can't read anyway. Each push also carries the user's unread total
 // for the app-icon badge, and BadgeJobs (a chat read on another device) carry only that.
 import type { Env } from "../env";
-import { BADGE_PLATFORMS, type BadgeJob, isBadgeJob, type PushJob, type QueueJob } from "../hub";
+import { BADGE_PLATFORMS, type BadgeJob, isBadgeJob, isReminderJob, type PushJob, type QueueJob, type ReminderJob } from "../hub";
 import {
   accessToken,
   type Fetch,
   fcmBadgeMessage,
   fcmMessage,
   fcmPreviewMessage,
+  fcmReminderMessage,
   invalidateAccessToken,
   type Notification,
   parseServiceAccount,
@@ -51,6 +52,7 @@ export async function handlePushBatch(batch: MessageBatch<QueueJob>, env: Env, f
     try {
       const job = msg.body;
       if (isBadgeJob(job)) await deliverBadgeJob(env, sa, job, fetcher);
+      else if (isReminderJob(job)) await deliverReminderJob(env, sa, job, fetcher);
       else await deliverJob(env, sa, job, fetcher);
       msg.ack();
     } catch (e) {
@@ -159,6 +161,49 @@ export async function deliverBadgeJob(env: Env, sa: ServiceAccount, job: BadgeJo
   if (retry.length && attempt < MAX_ATTEMPTS && env.PUSH_QUEUE) {
     await env.PUSH_QUEUE.send({ kind: "badge", userId: job.userId, deviceIds: retry, attempt }, { delaySeconds: RETRY_DELAY_S * attempt })
       .catch((e) => console.error("badge retry not queued", e));
+  }
+  return deliveries;
+}
+
+/**
+ * "Reminder" / "Message from <sender>" (direct) or "<group>: message from <sender>"; "Your message"
+ * when it was the user's own. Previews decrypt the text on the device, as for messages.
+ */
+export async function reminderNotification(db: D1Database, job: ReminderJob): Promise<Notification | null> {
+  const row = await db.prepare(
+    "SELECT c.kind, c.title, u.name AS sender FROM chats c, users u WHERE c.id = ? AND u.id = ?",
+  ).bind(job.chatId, job.senderUserId).first<{ kind: string; title: string | null; sender: string }>();
+  if (!row) return null;
+  const who = job.senderUserId === job.userId ? null : row.sender;
+  const what = who ? `message from ${who}` : "your message";
+  const body = row.kind === "group" ? `${row.title || "Group"}: ${what}` : what[0].toUpperCase() + what.slice(1);
+  return { title: "Reminder", body, chatId: job.chatId };
+}
+
+/**
+ * Sends a reminder to the job's devices that are still its user's, live, holding a token, and still
+ * in the chat. Failed sends are re-queued like message pushes.
+ */
+export async function deliverReminderJob(env: Env, sa: ServiceAccount, job: ReminderJob, fetcher: Fetch): Promise<Delivery[]> {
+  if (typeof job.userId !== "string" || !Array.isArray(job.deviceIds) || job.deviceIds.length === 0) return [];
+  const note = await reminderNotification(env.DB, job);
+  if (!note) return [];
+  const ids = job.deviceIds.slice(0, 100);
+  const { results } = await env.DB.prepare(
+    `SELECT d.id, d.push_token, d.push_previews FROM devices d
+     JOIN chat_members m ON m.user_id = d.user_id AND m.chat_id = ?
+     WHERE d.user_id = ? AND d.id IN (${ids.map(() => "?").join(",")})
+       AND d.revoked_at IS NULL AND d.push_token IS NOT NULL`,
+  ).bind(job.chatId, job.userId, ...ids).all<{ id: string; push_token: string; push_previews: number }>();
+  const preview = job.preview && { messageId: job.messageId, senderUserId: job.senderUserId, ...job.preview };
+  const r = { chatId: job.chatId, messageId: job.messageId, at: job.at };
+  const deliveries = await sendMessages(env, sa, results, (d) =>
+    fcmReminderMessage(d.push_token, note, r, env.APP_ORIGIN, d.push_previews === 1 ? preview : undefined), fetcher);
+  const retry = deliveries.filter((d) => d.result === "retry").map((d) => d.deviceId);
+  const attempt = (job.attempt ?? 0) + 1;
+  if (retry.length && attempt < MAX_ATTEMPTS && env.PUSH_QUEUE) {
+    await env.PUSH_QUEUE.send({ ...job, deviceIds: retry, attempt }, { delaySeconds: RETRY_DELAY_S * attempt })
+      .catch((e) => console.error("reminder retry not queued", e));
   }
   return deliveries;
 }

@@ -56,7 +56,10 @@ export async function evictOldest(env: Env, notify: Notify, cap = MEDIA_CAP, tar
   let freed = 0;
   for (let offset = 0; usage - freed >= target; offset += PAGE) {
     const { results } = await db.prepare(
+      // Blobs of a scheduled message that isn't delivered yet are never evicted: it would arrive
+      // with its media already gone.
       `SELECT key, chat_id, uploader_id, message_id, bytes FROM media WHERE expired_at IS NULL
+       AND (message_id IS NULL OR message_id NOT IN (SELECT id FROM scheduled_messages))
        ORDER BY created_at, key LIMIT ? OFFSET ?`,
     ).bind(PAGE, offset).all<Row>();
     if (results.length === 0) break;

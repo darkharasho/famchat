@@ -7,6 +7,8 @@ import { notify } from "../notify";
 import { ApiError } from "../lib/errors";
 import { name, readJson } from "../lib/validate";
 import { requireAuth } from "../middleware/auth";
+import { hubStub, parseMentions, type ScheduledRow, scheduledOut, validEnvelope } from "../hub";
+import { isUlid } from "../lib/chatdb";
 
 export const me = new Hono<AppEnv>();
 me.use(requireAuth);
@@ -22,6 +24,92 @@ me.get("/stars", async (c) => {
      WHERE s.user_id = ? ORDER BY s.starred_at DESC, s.message_id DESC LIMIT 5000`,
   ).bind(c.get("userId")).all<{ chatId: string; messageId: string; starredAt: number }>();
   return c.json({ stars: rows.results });
+});
+
+/**
+ * The caller's scheduled messages (docs/protocol.md "Scheduled messages"), soonest first, envelopes
+ * included so each of their devices can show them. Only chats they are still in.
+ */
+me.get("/scheduled", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT s.id, s.chat_id, s.sender_user_id, s.sender_device_id, s.envelope, s.silent, s.mentions, s.deliver_at,
+       s.state, s.attempts, s.created_at, s.updated_at
+     FROM scheduled_messages s JOIN chat_members cm ON cm.chat_id = s.chat_id AND cm.user_id = s.sender_user_id
+     WHERE s.sender_user_id = ? ORDER BY s.deliver_at, s.id LIMIT 1000`,
+  ).bind(c.get("userId")).all<ScheduledRow>();
+  return c.json({ scheduled: results.map(scheduledOut) });
+});
+
+/** Schedules a message, or replaces one (new envelope and/or time). 201 created, 200 replaced or unchanged. */
+me.put("/scheduled/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await readJson(c);
+  const mentions = parseMentions(body.mentions);
+  if (
+    !isUlid(id) || !isUlid(body.chatId) || !validEnvelope(body.envelope) || !Number.isSafeInteger(body.deliverAt) ||
+    mentions === false || (body.silent !== undefined && typeof body.silent !== "boolean")
+  ) {
+    throw new ApiError("invalid_request");
+  }
+  const r = await hubStub(c.env).putScheduled(c.get("userId"), c.get("deviceId"), {
+    id,
+    chatId: body.chatId,
+    envelope: body.envelope,
+    deliverAt: body.deliverAt as number,
+    silent: body.silent === true,
+    mentions: mentions && mentions.length ? mentions : null,
+  });
+  if ("error" in r) throw new ApiError(r.error);
+  return c.json({ scheduled: r.scheduled }, r.created ? 201 : 200);
+});
+
+/** Cancels a scheduled message; the media uploaded for it is deleted. */
+me.delete("/scheduled/:id", async (c) => {
+  const r = await hubStub(c.env).cancelScheduled(c.get("userId"), c.req.param("id"));
+  if ("error" in r) throw new ApiError(r.error);
+  return c.body(null, 204);
+});
+
+/** Delivers a scheduled message now, with the envelope it holds. */
+me.post("/scheduled/:id/send", async (c) => {
+  const id = c.req.param("id");
+  const r = await hubStub(c.env).sendScheduledNow(c.get("userId"), id);
+  if ("error" in r) throw new ApiError(r.error);
+  return c.json({ id, seq: r.seq, createdAt: r.createdAt });
+});
+
+/**
+ * The caller's reminders, soonest first, in chats they're still in and for messages the server
+ * still holds (docs/protocol.md "Reminders").
+ */
+me.get("/reminders", async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT r.chat_id AS chatId, r.message_id AS messageId, r.remind_at AS at FROM reminders r
+     JOIN chat_members cm ON cm.chat_id = r.chat_id AND cm.user_id = r.user_id
+     JOIN messages m ON m.id = r.message_id AND m.chat_id = r.chat_id
+     WHERE r.user_id = ? ORDER BY r.remind_at, r.message_id LIMIT 5000`,
+  ).bind(c.get("userId")).all<{ chatId: string; messageId: string; at: number }>();
+  return c.json({ reminders: rows.results });
+});
+
+/**
+ * Disappearing messages the server deleted (docs/protocol.md "Disappearing messages"), in the
+ * caller's chats, after the cursor `after` (0 at first): `{gone: [{chatId, messageId, seq}], cursor}`.
+ * Pass `cursor` back next time; a full page (`limit`, 1–1000, default 500) means ask again.
+ */
+me.get("/gone", async (c) => {
+  const afterQ = c.req.query("after") ?? "0";
+  const limitQ = c.req.query("limit") ?? "500";
+  if (!/^\d{1,15}$/.test(afterQ) || !/^\d{1,4}$/.test(limitQ)) throw new ApiError("invalid_request");
+  const after = Number(afterQ);
+  const limit = Math.min(Math.max(Number(limitQ), 1), 1000);
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.cursor, t.chat_id AS chatId, t.message_id AS messageId, t.seq FROM message_tombstones t
+     JOIN chat_members cm ON cm.chat_id = t.chat_id AND cm.user_id = ?
+     WHERE t.cursor > ? ORDER BY t.cursor LIMIT ?`,
+  ).bind(c.get("userId"), after, limit).all<{ cursor: number; chatId: string; messageId: string; seq: number }>();
+  const cursor = results.length ? results[results.length - 1].cursor : after;
+  return c.json({ gone: results.map(({ cursor: _, ...g }) => g), cursor });
 });
 
 me.get("/", async (c) => {
