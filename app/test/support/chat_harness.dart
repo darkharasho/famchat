@@ -29,6 +29,8 @@ import 'fake_chat_backend.dart';
 import 'fake_media.dart';
 import 'fake_server.dart';
 import 'fake_voice.dart';
+import 'package:famchat/push/push_messaging.dart';
+
 import 'session_overrides.dart';
 
 /// A hub that stays disconnected unless the test says otherwise; tests push events with [emit].
@@ -103,6 +105,7 @@ Future<ScriptedHubLink> pumpChatApp(
   FakeVoicePlayer? player,
   KlipyClient? gifs,
   FakeServer? server,
+  PushMessaging? push,
 }) async {
   final hub = ScriptedHubLink();
   await tester.runAsync(() async {
@@ -137,6 +140,7 @@ Future<ScriptedHubLink> pumpChatApp(
       voicePlayerFactoryProvider.overrideWithValue(() => player ?? FakeVoicePlayer()),
       // No GIF search unless a test brings a client (the real one needs the server's key).
       gifClientProvider.overrideWith((ref) async => gifs),
+      if (push != null) pushMessagingProvider.overrideWithValue(push),
     ],
     child: const FamChatApp(),
   ));
