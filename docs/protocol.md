@@ -93,6 +93,8 @@ A text may reply to an earlier message: `{"kind":"text","text":"...","replyTo":"
 In a group, a text may @mention members: `{"kind":"text","text":"@Mom can you?","mentions":["<userId>"]}`.
 The text holds `@<name>`; `mentions` lists who that is. The `send` frame repeats the list (the server
 can't read the text) so mentioned members are pushed even when they muted the chat.
+`@everyone` in a group mentions every other member: the text holds `@everyone` and `mentions` lists
+them all (clients bold `@everyone` when a text has mentions).
 
 Edits and deletes are messages too, and count only when their sender is the target's sender:
 

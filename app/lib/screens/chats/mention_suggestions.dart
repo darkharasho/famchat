@@ -1,6 +1,7 @@
 // The members matching an `@name` being typed, above the composer.
 import 'package:material_ui/material_ui.dart';
 
+import '../../chat/mentions.dart' show everyoneId;
 import '../../theme/tokens.dart';
 import '../../widgets/person_avatar.dart';
 
@@ -39,11 +40,18 @@ class MentionSuggestions extends StatelessWidget {
                   color: i == selected ? s.secondaryContainer : null,
                   padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 6),
                   child: Row(children: [
-                    PersonAvatar(label: p.name, colorKey: p.id, userId: p.id, radius: 14),
+                    if (p.id == everyoneId)
+                      CircleAvatar(
+                        radius: 14,
+                        backgroundColor: s.secondaryContainer,
+                        child: Icon(Icons.groups_rounded, size: 16, color: s.onSecondaryContainer),
+                      )
+                    else
+                      PersonAvatar(label: p.name, colorKey: p.id, userId: p.id, radius: 14),
                     const SizedBox(width: Space.sm),
                     Expanded(
                       child: Text(
-                        p.name,
+                        p.id == everyoneId ? 'everyone · notifies the whole group' : p.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(

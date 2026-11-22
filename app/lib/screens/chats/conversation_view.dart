@@ -379,7 +379,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final start = mq?.start ?? q?.start;
     if (start != _dismissedAt) _dismissedAt = null;
     final dismissed = start != null && start == _dismissedAt;
-    final people = mq == null || dismissed ? const <Person>[] : matchingPeople(mq.query, _people).take(6).toList();
+    final people = mq == null || dismissed ? const <Person>[] : mentionSuggestionsFor(mq.query, _people).take(6).toList();
     final matches = q == null || dismissed ? const <ShortcodeMatch>[] : searchShortcodes(q.query, limit: 6);
     final key = mq != null ? '@${mq.start}:${mq.query}' : (q != null ? ':${q.start}:${q.query}' : null);
     final same = key == _suggestKey;
@@ -1291,7 +1291,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),
                 quote: quoteFor(m),
-                mentionNames: [for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name],
+                mentionNames: [
+                  for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name,
+                  if (group && mentionsOf(m).isNotEmpty) everyoneName,
+                ],
                 linkPreview: changes.previewOf(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,
