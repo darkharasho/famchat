@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -52,6 +53,7 @@ import 'link_preview_card.dart';
 import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
+import 'pin_bar.dart';
 import 'staged_tray.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -740,6 +742,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (!_pickerOpen) _focus.requestFocus();
   }
 
+  /// Whether pin event [m] pins (else unpins).
+  static bool _pinned(MessageRow m) {
+    try {
+      return (jsonDecode(m.body!) as Map)['pinned'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The latest changes over this chat's messages (set in build).
   MessageChanges _changes = messageChanges(const []);
 
@@ -1214,9 +1225,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       shown: (m) => !timelineHiddenKinds.contains(m.kind),
       readOnly: readOnly,
     );
-    final visible =
-        messages.where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id)).toList();
+    // Pins and unpins show as lines too.
+    final pinNotes = {for (final r in changes.pinEvents) r.id: r};
+    final pinnedIds = changes.pinned.toSet();
+    final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
+    final visible = messages
+        .where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id) || pinNotes.containsKey(m.id))
+        .toList();
     final byId = {for (final m in visible) m.id: m};
+    final byIdAll = {for (final m in messages) m.id: m};
     QuotedMessage? quoteFor(MessageRow m) {
       final target = replyTargetOf(m);
       if (target == null) return null;
@@ -1260,6 +1277,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ),
               ),
             ),
+          MessageEntry(message: final m) when pinNotes.containsKey(m.id) => AppearIn(
+              key: ValueKey(m.id),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
+              child: KeyedSubtree(
+                key: _keyFor(m.id),
+                child: PinNoteLine(
+                  text: '${nameOf(m.senderUserId)} ${_pinned(m) ? 'pinned' : 'unpinned'} a message',
+                  onTap: () => _jumpTo(m.targetId!),
+                ),
+              ),
+            ),
           MessageEntry(message: final m) when m.kind == 'game' => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1290,6 +1318,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 forwarded: isForwarded(m),
                 onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
                 onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
+                pinned: pinnedIds.contains(m.id),
+                onPin: m.seq == null || changes.isDeleted(m.id) || readOnly
+                    ? null
+                    : () => sync?.pinMessage(chatId, m.id, pinned: !pinnedIds.contains(m.id)),
+                starred: starred.contains(m.id),
+                onStar: m.seq == null || changes.isDeleted(m.id)
+                    ? null
+                    : () => sync?.star(chatId, m.id, starred: !starred.contains(m.id)),
                 onReadBy: group && m.senderUserId == me && m.seq != null && others.isNotEmpty
                     ? () => _showReaders(m, members, users, me)
                     : null,
@@ -1377,6 +1413,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           // Wide panes keep the messages in a readable column; the backdrop runs edge to edge.
           final side = math.max(Space.md, (c.maxWidth - Widths.conversation) / 2);
           return Column(children: [
+            if (changes.pinned.isNotEmpty)
+              PinBar(
+                pins: changes.pinned,
+                snippetOf: (id) => byIdAll[id] == null ? 'Message' : messageSnippet(byIdAll[id]!, changes),
+                onJump: (id) => unawaited(_jumpTo(id)),
+              ),
             for (final r in resets)
               NoticeCard(
                 key: Key('reset-banner-${r.id}'),

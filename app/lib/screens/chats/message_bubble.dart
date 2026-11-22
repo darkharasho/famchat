@@ -55,7 +55,7 @@ Future<String?> pickReaction(BuildContext context, {String? current}) => showMod
     );
 
 /// What can be done to a message besides reacting.
-enum MessageAction { reply, forward, copy, readBy, edit, delete }
+enum MessageAction { reply, pin, star, forward, copy, readBy, edit, delete }
 
 /// The message a reply quotes, as its bubble shows it.
 class QuotedMessage {
@@ -104,7 +104,19 @@ class MessageBubble extends StatefulWidget {
     this.onDelete,
     this.onReadBy,
     this.highlighted = false,
+    this.onPin,
+    this.pinned = false,
+    this.onStar,
+    this.starred = false,
   });
+
+  /// Pins it for everyone (or unpins it, when [pinned]).
+  final VoidCallback? onPin;
+  final bool pinned;
+
+  /// Stars it for me (or unstars it, when [starred]); a ★ shows by the time while starred.
+  final VoidCallback? onStar;
+  final bool starred;
 
   /// My sent messages in groups: who has read it.
   final VoidCallback? onReadBy;
@@ -215,6 +227,8 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   List<MessageAction> get _actions => [
         if (widget.onReply != null) MessageAction.reply,
+        if (widget.onPin != null) MessageAction.pin,
+        if (widget.onStar != null) MessageAction.star,
         if (widget.onForward != null) MessageAction.forward,
         if (_copyText != null) MessageAction.copy,
         if (widget.onReadBy != null) MessageAction.readBy,
@@ -222,8 +236,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (widget.onDelete != null) MessageAction.delete,
       ];
 
-  static (IconData, String) _look(MessageAction a) => switch (a) {
+  (IconData, String) _look(MessageAction a) => switch (a) {
         MessageAction.reply => (Icons.reply_rounded, 'Reply'),
+        MessageAction.pin => widget.pinned
+            ? (Icons.push_pin_rounded, 'Unpin')
+            : (Icons.push_pin_outlined, 'Pin for everyone'),
+        MessageAction.star => widget.starred ? (Icons.star_rounded, 'Unstar') : (Icons.star_outline_rounded, 'Star'),
         MessageAction.forward => (Icons.shortcut_rounded, 'Forward'),
         MessageAction.copy => (Icons.copy_rounded, 'Copy'),
         MessageAction.readBy => (Icons.done_all_rounded, 'Read by'),
@@ -273,6 +291,10 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.onReact(e == _myEmoji ? '' : e);
       case MessageAction.reply:
         widget.onReply?.call();
+      case MessageAction.pin:
+        widget.onPin?.call();
+      case MessageAction.star:
+        widget.onStar?.call();
       case MessageAction.forward:
         widget.onForward?.call();
       case MessageAction.copy:
@@ -380,7 +402,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     final pending = m.state == 'pending';
     // My sent messages each carry their ticks (with the time), as Telegram does; others' runs show
     // the time once, under the last bubble.
-    final showTime = widget.lastInGroup || pending || m.state == 'failed' || widget.receipt != null;
+    final showTime = widget.lastInGroup || widget.starred || pending || m.state == 'failed' || widget.receipt != null;
 
     // "edited" stays in the bubble; the time goes under it (below).
     final showEdited = widget.edited && !widget.deleted;
@@ -393,6 +415,10 @@ class _MessageBubbleState extends State<MessageBubble> {
         right: mine ? Space.xs : 0,
       ),
       child: Row(key: Key('time-${m.id}'), mainAxisSize: MainAxisSize.min, children: [
+        if (widget.starred && !widget.deleted) ...[
+          Icon(Icons.star_rounded, key: Key('star-${m.id}'), size: 13, color: const Color(0xFFE0A100), semanticLabel: 'Starred'),
+          const SizedBox(width: 3),
+        ],
         Text(
           clockTime(DateTime.fromMillisecondsSinceEpoch(m.createdAt), h24: MediaQuery.alwaysUse24HourFormatOf(context)),
           style: theme.textTheme.labelSmall?.copyWith(
