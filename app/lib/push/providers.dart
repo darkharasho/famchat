@@ -143,3 +143,54 @@ class NotifyOfferNotifier extends Notifier<bool> {
 }
 
 final notifyOfferProvider = NotifierProvider<NotifyOfferNotifier, bool>(NotifyOfferNotifier.new);
+
+/// Phones: whether this device's notifications are off (never allowed, or turned off in the
+/// phone's settings), so pushes reach it but never show. Checked at start and each time the app
+/// comes back to the front; "Not now" hides it until the next start.
+class NotificationsOffNotifier extends Notifier<bool> {
+  bool _dismissed = false;
+
+  @override
+  bool build() {
+    final messaging = ref.watch(pushMessagingProvider);
+    if (kIsWeb || messaging == null) return false;
+    final lifecycle = AppLifecycleListener(onResume: () => unawaited(_check(messaging)));
+    ref.onDispose(lifecycle.dispose);
+    unawaited(_check(messaging));
+    return false;
+  }
+
+  Future<void> _check(PushMessaging messaging) async {
+    final bool off;
+    try {
+      off = !await messaging.permissionGranted();
+    } catch (_) {
+      return;
+    }
+    if (ref.mounted) state = off && !_dismissed;
+  }
+
+  /// Asks for permission and registers. False when the phone said no without asking (it only asks
+  /// so many times); then the user has to turn them on in the phone's settings.
+  Future<bool> turnOn() async {
+    final messaging = ref.read(pushMessagingProvider);
+    if (messaging == null) return true;
+    bool allowed;
+    try {
+      allowed = await messaging.requestPermission();
+    } catch (_) {
+      allowed = false;
+    }
+    if (!allowed || !ref.mounted) return allowed;
+    state = false;
+    await ref.read(pushControllerProvider)?.enable();
+    return true;
+  }
+
+  void dismiss() {
+    _dismissed = true;
+    state = false;
+  }
+}
+
+final notificationsOffProvider = NotifierProvider<NotificationsOffNotifier, bool>(NotificationsOffNotifier.new);

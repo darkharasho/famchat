@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../chat/providers.dart';
 import '../../media/providers.dart';
@@ -140,6 +141,16 @@ class _ListPane extends ConsumerWidget {
               TextButton(onPressed: () => ref.read(notifyOfferProvider.notifier).enable(), child: const Text('Turn on')),
             ],
           ),
+        if (ref.watch(notificationsOffProvider))
+          NoticeCard(
+            key: const Key('notifications-off'),
+            icon: Icons.notifications_off_outlined,
+            text: "Notifications are off, so you won't hear about new messages.",
+            actions: [
+              TextButton(onPressed: () => ref.read(notificationsOffProvider.notifier).dismiss(), child: const Text('Not now')),
+              TextButton(onPressed: () => _turnOnNotifications(context, ref), child: const Text('Turn on')),
+            ],
+          ),
         // Admin setup: the recovery code is the last resort if every admin device is lost.
         if (admin && ref.watch(meProvider).value?.recoveryCodeSet == false)
           NoticeCard(
@@ -162,6 +173,30 @@ class _ListPane extends ConsumerWidget {
 }
 
 /// The right pane before a chat is picked.
+/// Asks for notification permission; when the phone won't ask again, says where to turn them on
+/// (on iPhone, opening FamChat's page in Settings).
+Future<void> _turnOnNotifications(BuildContext context, WidgetRef ref) async {
+  if (await ref.read(notificationsOffProvider.notifier).turnOn() || !context.mounted) return;
+  final ios = defaultTargetPlatform == TargetPlatform.iOS;
+  final open = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      key: const Key('notifications-blocked'),
+      title: const Text('Turn on notifications'),
+      content: Text(ios
+          ? 'Notifications are turned off for FamChat. In Settings, tap Notifications and turn on Allow Notifications.'
+          : "Notifications are turned off for FamChat. Open your phone's Settings, then Apps, FamChat, "
+              'Notifications, and allow them. If your phone puts apps to sleep to save battery, '
+              'set FamChat to Unrestricted there too.'),
+      actions: [
+        if (ios) TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, ios), child: Text(ios ? 'Open Settings' : 'OK')),
+      ],
+    ),
+  );
+  if (open == true) await launchUrl(Uri.parse('app-settings:'));
+}
+
 class _WelcomePane extends StatelessWidget {
   const _WelcomePane();
 
