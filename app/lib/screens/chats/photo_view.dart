@@ -50,7 +50,11 @@ class _Expired extends StatelessWidget {
 
 /// A photo's thumbnail: loading, shown, uploading (progress ring), expired or failed (tap retries).
 class PhotoThumb extends ConsumerWidget {
-  const PhotoThumb({super.key, required this.body, required this.messageId, required this.onOpen});
+  const PhotoThumb({super.key, required this.body, required this.messageId, required this.onOpen, this.size, this.radius});
+
+  /// A tile in an album: this size (cropped to fill) and corner radius instead of the bubble's.
+  final Size? size;
+  final double? radius;
 
   final PhotoBody body;
   final String messageId;
@@ -59,7 +63,7 @@ class PhotoThumb extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final size = thumbSize(body.width, body.height);
+    final size = this.size ?? thumbSize(body.width, body.height);
     final progress = ref.watch(uploadProgressProvider(messageId)).value;
     final Widget child;
     VoidCallback? onTap;
@@ -99,7 +103,7 @@ class PhotoThumb extends ConsumerWidget {
       child: GestureDetector(
         onTap: onTap,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(Radii.lg - 4),
+          borderRadius: BorderRadius.circular(radius ?? Radii.lg - 4),
           child: Container(
             width: size.width,
             height: size.height,

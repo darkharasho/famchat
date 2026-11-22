@@ -316,7 +316,23 @@ class FetchedPreview {
   }
 }
 
+/// A message this user starred (docs/protocol.md "Starred messages").
+class StarDto {
+  const StarDto({required this.chatId, required this.messageId, required this.starredAt});
+  final String chatId, messageId;
+  final int starredAt;
+
+  factory StarDto.fromJson(Map<String, Object?> j) =>
+      StarDto(chatId: j['chatId'] as String, messageId: j['messageId'] as String, starredAt: (j['starredAt'] as num).toInt());
+}
+
 abstract interface class ChatApi {
+  /// Stars or unstars a message for this user only.
+  Future<void> setStar(String chatId, String messageId, bool starred);
+
+  /// This user's starred messages, newest first.
+  Future<List<StarDto>> stars();
+
   Future<List<UserDto>> users();
 
   /// Sets this user's profile photo (a JPEG, docs/protocol.md "Profile photos"); returns its key.

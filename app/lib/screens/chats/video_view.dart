@@ -29,7 +29,11 @@ bool _isExpired(WidgetRef ref, VideoBody body) {
 /// A video's poster frame (or a plain tile), its length and a play button; upload progress while
 /// sending. Tapping opens the player.
 class VideoThumb extends ConsumerWidget {
-  const VideoThumb({super.key, required this.body, required this.messageId, required this.onOpen});
+  const VideoThumb({super.key, required this.body, required this.messageId, required this.onOpen, this.size, this.radius});
+
+  /// A tile in an album: this size (cropped to fill) and corner radius instead of the bubble's.
+  final Size? size;
+  final double? radius;
 
   final VideoBody body;
   final String messageId;
@@ -37,7 +41,7 @@ class VideoThumb extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final size = thumbSize(body.width, body.height);
+    final size = this.size ?? thumbSize(body.width, body.height);
     final progress = ref.watch(uploadProgressProvider(messageId)).value;
     final expired = _isExpired(ref, body);
     final thumbRef = body.thumbRef;
@@ -49,7 +53,7 @@ class VideoThumb extends ConsumerWidget {
       child: GestureDetector(
         onTap: expired ? null : onOpen,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(Radii.lg - 4),
+          borderRadius: BorderRadius.circular(radius ?? Radii.lg - 4),
           child: Container(
             key: Key('video-$messageId'),
             width: size.width,

@@ -152,6 +152,7 @@ export function leaveGroupStmts(
   const b = when?.binds ?? [];
   return [
     db.prepare(`DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?${and}`).bind(chatId, userId, ...b),
+    db.prepare(`DELETE FROM starred_messages WHERE chat_id = ? AND user_id = ?${and}`).bind(chatId, userId, ...b),
     db.prepare(`UPDATE chats SET current_epoch = current_epoch + 1 WHERE id = ?${and}`).bind(chatId, ...b),
     db.prepare(`INSERT OR REPLACE INTO chat_leavers (chat_id, user_id, left_at) SELECT ?, ?, ? WHERE ${when?.sql ?? "1"}`)
       .bind(chatId, userId, now, ...b),

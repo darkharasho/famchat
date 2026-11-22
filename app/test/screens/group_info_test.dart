@@ -85,6 +85,8 @@ void main() {
 
   chatTestWidgets('leaving returns to the chat list', (tester) async {
     final id = await openInfo(tester, (c) => c.read(chatSyncProvider)!.createGroup('Cousins', [bob.userId, carol.userId]));
+    await tester.ensureVisible(find.text('Leave group'));
+    await settle(tester);
     await tester.tap(find.text('Leave group'));
     await settle(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Leave'));

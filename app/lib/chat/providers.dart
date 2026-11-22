@@ -119,6 +119,14 @@ final chatListProvider = StreamProvider<List<ChatListItem>>((ref) {
 
 final chatProvider = StreamProvider.family<ChatRow?, String>((ref, id) => ref.watch(chatDbProvider).watchChat(id));
 
+/// My starred messages in a chat (or every chat, for null), newest star first.
+final starsProvider =
+    StreamProvider.family<List<StarRow>, String?>((ref, chatId) => ref.watch(chatDbProvider).watchStars(chatId: chatId));
+
+/// My starred messages that are on this device (in a chat, or all for null), newest star first.
+final starredMessagesProvider = StreamProvider.family<List<MessageRow>, String?>(
+    (ref, chatId) => ref.watch(chatDbProvider).watchStarredMessages(chatId: chatId));
+
 final messagesProvider =
     StreamProvider.family<List<MessageRow>, String>((ref, id) => ref.watch(chatDbProvider).watchMessages(id));
 
@@ -172,3 +180,15 @@ String membersLabel(int n) => n <= 1 ? 'Only you' : '$n members';
 /// For a 1:1, the other member's id.
 String? otherMember(ChatRow chat, List<MemberRow> members, String? me) =>
     chat.kind == 'direct' ? members.where((m) => m.userId != me).firstOrNull?.userId : null;
+
+/// A chat's title as the chat list shows it, or null while it loads.
+final chatTitleProvider = Provider.family<String?, String>((ref, chatId) {
+  final chat = ref.watch(chatProvider(chatId)).value;
+  if (chat == null) return null;
+  return chatTitle(
+    chat,
+    ref.watch(membersProvider(chatId)).value ?? const [],
+    ref.watch(usersProvider).value ?? const {},
+    ref.watch(myUserIdProvider),
+  );
+});

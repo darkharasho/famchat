@@ -101,6 +101,21 @@ class LocalKeys extends Table {
   Set<Column> get primaryKey => {chatId, epoch};
 }
 
+/// This user's starred messages (docs/protocol.md "Starred messages"), mirrored from the server.
+/// [pending]: changed here and not yet confirmed by the server; [starred] false is an unstar waiting
+/// to go (the row goes once it does).
+@DataClassName('StarRow')
+class LocalStars extends Table {
+  TextColumn get messageId => text()();
+  TextColumn get chatId => text()();
+  IntColumn get starredAt => integer()();
+  BoolColumn get starred => boolean().withDefault(const Constant(true))();
+  BoolColumn get pending => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {messageId};
+}
+
 @DataClassName('UserRow')
 class LocalUsers extends Table {
   TextColumn get id => text()();
@@ -284,13 +299,14 @@ int compareChatListItems(ChatListItem a, ChatListItem b) {
   LocalFamilies,
   LocalFamilyAdmins,
   LocalRevokedProofs,
+  LocalStars,
   Meta,
 ])
 class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -333,8 +349,50 @@ class ChatDb extends _$ChatDb {
             await m.addColumn(localChats, localChats.avatarKey);
             await m.addColumn(localUsers, localUsers.lastSeenAt);
           }
+          // Filled in by the next sync.
+          if (from < 11) await m.createTable(localStars);
         },
       );
+
+  // ---------------------------------------------------------------------------------------------
+  // Stars
+
+  /// Starred message ids (in [chatId], or all), newest star first. Unstars waiting to go are left out.
+  Stream<List<StarRow>> watchStars({String? chatId}) => (select(localStars)
+        ..where((s) => s.starred.equals(true) & (chatId == null ? const Constant(true) : s.chatId.equals(chatId)))
+        ..orderBy([(s) => OrderingTerm.desc(s.starredAt), (s) => OrderingTerm.desc(s.messageId)]))
+      .watch();
+
+  /// My starred messages that are here (in [chatId], or all), newest star first.
+  Stream<List<MessageRow>> watchStarredMessages({String? chatId}) {
+    final q = select(localMessages).join([innerJoin(localStars, localStars.messageId.equalsExp(localMessages.id))])
+      ..where(localStars.starred.equals(true) & (chatId == null ? const Constant(true) : localMessages.chatId.equals(chatId)))
+      ..orderBy([OrderingTerm.desc(localStars.starredAt), OrderingTerm.desc(localStars.messageId)]);
+    return q.watch().map((rows) => [for (final r in rows) r.readTable(localMessages)]);
+  }
+
+  /// Stars or unstars here first; [pending] until the server has it.
+  Future<void> setStar(String chatId, String messageId, {required bool starred, required int at, bool pending = true}) =>
+      into(localStars).insertOnConflictUpdate(
+          StarRow(messageId: messageId, chatId: chatId, starredAt: at, starred: starred, pending: pending));
+
+  Future<List<StarRow>> pendingStars() => (select(localStars)..where((s) => s.pending.equals(true))).get();
+
+  Future<StarRow?> starOf(String messageId) =>
+      (select(localStars)..where((s) => s.messageId.equals(messageId))).getSingleOrNull();
+
+  Future<void> dropStar(String messageId) => (delete(localStars)..where((s) => s.messageId.equals(messageId))).go();
+
+  /// The server's list replaces what's here, except changes still waiting to go.
+  Future<void> replaceStars(List<({String chatId, String messageId, int starredAt})> stars) => transaction(() async {
+        await (delete(localStars)..where((s) => s.pending.equals(false))).go();
+        for (final st in stars) {
+          await into(localStars).insert(
+            StarRow(messageId: st.messageId, chatId: st.chatId, starredAt: st.starredAt, starred: true, pending: false),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
 
   /// Set once a device before schema 8 had pinned the family's admins (the upgrade to per-family
   /// pins reads it).
@@ -512,7 +570,7 @@ class ChatDb extends _$ChatDb {
   Stream<List<MemberRow>> watchMembers(String chatId) =>
       (select(localMembers)..where((m) => m.chatId.equals(chatId))).watch();
 
-  static const _changeKinds = ['reaction', 'edit', 'delete'];
+  static const _changeKinds = ['reaction', 'edit', 'delete', 'pin'];
 
   /// Keeps [text] as [chatId]'s draft; blank text clears it.
   Future<void> setDraft(String chatId, String? text) => (update(localChats)..where((c) => c.id.equals(chatId)))
@@ -596,7 +654,7 @@ class ChatDb extends _$ChatDb {
       final unread = await customSelect(
         // Counted from where I joined: history from before is shown, not unread.
         "SELECT COUNT(*) AS n FROM local_messages m WHERE chat_id = ? AND sender_user_id != ? "
-        "AND kind NOT IN ('reaction', 'edit', 'delete') "
+        "AND kind NOT IN (${_changeKinds.map((k) => "'$k'").join(', ')}) "
         // Messages their sender deleted aren't unread either.
         "AND NOT EXISTS (SELECT 1 FROM local_messages d WHERE d.chat_id = m.chat_id AND d.kind = 'delete' "
         'AND d.target_id = m.id AND d.sender_user_id = m.sender_user_id) '

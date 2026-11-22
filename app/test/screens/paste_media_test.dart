@@ -139,4 +139,16 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'hello there');
     expect(sends(hub), 0);
   });
+
+  chatTestWidgets('photos sent together show as one album: 4 tiles, "+1", and the caption under it', (tester) async {
+    await open(tester, () => [for (var i = 0; i < 5; i++) PickedPhoto(png)]);
+    await ctrlV(tester);
+    await type(tester, 'beach day');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    expect(find.byKey(const Key('album')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('album')), matching: find.byKey(const Key('photo-thumb'))), findsNWidgets(4));
+    expect(find.text('+1'), findsOneWidget);
+    expect(find.text('beach day'), findsOneWidget);
+  });
 }

@@ -73,6 +73,10 @@ sealed class Plaintext {
         final target = j['target'];
         if (target is! String || target.isEmpty) throw const FormatException('bad delete');
         return DeleteBody(target);
+      case 'pin':
+        final target = j['target'], pinned = j['pinned'];
+        if (target is! String || target.isEmpty || pinned is! bool) throw const FormatException('bad pin');
+        return PinBody(target, pinned: pinned);
       case 'reaction':
         final target = j['target'], emoji = j['emoji'];
         if (target is! String || target.isEmpty || emoji is! String || emoji.length > 32) {
@@ -219,6 +223,21 @@ class EditBody extends Plaintext {
       };
 }
 
+/// Pins [target] for everyone in the chat ([pinned] false unpins it). Anyone can pin any message;
+/// the latest pin event per target wins and at most [maxPins] stay pinned (docs/protocol.md "Pins").
+class PinBody extends Plaintext {
+  const PinBody(this.target, {required this.pinned});
+  final String target;
+  final bool pinned;
+  @override
+  String get kind => 'pin';
+  @override
+  Map<String, Object?> toJson() => {'kind': kind, 'target': target, 'pinned': pinned};
+}
+
+/// At most this many messages are pinned in a chat; pinning another unpins the oldest.
+const maxPins = 3;
+
 /// Unsends the sender's own message [target].
 class DeleteBody extends Plaintext {
   const DeleteBody(this.target);
@@ -255,6 +274,7 @@ class PhotoBody extends Plaintext with Captioned {
     this.caption,
     this.replyTo,
     this.mentions = const [],
+    this.album,
   });
 
   /// Media keys (`/api/media/:key`) of the full image and the thumbnail.
@@ -268,7 +288,7 @@ class PhotoBody extends Plaintext with Captioned {
   final String mime;
 
   @override
-  final String? caption, replyTo;
+  final String? caption, replyTo, album;
   @override
   final List<String> mentions;
 
@@ -303,6 +323,7 @@ class PhotoBody extends Plaintext with Captioned {
         caption: _caption(j),
         replyTo: _replyTo(j),
         mentions: _mentions(j),
+        album: _album(j),
       );
 }
 
@@ -394,6 +415,7 @@ class VideoBody extends Plaintext with Captioned {
     this.caption,
     this.replyTo,
     this.mentions = const [],
+    this.album,
   }) : assert((thumbKey == null) == (thumbSha256 == null));
 
   /// Receivers accept videos up to this long.
@@ -412,7 +434,7 @@ class VideoBody extends Plaintext with Captioned {
   final String mime;
 
   @override
-  final String? caption, replyTo;
+  final String? caption, replyTo, album;
   @override
   final List<String> mentions;
 
@@ -451,6 +473,7 @@ class VideoBody extends Plaintext with Captioned {
       caption: _caption(j),
       replyTo: _replyTo(j),
       mentions: _mentions(j),
+      album: _album(j),
     );
   }
 }
@@ -499,16 +522,25 @@ bool isKlipyMediaUrl(String url) {
 /// A photo or video's optional caption, with the message it replies to and the users @mentioned
 /// in the caption (docs/protocol.md "Messages"). A caption that doesn't check out is dropped; the
 /// media still shows.
+///
+/// [album]: photos and videos sent together share this id and show as one album.
 mixin Captioned {
   String? get caption;
   String? get replyTo;
   List<String> get mentions;
+  String? get album;
 
   Map<String, Object?> get captionJson => {
         'caption': ?caption,
         'replyTo': ?replyTo,
         if (mentions.isNotEmpty) 'mentions': mentions,
+        'album': ?album,
       };
+}
+
+String? _album(Map<String, Object?> j) {
+  final a = j['album'];
+  return a is String && _ulid.hasMatch(a) ? a : null;
 }
 
 String? _caption(Map<String, Object?> j) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -34,7 +35,7 @@ import '../../media/clipboard_media.dart';
 import '../../media/media_service.dart';
 import '../../media/photo_picker.dart';
 import '../../media/send_media.dart';
-import '../../chat/plaintext.dart' show maxTextLength;
+import '../../chat/plaintext.dart';
 import '../../media/staged_media.dart';
 import '../../media/providers.dart';
 import '../../voice/providers.dart';
@@ -52,6 +53,9 @@ import 'link_preview_card.dart';
 import 'forward_picker.dart';
 import 'mention_suggestions.dart';
 import 'message_bubble.dart';
+import 'album_grid.dart';
+import 'media_pager.dart';
+import 'pin_bar.dart';
 import 'staged_tray.dart';
 import 'record_bar.dart';
 import 'timeline.dart';
@@ -267,7 +271,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final read = _readAtOpen;
     if (_unreadFrom != null || read == null || widget.jumpTo != null) return;
     if (DateTime.now().difference(_openedAt) > const Duration(seconds: 5)) return;
-    _unreadFrom = visible.where((m) => m.senderUserId != me && m.seq != null && m.seq! > read).firstOrNull?.id;
+    _unreadFrom = visible.where((m) => m.senderUserId != me && m.kind != 'pin' && m.seq != null && m.seq! > read).firstOrNull?.id;
     if (_unreadFrom != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_scrollToUnread());
@@ -740,6 +744,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     if (!_pickerOpen) _focus.requestFocus();
   }
 
+  /// Whether pin event [m] pins (else unpins).
+  static bool _pinned(MessageRow m) {
+    try {
+      return (jsonDecode(m.body!) as Map)['pinned'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The latest changes over this chat's messages (set in build).
   MessageChanges _changes = messageChanges(const []);
 
@@ -776,11 +789,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     setState(() => _replyTo = null);
   }
 
-  Future<void> _delete(MessageRow m) async {
+  /// Deletes [ms] (a message, or an album's items) for everyone, after asking.
+  Future<void> _delete(List<MessageRow> ms) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete for everyone?'),
+        title: Text(ms.length == 1 ? 'Delete for everyone?' : 'Delete these ${ms.length} for everyone?'),
         content: const Text('It will show as deleted in this chat. Anyone who already saw it may remember it.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -796,23 +810,28 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       ),
     );
     if (ok != true || !mounted) return;
-    if (_editing?.id == m.id || _replyTo?.id == m.id) _cancelCompose();
-    await ref.read(chatSyncProvider)?.deleteMessage(widget.chatId, m.id);
+    for (final m in ms) {
+      if (_editing?.id == m.id || _replyTo?.id == m.id) _cancelCompose();
+      await ref.read(chatSyncProvider)?.deleteMessage(widget.chatId, m.id);
+    }
   }
 
-  Future<void> _forward(MessageRow m) async {
+  /// Forwards [ms] (a message, or an album's items) to a chat picked.
+  Future<void> _forward(List<MessageRow> ms) async {
     final to = await showForwardPicker(context, fromChatId: widget.chatId);
     if (to == null || !mounted) return;
     final sync = ref.read(chatSyncProvider);
     if (sync == null) return;
     try {
-      await forwardMessage(
-        message: m,
-        changes: _changes,
-        toChatId: to.id,
-        sync: sync,
-        media: ref.read(mediaServiceProvider),
-      );
+      for (final m in ms) {
+        await forwardMessage(
+          message: m,
+          changes: _changes,
+          toChatId: to.id,
+          sync: sync,
+          media: ref.read(mediaServiceProvider),
+        );
+      }
       _snack('Forwarded to ${to.title}');
     } on ForwardException catch (e) {
       _snack(e.reason == 'media expired' ? "That's no longer available to forward." : "That message can't be forwarded.");
@@ -821,8 +840,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  /// Album items other than the last have no bubble of their own: jumps go to their album's.
+  Map<String, String> _albumOwner = const {};
+
   /// Scrolls until [id]'s bubble is built, centers it and tints it for a moment.
-  Future<void> _jumpTo(String id) async {
+  Future<void> _jumpTo(String target) async {
+    final id = _albumOwner[target] ?? target;
     for (var i = 0; i < 60; i++) {
       final ctx = _bubbleKeys[id]?.currentContext;
       if (ctx != null && ctx.mounted) {
@@ -1214,9 +1237,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
       shown: (m) => !timelineHiddenKinds.contains(m.kind),
       readOnly: readOnly,
     );
-    final visible =
-        messages.where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id)).toList();
+    // Pins and unpins show as lines too.
+    final pinNotes = {for (final r in changes.pinEvents) r.id: r};
+    final pinnedIds = changes.pinned.toSet();
+    final starred = {for (final st in ref.watch(starsProvider(chatId)).value ?? const <StarRow>[]) st.messageId};
+    final visible = messages
+        .where((m) => !timelineHiddenKinds.contains(m.kind) || gameEvents.containsKey(m.id) || pinNotes.containsKey(m.id))
+        .toList();
     final byId = {for (final m in visible) m.id: m};
+    final byIdAll = {for (final m in messages) m.id: m};
     QuotedMessage? quoteFor(MessageRow m) {
       final target = replyTargetOf(m);
       if (target == null) return null;
@@ -1238,10 +1267,80 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
     _findUnread(visible, me);
-    final entries = buildTimeline(visible, unreadFrom: _unreadFrom).reversed.toList(); // the list runs bottom-up
+    final timeline = buildTimeline(visible, unreadFrom: _unreadFrom, albumOf: (m) => changes.isDeleted(m.id) ? null : albumIdOf(m))
+        ;
+    _albumOwner = {
+      for (final e in timeline.whereType<AlbumEntry>())
+        for (final m in e.items) m.id: e.items.last.id,
+    };
+    final entries = timeline.reversed.toList(); // the list runs bottom-up // the list runs bottom-up
     final now = DateTime.now();
     final sync = ref.read(chatSyncProvider);
     const avatarSpace = 40.0;
+
+    Widget bubble(MessageRow m, {required bool firstInGroup, required bool lastInGroup, List<MessageRow>? album}) =>
+        AppearIn(
+              key: ValueKey(m.id),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
+              child: MessageBubble(
+                key: _keyFor(m.id),
+                message: m,
+                album: album,
+                onOpenAlbumItem: album == null ? null : (i) => showMediaPager(context, album, i),
+                shownText: changes.textOf(m),
+                edited: changes.edited.contains(m.id),
+                deleted: changes.isDeleted(m.id),
+                quote: quoteFor(m),
+                mentionNames: [
+                  for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name,
+                  if (group && mentionsOf(m).isNotEmpty) everyoneName,
+                ],
+                linkPreview: changes.previewOf(m),
+                onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
+                highlighted: _highlight == m.id,
+                onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
+                onForward: (album ?? [m]).every((i) => forwardableKinds.contains(i.kind) && i.body != null && !changes.isDeleted(i.id))
+                    ? () => _forward(album ?? [m])
+                    : null,
+                forwarded: isForwarded(m),
+                onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
+                onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(album ?? [m]) : null,
+                // An album counts as pinned when any of its items is; unpinning unpins those.
+                pinned: (album ?? [m]).any((i) => pinnedIds.contains(i.id)),
+                onPin: m.seq == null || changes.isDeleted(m.id) || readOnly
+                    ? null
+                    : () {
+                        final pinnedItems = [for (final i in album ?? [m]) if (pinnedIds.contains(i.id)) i.id];
+                        if (pinnedItems.isEmpty) {
+                          sync?.pinMessage(chatId, m.id, pinned: true);
+                        } else {
+                          for (final id in pinnedItems) {
+                            sync?.pinMessage(chatId, id, pinned: false);
+                          }
+                        }
+                      },
+                starred: starred.contains(m.id),
+                onStar: m.seq == null || changes.isDeleted(m.id)
+                    ? null
+                    : () => sync?.star(chatId, m.id, starred: !starred.contains(m.id)),
+                onReadBy: group && m.senderUserId == me && m.seq != null && others.isNotEmpty
+                    ? () => _showReaders(m, members, users, me)
+                    : null,
+                mine: m.senderUserId == me,
+                senderName: group && m.senderUserId != me && firstInGroup ? users[m.senderUserId]?.name ?? 'Someone' : null,
+                reactions: reactions[m.id] ?? const {},
+                myUserId: me,
+                onReact: (e) => sync?.react(chatId, m.id, e),
+                onRetry: () => sync?.retry(m.id),
+                receipt: receiptFor(m),
+                firstInGroup: firstInGroup,
+                lastInGroup: lastInGroup,
+                avatarSpace: group ? avatarSpace : 0,
+                avatar: group && m.senderUserId != me && lastInGroup
+                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, userId: m.senderUserId, radius: 15)
+                    : null,
+              ),
+            );
 
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
@@ -1260,6 +1359,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 ),
               ),
             ),
+          MessageEntry(message: final m) when pinNotes.containsKey(m.id) => AppearIn(
+              key: ValueKey(m.id),
+              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
+              child: KeyedSubtree(
+                key: _keyFor(m.id),
+                child: PinNoteLine(
+                  text: '${nameOf(m.senderUserId)} ${_pinned(m) ? 'pinned' : 'unpinned'} a message',
+                  onTap: () => _jumpTo(m.targetId!),
+                ),
+              ),
+            ),
           MessageEntry(message: final m) when m.kind == 'game' => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1268,46 +1378,10 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 child: GameCard(key: ValueKey(m.id), chatId: chatId, gameId: m.id),
               ),
             ),
-          MessageEntry(message: final m, :final firstInGroup, :final lastInGroup) => AppearIn(
-              key: ValueKey(m.id),
-              animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
-              child: MessageBubble(
-                key: _keyFor(m.id),
-                message: m,
-                shownText: changes.textOf(m),
-                edited: changes.edited.contains(m.id),
-                deleted: changes.isDeleted(m.id),
-                quote: quoteFor(m),
-                mentionNames: [
-                  for (final u in mentionsOf(m)) if (users[u] != null) users[u]!.name,
-                  if (group && mentionsOf(m).isNotEmpty) everyoneName,
-                ],
-                linkPreview: changes.previewOf(m),
-                onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
-                highlighted: _highlight == m.id,
-                onReply: m.seq == null || changes.isDeleted(m.id) || !_replyable(m) ? null : () => _startReply(m),
-                onForward: forwardableKinds.contains(m.kind) && m.body != null && !changes.isDeleted(m.id) ? () => _forward(m) : null,
-                forwarded: isForwarded(m),
-                onEdit: m.senderUserId == me && changes.textOf(m) != null ? () => _startEdit(m) : null,
-                onDelete: m.senderUserId == me && _replyable(m) && !changes.isDeleted(m.id) ? () => _delete(m) : null,
-                onReadBy: group && m.senderUserId == me && m.seq != null && others.isNotEmpty
-                    ? () => _showReaders(m, members, users, me)
-                    : null,
-                mine: m.senderUserId == me,
-                senderName: group && m.senderUserId != me && firstInGroup ? users[m.senderUserId]?.name ?? 'Someone' : null,
-                reactions: reactions[m.id] ?? const {},
-                myUserId: me,
-                onReact: (e) => sync?.react(chatId, m.id, e),
-                onRetry: () => sync?.retry(m.id),
-                receipt: receiptFor(m),
-                firstInGroup: firstInGroup,
-                lastInGroup: lastInGroup,
-                avatarSpace: group ? avatarSpace : 0,
-                avatar: group && m.senderUserId != me && lastInGroup
-                    ? PersonAvatar(label: users[m.senderUserId]?.name ?? '?', colorKey: m.senderUserId, userId: m.senderUserId, radius: 15)
-                    : null,
-              ),
-            ),
+          MessageEntry(message: final m, :final firstInGroup, :final lastInGroup) =>
+            bubble(m, firstInGroup: firstInGroup, lastInGroup: lastInGroup),
+          AlbumEntry(:final items, :final firstInGroup, :final lastInGroup) =>
+            bubble(items.last, firstInGroup: firstInGroup, lastInGroup: lastInGroup, album: items),
         };
 
     return PopScope(
@@ -1377,6 +1451,12 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           // Wide panes keep the messages in a readable column; the backdrop runs edge to edge.
           final side = math.max(Space.md, (c.maxWidth - Widths.conversation) / 2);
           return Column(children: [
+            if (changes.pinned.isNotEmpty)
+              PinBar(
+                pins: changes.pinned,
+                snippetOf: (id) => byIdAll[id] == null ? 'Message' : messageSnippet(byIdAll[id]!, changes),
+                onJump: (id) => unawaited(_jumpTo(id)),
+              ),
             for (final r in resets)
               NoticeCard(
                 key: Key('reset-banner-${r.id}'),
@@ -1436,6 +1516,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         final id = (key as ValueKey<Object?>).value;
                         final i = entries.indexWhere((e) => switch (e) {
                               MessageEntry(:final message) => message.id == id,
+                              AlbumEntry(:final items) => items.last.id == id,
                               DayEntry(:final day) => 'day-${day.millisecondsSinceEpoch}' == id,
                               UnreadEntry() => id == 'unread-line',
                             });

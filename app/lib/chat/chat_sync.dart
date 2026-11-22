@@ -224,6 +224,11 @@ class ChatSync {
       final local = (await db.chatById(c.id))!.myLastReadSeq;
       if (local > server) hub.send({'type': 'read', 'chatId': c.id, 'seq': local});
     }
+    try {
+      await refreshStars();
+    } catch (_) {
+      // Stars wait for the next sync or `stars` event; they never hold up messages and keys.
+    }
     await keys.fetch();
     for (final c in chats) {
       try {
@@ -391,6 +396,7 @@ class ChatSync {
       ReactionBody(:final target) => base.copyWith(kind: 'reaction', body: Value(body), targetId: Value(target)),
       EditBody(:final target) => base.copyWith(kind: 'edit', body: Value(body), targetId: Value(target)),
       DeleteBody(:final target) => base.copyWith(kind: 'delete', body: Value(body), targetId: Value(target)),
+      PinBody(:final target) => base.copyWith(kind: 'pin', body: Value(body), targetId: Value(target)),
       PhotoBody() => base.copyWith(kind: 'photo', body: Value(body)),
       VoiceBody() => base.copyWith(kind: 'voice', body: Value(body)),
       GifBody() => base.copyWith(kind: 'gif', body: Value(body)),
@@ -465,6 +471,8 @@ class ChatSync {
         await _catchUp(chatId);
         await _retryUndecryptable();
         await _flushOutbox();
+      case 'stars':
+        await refreshStars();
       case 'removed':
         await db.deleteChat(e['chatId'] as String);
       case 'device':
@@ -726,6 +734,10 @@ class ChatSync {
 
   /// Replaces the text of this user's text message [messageId]. Throws [ArgumentError] for empty or
   /// too-long text.
+  /// Pins [messageId] for everyone in the chat, or unpins it (docs/protocol.md "Pins").
+  Future<String> pinMessage(String chatId, String messageId, {required bool pinned}) =>
+      _enqueueMessage(chatId, PinBody(messageId, pinned: pinned), targetId: messageId);
+
   Future<void> editText(String chatId, String messageId, String text) {
     final t = validMessageText(text);
     if (t == null) throw ArgumentError.value(text, 'text', 'empty or longer than $maxTextLength characters');
@@ -792,6 +804,51 @@ class ChatSync {
     await api.muteChat(chatId, until);
     await db.setMutedUntil(chatId, until);
   }
+
+  /// Stars or unstars [messageId] for this user: here at once, then on the server (on the next sync
+  /// if offline). A refusal (the message or chat is gone) undoes it here.
+  Future<void> star(String chatId, String messageId, {required bool starred}) async {
+    await db.setStar(chatId, messageId, starred: starred, at: _now().millisecondsSinceEpoch);
+    await _onStarLane(() => _pushStar(chatId, messageId, starred));
+  }
+
+  /// Star pushes and refreshes run one at a time, in order: a quick star-then-unstar reaches the
+  /// server in that order, and a refresh can't land on top of a newer toggle.
+  Future<void> _starLane = Future.value();
+  Future<void> _onStarLane(Future<void> Function() work) {
+    final next = _starLane.then((_) => work());
+    _starLane = next.catchError((_) {});
+    return next;
+  }
+
+  Future<void> _pushStar(String chatId, String messageId, bool starred) async {
+    try {
+      await api.setStar(chatId, messageId, starred);
+    } on ApiException catch (e) {
+      if (e.status != 404) return; // retried on the next sync
+      await db.dropStar(messageId); // the message or chat is gone
+      return;
+    } catch (_) {
+      return; // offline: retried on the next sync
+    }
+    // Confirmed, unless it changed again meanwhile.
+    final now = await db.starOf(messageId);
+    if (now == null || now.starred != starred) return;
+    if (starred) {
+      await db.setStar(chatId, messageId, starred: true, at: now.starredAt, pending: false);
+    } else {
+      await db.dropStar(messageId);
+    }
+  }
+
+  /// Sends stars made offline, then takes the server's list.
+  Future<void> refreshStars() => _onStarLane(() async {
+        for (final p in await db.pendingStars()) {
+          await _pushStar(p.chatId, p.messageId, p.starred);
+        }
+        final stars = await api.stars();
+        await db.replaceStars([for (final s in stars) (chatId: s.chatId, messageId: s.messageId, starredAt: s.starredAt)]);
+      });
 
   /// Pins [chatId] to the top of this user's chat list, or unpins it.
   Future<void> pin(String chatId, bool pinned) async {

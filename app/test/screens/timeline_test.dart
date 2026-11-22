@@ -22,6 +22,8 @@ String describe(List<TimelineEntry> t) => t
           UnreadEntry() => '|new|',
           MessageEntry(:final message, :final firstInGroup, :final lastInGroup) =>
             '${message.id}${firstInGroup ? '<' : ''}${lastInGroup ? '>' : ''}',
+          AlbumEntry(:final items, :final firstInGroup, :final lastInGroup) =>
+            '{${items.map((m) => m.id).join(',')}}${firstInGroup ? '<' : ''}${lastInGroup ? '>' : ''}',
         })
     .join(' ');
 
@@ -80,6 +82,32 @@ void main() {
     });
     test('a future date (clock skew) shows the date', () {
       expect(dayLabel(DateTime(2026, 11, 18), now), 'November 18');
+    });
+  });
+
+  group('albums', () {
+    final t0 = DateTime(2026, 11, 22, 10);
+    MessageRow at(String id, String from, int sec) => msg(id, from, t0.add(Duration(seconds: sec)));
+    const albums = {'a1': 'A', 'a2': 'A', 'a3': 'A', 'b1': 'B', 'b2': 'B'};
+    String? albumOf(MessageRow m) => albums[m.id];
+
+    test('items sent together become one entry, in a run with the messages around them', () {
+      final t = buildTimeline([at('t1', 'x', 0), at('a1', 'x', 1), at('a2', 'x', 2), at('a3', 'x', 3), at('t2', 'x', 4)],
+          albumOf: albumOf);
+      expect(describe(t), '[11/22] t1< {a1,a2,a3} t2>');
+    });
+
+    test('an album interrupted by another message shows as two; a lone item is a plain message', () {
+      final t = buildTimeline([at('a1', 'x', 0), at('a2', 'x', 1), at('y', 'y', 2), at('a3', 'x', 3), at('b1', 'x', 4)],
+          albumOf: albumOf);
+      expect(describe(t), '[11/22] {a1,a2}<> y<> a3< b1>');
+    });
+
+    test('albums never span the New messages line or two senders', () {
+      final t = buildTimeline([at('a1', 'x', 0), at('a2', 'x', 1), at('a3', 'x', 2)], albumOf: albumOf, unreadFrom: 'a2');
+      expect(describe(t), '[11/22] a1<> |new| {a2,a3}<>');
+      final u = buildTimeline([at('b1', 'x', 0), at('b2', 'y', 1)], albumOf: albumOf);
+      expect(describe(u), '[11/22] b1<> b2<>');
     });
   });
 }

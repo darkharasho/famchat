@@ -6,7 +6,7 @@ import 'db/chat_db.dart';
 import 'plaintext.dart';
 
 /// Kinds that change another message instead of showing as one.
-const changeKinds = {'reaction', 'edit', 'delete'};
+const changeKinds = {'reaction', 'edit', 'delete', 'pin'};
 
 /// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
 /// and count as activity and unread, unlike changes).
@@ -17,7 +17,14 @@ const captionKinds = {'photo', 'video'};
 
 /// The edits and deletes in force over a chat's messages.
 class MessageChanges {
-  MessageChanges._(this._texts, this._deleted, this._previews);
+  MessageChanges._(this._texts, this._deleted, this._previews, this.pinned, this.pinEvents);
+
+  /// Ids of the pinned messages, newest pin first, at most [maxPins].
+  final List<String> pinned;
+
+  /// The pin and unpin events that count (their target is here and not deleted), in order: the
+  /// timeline shows each as a line.
+  final List<MessageRow> pinEvents;
 
   final Map<String, String> _texts;
   final Set<String> _deleted;
@@ -85,7 +92,26 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
       }
     }
   }
-  return MessageChanges._(texts, deleted, previews);
+  // Pins, in event order (rows are in order): pinning moves a target to the newest place, and
+  // pinning past [maxPins] unpins the oldest for good (unpinning or deleting another later doesn't
+  // bring it back). Deleted targets drop out at the end.
+  final pinEvents = <MessageRow>[];
+  final current = <String>[]; // oldest first
+  for (final r in rows) {
+    if (r.kind != 'pin' || r.state == 'failed' || r.targetId == null) continue;
+    final target = byId[r.targetId!];
+    if (target == null || timelineHiddenKinds.contains(target.kind)) continue;
+    final p = _decode(r);
+    if (p is! PinBody) continue;
+    if (!deleted.contains(target.id)) pinEvents.add(r);
+    current.remove(target.id);
+    if (p.pinned) {
+      current.add(target.id);
+      if (current.length > maxPins) current.removeAt(0);
+    }
+  }
+  final pinned = [for (final id in current.reversed) if (!deleted.contains(id)) id];
+  return MessageChanges._(texts, deleted, previews, pinned, pinEvents);
 }
 
 /// The id [m] replies to, or null.

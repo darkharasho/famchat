@@ -990,4 +990,74 @@ void main() {
     expect(m.kind, 'move');
     expect(m.targetId, 'G1');
   });
+
+  group('stars', () {
+    Future<List<String>> starred(Node n) async => [for (final s in await n.d.db.watchStars().first) s.messageId];
+
+    test("a star shows at once, reaches the server and Alice's other device, and unstars", () async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final chatId = await alice.sync.openDirect(bob.d.userId);
+      final alice2 = await start(await backend.addDevice(alice.d.userId));
+      final id = await bob.sync.sendText(chatId, 'gate code 4471');
+      await until(() async => (await alice.texts(chatId)).isNotEmpty);
+      await alice.sync.star(chatId, id, starred: true);
+      expect(await starred(alice), [id]);
+      expect((await alice.d.db.starOf(id))!.pending, isFalse);
+      await until(() async => (await starred(alice2)).isNotEmpty, reason: 'the stars event reaches her other device');
+      expect(await starred(bob), isEmpty);
+      await alice.sync.star(chatId, id, starred: false);
+      expect(await starred(alice), isEmpty);
+      await until(() async => (await starred(alice2)).isEmpty);
+    });
+
+    test('a star made offline waits and goes on the next sync; a refused one is undone', () async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final chatId = await alice.sync.openDirect(bob.d.userId);
+      final id = await alice.sync.sendText(chatId, 'hi');
+      await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
+      final put = 'PUT /chats/$chatId/messages/$id/star';
+      alice.d.api.offlineCalls.add(put);
+      await alice.sync.star(chatId, id, starred: true);
+      expect(await starred(alice), [id]);
+      expect((await alice.d.db.starOf(id))!.pending, isTrue);
+      alice.d.api.offlineCalls.remove(put);
+      await alice.sync.syncAll();
+      expect((await alice.d.db.starOf(id))!.pending, isFalse);
+      expect((await alice.d.api.stars()).map((s) => s.messageId), [id]);
+
+      await alice.sync.star(chatId, 'nope', starred: true);
+      expect(await starred(alice), [id]);
+    });
+
+    test('a star refused for another reason than a missing message stays and retries', () async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final chatId = await alice.sync.openDirect(bob.d.userId);
+      final id = await alice.sync.sendText(chatId, 'hi');
+      await until(() async => (await alice.d.db.messageById(id))!.state == 'sent');
+      final put = 'PUT /chats/$chatId/messages/$id/star';
+      alice.d.api.failCalls[put] = const ApiException(429, 'rate_limited');
+      await alice.sync.star(chatId, id, starred: true);
+      expect((await alice.d.db.starOf(id))!.pending, isTrue);
+      alice.d.api.failCalls.remove(put);
+      await alice.sync.syncAll();
+      expect((await alice.d.db.starOf(id))!.pending, isFalse);
+    });
+
+    test('a failing stars list does not stop the rest of the sync', () async {
+      final alice = await start(await backend.addUser('Alice'));
+      final bob = await start(await backend.addUser('Bob'));
+      final chatId = await alice.sync.openDirect(bob.d.userId);
+      alice.d.api.offlineCalls.add('GET /me/stars');
+      backend.calls.clear();
+      await alice.sync.syncAll();
+      final calls = backend.calls.toList();
+      expect(calls, contains('GET /me/stars'));
+      // Keys and catch-up still run after the stars call fails.
+      final after = calls.sublist(calls.lastIndexOf('GET /me/stars'));
+      expect(after, containsAll(['GET /keys/wraps', 'GET /chats/$chatId/messages']));
+    });
+  });
 }

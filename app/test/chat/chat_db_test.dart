@@ -45,6 +45,7 @@ void main() {
     await db.insertMessageIfAbsent(msg('m2', 'old', 2));
     await db.insertMessageIfAbsent(msg('m3', 'old', 3, sender: 'me'));
     await db.insertMessageIfAbsent(msg('m4', 'old', 4, kind: 'reaction', body: '{"kind":"reaction","target":"m1","emoji":"x"}'));
+    await db.insertMessageIfAbsent(msg('m5', 'old', 5, kind: 'pin', body: '{"kind":"pin","target":"m1","pinned":true}'));
     await db.setMyLastRead('old', 1);
     final list = await db.watchChatList('me').first;
     expect(list.map((c) => c.chat.id), ['new', 'fresh', 'old']);

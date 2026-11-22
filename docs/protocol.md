@@ -112,6 +112,21 @@ Edits and deletes are messages too, and count only when their sender is the targ
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
+Pins are messages too, but anyone in the chat can pin any message (docs: "Pins"):
+
+```
+{"kind":"pin", "target":"<messageId>", "pinned":true|false}   pin for everyone, or unpin
+```
+
+For each target the latest pin event (by order) wins; the pinned messages are those whose latest event
+is `pinned:true`, newest first, and only the newest 3 stay pinned (a 4th pushes out the oldest with no
+further event). Deleted messages drop out. Clients show a line ("Bob pinned a message") for each event.
+Pins are sent `silent` like edits.
+
+Photos and videos sent together carry `"album":"<ULID>"` (the same for each, only when there are 2 or
+more). Consecutive messages from one sender with the same album show as one album; clients that don't
+know `album` show them one by one.
+
 A deleted message shows as "This message was deleted" and loses its reactions; replies quote it as
 "Deleted message". Neither changes nor deleted messages count as unread, and changes don't move the
 chat's `lastMessageAt`.
@@ -738,6 +753,17 @@ writes an `events` row (audit log; not exposed by the API yet).
 - `GET /chats/:id/messages?after=N` (ascending, seq > N) or `?before=N` (the latest `limit` rows with
   seq < N, returned ascending); `limit` 1–200, default 100 → `{messages: Message[]}`.
 
+### Starred messages
+
+Starring is private to the user and synced across their devices. The server stores only which message
+ids they starred, never content.
+- `PUT /chats/:id/messages/:messageId/star` / `DELETE …/star` → 204 (idempotent; 404 unless the caller
+  is a member and the message is in that chat). When something changed, the caller's own sockets get
+  `{type:"stars"}`.
+- `GET /me/stars` → `{stars:[{chatId, messageId, starredAt}]}`, newest first, only for chats the caller
+  is still in and messages the server still holds. Leaving a group or deleting the account drops them.
+  Clients hide stars on messages that were deleted (unsent).
+
 ### Media
 - `POST /media?chatId=&key=&kind=&messageId=` with the encrypted blob as the raw body
   (`Content-Length` required) → `201 {key, bytes}`. `key` (the object's id) and `messageId` (the
@@ -804,6 +830,7 @@ one. "Former" chat partners get none of these. Chat events (`msg`, `read`, `chat
 | `{type:"typing", chatId, userId}` | another member who shares a family with you is typing; show for ~5 s |
 | `{type:"read", chatId, userId, seq}` | a member's (or your own other device's) read position moved |
 | `{type:"chat", chatId}` | chat created or changed (members, epoch): `GET /chats/:id` |
+| `{type:"stars"}` | (to your own sockets) your starred messages changed: `GET /me/stars` |
 | `{type:"removed", chatId}` | you left or were removed |
 | `{type:"keys", chatId, epoch?}` | new wraps may be waiting: `GET /keys/wraps?chatId=` |
 | `{type:"device", userId, deviceId, revoked?}` | a device of a user you share a chat and a family with (or your own) was added or revoked: `GET /users`, then (if added) `GET /keys/missing` and add wraps |

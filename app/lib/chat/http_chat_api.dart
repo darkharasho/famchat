@@ -100,6 +100,16 @@ class HttpChatApi implements ChatApi {
   Future<void> muteChat(String chatId, int? until) => _call('PUT', '/chats/${_seg(chatId)}/mute', {'until': until});
 
   @override
+  Future<void> setStar(String chatId, String messageId, bool starred) =>
+      _call(starred ? 'PUT' : 'DELETE', '/chats/${_seg(chatId)}/messages/${_seg(messageId)}/star');
+
+  @override
+  Future<List<StarDto>> stars() async => [
+        for (final j in (await _call('GET', '/me/stars'))!['stars'] as List)
+          StarDto.fromJson(j as Map<String, Object?>),
+      ];
+
+  @override
   Future<void> setChatState(String chatId, {bool? pinned, bool? archived, bool? unread}) =>
       _call('PATCH', '/chats/${_seg(chatId)}/me', {
         'pinned': ?pinned,

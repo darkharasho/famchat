@@ -222,6 +222,8 @@ void main() {
     });
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
+    await tester.ensureVisible(find.byKey(const Key('settings-families')));
+    await settle(tester);
     await tester.tap(find.byKey(const Key('settings-families')));
     await settle(tester);
     await tester.tap(find.byKey(const Key('family-tile-1')));
