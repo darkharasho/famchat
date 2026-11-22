@@ -1,5 +1,8 @@
 // Photos in a conversation: the thumbnail inside a bubble, and the full-screen viewer.
 
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
@@ -131,32 +134,98 @@ Future<void> showPhotoViewer(BuildContext context, PhotoBody body) => Navigator.
       ),
     );
 
-/// The full image on black, pinch/scroll to zoom; the thumbnail shows while it downloads.
-class PhotoViewer extends ConsumerWidget {
-  const PhotoViewer({super.key, required this.body});
+/// Whether this device mostly uses a mouse: the viewer shows its zoom bar.
+bool get _mouseFirst =>
+    kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
+
+/// The full image on black; the thumbnail shows while it downloads. Pinch, scroll or double-tap to
+/// zoom and drag to pan; on desktop a zoom bar (−, slider, +, fit) and the +, − and 0 keys too.
+class PhotoViewer extends ConsumerStatefulWidget {
+  const PhotoViewer({super.key, required this.body, this.zoomBar});
 
   final PhotoBody body;
 
+  /// Shows the zoom bar; null shows it on desktop and the web.
+  final bool? zoomBar;
+
+  static const minScale = 1.0, maxScale = 8.0;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PhotoViewer> createState() => _PhotoViewerState();
+}
+
+class _PhotoViewerState extends ConsumerState<PhotoViewer> {
+  final _zoom = TransformationController();
+  Size _viewport = Size.zero;
+  Offset? _doubleTapAt;
+
+  @override
+  void dispose() {
+    _zoom.dispose();
+    super.dispose();
+  }
+
+  double get _scale => _zoom.value.getMaxScaleOnAxis();
+
+  /// Zooms to [scale] keeping the scene point under [focus] (default: the middle) in place, and
+  /// keeps the photo covering the viewport.
+  void _zoomTo(double scale, [Offset? focus]) {
+    final s = scale.clamp(PhotoViewer.minScale, PhotoViewer.maxScale);
+    final v = _viewport;
+    final f = focus ?? v.center(Offset.zero);
+    final scene = _zoom.toScene(f);
+    final tx = (f.dx - scene.dx * s).clamp(v.width * (1 - s), 0.0);
+    final ty = (f.dy - scene.dy * s).clamp(v.height * (1 - s), 0.0);
+    _zoom.value = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(s, s, 1, 1);
+  }
+
+  /// A step of the zoom buttons and keys: ×1.5.
+  void _step(int dir) => _zoomTo(dir > 0 ? _scale * 1.5 : _scale / 1.5);
+
+  @override
+  Widget build(BuildContext context) {
+    final body = widget.body;
     final full = ref.watch(mediaBytesProvider(body.fullRef));
     final Widget content;
+    var zoomable = false;
     if (_isExpired(ref, body)) {
       content = const _Expired(light: true);
     } else {
       switch (full) {
         case AsyncData(value: final Uint8List bytes):
-          content = InteractiveViewer(
-            maxScale: 8,
-            child: Center(
-              child: Image.memory(
-                bytes,
-                key: const Key('photo-full'),
-                fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
+          zoomable = true;
+          content = LayoutBuilder(builder: (context, box) {
+            _viewport = box.biggest;
+            return GestureDetector(
+              onDoubleTapDown: (d) => _doubleTapAt = d.localPosition,
+              // Double-tap: in to 2.5× where tapped, or back to fit.
+              onDoubleTap: () => _zoomTo(_scale > 1.01 ? 1 : 2.5, _doubleTapAt),
+              child: ListenableBuilder(
+                listenable: _zoom,
+                builder: (context, child) => MouseRegion(
+                  cursor: _scale > 1.01 ? SystemMouseCursors.grab : MouseCursor.defer,
+                  child: child,
+                ),
+                child: InteractiveViewer(
+                  key: const Key('photo-zoom'),
+                  transformationController: _zoom,
+                  minScale: PhotoViewer.minScale,
+                  maxScale: PhotoViewer.maxScale,
+                  child: Center(
+                    child: Image.memory(
+                      bytes,
+                      key: const Key('photo-full'),
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          );
+            );
+          });
         case AsyncData():
           content = const _Expired(light: true);
         case AsyncError():
@@ -183,8 +252,19 @@ class PhotoViewer extends ConsumerWidget {
           ]);
       }
     }
+    final bar = zoomable && (widget.zoomBar ?? _mouseFirst);
     return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.of(context).maybePop()},
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.of(context).maybePop(),
+        if (zoomable) ...{
+          const SingleActivator(LogicalKeyboardKey.equal): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.equal, shift: true): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.numpadAdd): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.minus): () => _step(-1),
+          const SingleActivator(LogicalKeyboardKey.numpadSubtract): () => _step(-1),
+          const SingleActivator(LogicalKeyboardKey.digit0): () => _zoomTo(1),
+        },
+      },
       child: Focus(
         autofocus: true,
         child: Scaffold(
@@ -209,9 +289,101 @@ class PhotoViewer extends ConsumerWidget {
                 ),
               ),
             ),
+            if (bar)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Center(
+                      child: ListenableBuilder(
+                        listenable: _zoom,
+                        builder: (context, _) => _ZoomBar(
+                          scale: _scale,
+                          onScale: _zoomTo,
+                          onStep: _step,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// − [slider] + 150% [fit], on a dark pill. The slider is logarithmic, so each step of it zooms by
+/// the same factor.
+class _ZoomBar extends StatelessWidget {
+  const _ZoomBar({required this.scale, required this.onScale, required this.onStep});
+
+  final double scale;
+  final ValueChanged<double> onScale;
+  final ValueChanged<int> onStep;
+
+  @override
+  Widget build(BuildContext context) {
+    const lo = PhotoViewer.minScale, hi = PhotoViewer.maxScale;
+    final t = (math.log(scale.clamp(lo, hi)) - math.log(lo)) / (math.log(hi) - math.log(lo));
+    const white = Colors.white;
+    return Container(
+      key: const Key('photo-zoom-bar'),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(24)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        IconButton(
+          tooltip: 'Zoom out',
+          color: white,
+          icon: const Icon(Icons.remove_rounded),
+          onPressed: scale > lo + 0.001 ? () => onStep(-1) : null,
+        ),
+        // Narrow windows shrink the slider, not the buttons.
+        Flexible(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: white,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: white,
+              overlayColor: Colors.white12,
+            ),
+            child: Slider(
+              key: const Key('photo-zoom-slider'),
+              value: t,
+              semanticFormatterCallback: (_) => '${(scale * 100).round()}%',
+              onChanged: (v) => onScale(math.exp(math.log(lo) + v * (math.log(hi) - math.log(lo)))),
+            ),
+          ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Zoom in',
+          color: white,
+          icon: const Icon(Icons.add_rounded),
+          onPressed: scale < hi - 0.001 ? () => onStep(1) : null,
+        ),
+        SizedBox(
+          width: 48,
+          child: Text(
+            '${(scale * 100).round()}%',
+            key: const Key('photo-zoom-percent'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: white, fontFeatures: [FontFeature.tabularFigures()]),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Fit to screen',
+          color: white,
+          icon: const Icon(Icons.fit_screen_rounded),
+          onPressed: scale > lo + 0.001 ? () => onScale(lo) : null,
+        ),
+      ]),
     );
   }
 }

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/chat/chat_sync.dart';
@@ -10,6 +9,8 @@ import 'package:famchat/chat/ulid.dart';
 import 'package:famchat/crypto/media.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -117,6 +118,59 @@ void main() {
     await settle(tester);
     expect(find.byKey(const Key('photo-full')), findsNothing);
     expect(find.byKey(const Key('photo-thumb')), findsOneWidget);
+  });
+
+  chatTestWidgets('on desktop the viewer has a zoom bar; keys and double-tap zoom too', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      final (_, chatId) = await open(tester);
+      await bobsPhoto(tester, chatId);
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('photo-thumb')));
+      await settle(tester);
+      String percent() => tester.widget<Text>(find.byKey(const Key('photo-zoom-percent'))).data!;
+      Matrix4 matrix() => tester.widget<InteractiveViewer>(find.byKey(const Key('photo-zoom'))).transformationController!.value;
+      expect(percent(), '100%');
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pump();
+      expect(percent(), '150%');
+      // Zooming keeps the middle in place and the photo over the whole window.
+      expect(matrix().getTranslation().x, closeTo(-200 * 0.5, 0.01));
+      await tester.tap(find.byTooltip('Fit to screen'));
+      await tester.pump();
+      expect(percent(), '100%');
+      await tester.sendKeyEvent(LogicalKeyboardKey.equal);
+      await tester.sendKeyEvent(LogicalKeyboardKey.equal);
+      await tester.pump();
+      expect(percent(), '225%');
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit0);
+      await tester.pump();
+      expect(percent(), '100%');
+      // Double-tap zooms in where tapped: at the left edge, the left edge stays put.
+      final at = tester.getTopLeft(find.byKey(const Key('photo-zoom'))) + const Offset(0, 300);
+      await tester.tapAt(at);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(at);
+      await settle(tester);
+      expect(percent(), '250%');
+      expect(matrix().getTranslation().x, 0);
+      // The slider's far end is the most zoom.
+      await tester.drag(find.byKey(const Key('photo-zoom-slider')), const Offset(400, 0));
+      await tester.pump();
+      expect(percent(), '800%');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  chatTestWidgets('phones have no zoom bar (they pinch)', (tester) async {
+    final (_, chatId) = await open(tester);
+    await bobsPhoto(tester, chatId);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('photo-thumb')));
+    await settle(tester);
+    expect(find.byKey(const Key('photo-full')), findsOneWidget);
+    expect(find.byKey(const Key('photo-zoom-bar')), findsNothing);
   });
 
   chatTestWidgets('expired photo shows Photo expired', (tester) async {
