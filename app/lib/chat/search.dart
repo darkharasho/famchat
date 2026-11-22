@@ -14,8 +14,8 @@ class SearchHit {
 }
 
 /// Text messages whose current text contains [query] (ignoring case), newest first, and polls whose
-/// question or an option does (their text: "📊 question · option · option"), and files whose name
-/// does ("📎 name"). Deleted messages, and
+/// question or an option does (their text: "📊 question · option · option"), files whose name
+/// does ("📎 name"), and voice messages whose transcript does ("🎤 transcript"). Deleted messages, and
 /// text only an earlier version had, don't match.
 Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId, int limit = 50}) async {
   final q = query.trim();
@@ -27,11 +27,14 @@ Future<List<SearchHit>> searchMessages(ChatDb db, String query, {String? chatId,
     final c = messageChanges([m, ...await db.changesTo(m.chatId, m.id)]);
     final poll = c.isDeleted(m.id) ? null : pollOf(m);
     final file = c.isDeleted(m.id) ? null : fileOf(m);
+    final transcript = c.transcriptOf(m);
     final text = poll != null
         ? '📊 ${[poll.question, ...poll.options].join(' · ')}'
         : file != null
             ? '📎 ${file.name}'
-            : c.textOf(m);
+            : transcript != null
+                ? '🎤 $transcript'
+                : c.textOf(m);
     if (text != null && text.toLowerCase().contains(needle)) hits.add(SearchHit(m, text));
     if (hits.length >= limit) break;
   }
