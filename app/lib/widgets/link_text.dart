@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../chat/markdown.dart';
 import '../chat/mentions.dart';
+import '../session/invite_link.dart';
 
 /// A run of text, and the link it opens if it is one.
 typedef TextPart = ({String text, Uri? uri});
@@ -43,7 +44,11 @@ List<TextPart> splitLinks(String text) {
   return parts;
 }
 
-Future<void> openLink(Uri uri) => launchUrl(uri, mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+/// Opens [uri] in the browser, or an invite link in the app itself.
+Future<void> openLink(Uri uri) async {
+  if (openInviteInApp(uri)) return;
+  await launchUrl(uri, mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+}
 
 /// [text] in [style], with its links underlined and tappable, and `@name` of [mentions] in bold.
 /// With [markdown], its Markdown (see chat/markdown.dart) shows as formatting.

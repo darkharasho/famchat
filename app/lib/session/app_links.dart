@@ -17,6 +17,8 @@ import '../screens/join_family_sheet.dart';
 import 'invite_link.dart';
 import 'session_controller.dart';
 
+export 'invite_link.dart' show inviteFromLink;
+
 /// Links the system hands the app.
 abstract interface class IncomingLinks {
   /// The link that launched the app, if any.
@@ -57,12 +59,6 @@ final incomingLinksProvider = Provider<IncomingLinks>((ref) =>
         ? _PlatformLinks()
         : const NoIncomingLinks());
 
-/// The invite in [uri] when it's a famchat.dev invite link, else null.
-String? inviteFromLink(Uri uri) {
-  if (uri.scheme != 'https' || uri.host != 'famchat.dev') return null;
-  return inviteTokenFromUri(uri);
-}
-
 /// Opens Join for invite links; signed in, offers to join the family instead.
 class InviteLinkListener extends ConsumerStatefulWidget {
   const InviteLinkListener({super.key});
@@ -73,12 +69,14 @@ class InviteLinkListener extends ConsumerStatefulWidget {
 
 class _InviteLinkListenerState extends ConsumerState<InviteLinkListener> {
   StreamSubscription<Uri>? _sub;
+  StreamSubscription<Uri>? _tappedSub;
 
   @override
   void initState() {
     super.initState();
     final links = ref.read(incomingLinksProvider);
     _sub = links.links.listen(_open);
+    _tappedSub = tappedInviteLinks.listen(_open);
     unawaited(links.initial().then((u) {
       if (u != null) _open(u);
     }));
@@ -119,6 +117,7 @@ class _InviteLinkListenerState extends ConsumerState<InviteLinkListener> {
   @override
   void dispose() {
     unawaited(_sub?.cancel());
+    unawaited(_tappedSub?.cancel());
     super.dispose();
   }
 
