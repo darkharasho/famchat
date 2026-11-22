@@ -16,6 +16,7 @@ import '../../chat/emoji/emoticons.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/files.dart' show fileOf;
 import '../../chat/forward.dart';
+import '../../transcripts/transcripts_service.dart';
 import '../../chat/mentions.dart';
 import '../../chat/wire.dart' show FetchedPreview;
 import '../../widgets/link_text.dart' show splitLinks;
@@ -760,7 +761,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         _scheduledSnack(at);
         return;
       }
-      await media.sendVoice(widget.chatId, clip);
+      final id = await media.sendVoice(widget.chatId, clip);
+      // The transcript follows the clip; it never holds it up.
+      unawaited(ref.read(transcriptsServiceProvider)?.afterVoiceSent(widget.chatId, id, clip, scheduled: false));
     } on ArgumentError {
       _snack("That voice message can't be sent.");
     } catch (_) {
