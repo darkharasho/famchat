@@ -105,6 +105,9 @@ void main() {
       for (final m in messages) {
         await alice.db.insertMessageIfAbsent(m);
       }
+      // Read already: a chat with unread messages opens at its "New messages" line instead.
+      final newest = await alice.db.maxSeq(chatId);
+      if (newest != null) await alice.db.setMyLastRead(chatId, newest);
     });
     ProviderScope.containerOf(tester.element(find.byType(FamChatApp)))
         .read(routerProvider)
