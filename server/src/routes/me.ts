@@ -12,6 +12,18 @@ export const me = new Hono<AppEnv>();
 me.use(requireAuth);
 
 /** The signed-in user's profile. isAdmin comes from the database, not the access token. */
+/** The caller's starred messages, newest first, in chats they're still in (docs/protocol.md "Starred messages"). */
+me.get("/stars", async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT s.chat_id AS chatId, s.message_id AS messageId, s.starred_at AS starredAt
+     FROM starred_messages s
+     JOIN chat_members cm ON cm.chat_id = s.chat_id AND cm.user_id = s.user_id
+     JOIN messages m ON m.id = s.message_id AND m.chat_id = s.chat_id
+     WHERE s.user_id = ? ORDER BY s.starred_at DESC, s.message_id DESC LIMIT 5000`,
+  ).bind(c.get("userId")).all<{ chatId: string; messageId: string; starredAt: number }>();
+  return c.json({ stars: rows.results });
+});
+
 me.get("/", async (c) => {
   const row = await c.env.DB.prepare(`SELECT name, operator, recovery_pub IS NOT NULL AS has_recovery,
        EXISTS (SELECT 1 FROM family_members WHERE family_id = ? AND user_id = users.id AND role = 'admin') AS is_admin

@@ -216,6 +216,29 @@ chats.patch("/:id/me", async (c) => {
   return c.body(null, 204);
 });
 
+/** Stars or unstars a message for the caller only (docs/protocol.md "Starred messages"). */
+for (const method of ["put", "delete"] as const) {
+  chats[method]("/:id/messages/:messageId/star", async (c) => {
+    const db = c.env.DB;
+    const me = c.get("userId");
+    const chatId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    if (!isUlid(messageId)) throw new ApiError("not_found");
+    const found = await db.prepare(
+      `SELECT 1 AS ok FROM messages m JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
+       WHERE m.chat_id = ? AND m.id = ?`,
+    ).bind(me, chatId, messageId).first<{ ok: number }>();
+    if (!found) throw new ApiError("not_found");
+    const res = method === "put"
+      ? await db.prepare(
+        "INSERT OR IGNORE INTO starred_messages (user_id, chat_id, message_id, starred_at) VALUES (?, ?, ?, ?)",
+      ).bind(me, chatId, messageId, Date.now()).run()
+      : await db.prepare("DELETE FROM starred_messages WHERE user_id = ? AND message_id = ?").bind(me, messageId).run();
+    if (res.meta.changes > 0) await notify(c.env, [me], { type: "stars" });
+    return c.body(null, 204);
+  });
+}
+
 /** Renames a group (any member). Titles aren't end-to-end encrypted (docs/protocol.md "Chats"). */
 chats.patch("/:id", async (c) => {
   const db = c.env.DB;

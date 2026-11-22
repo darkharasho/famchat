@@ -97,6 +97,7 @@ export async function deleteAccount(env: Env, userId: string, actorId: string, n
       .bind(userId, userId, ...gb),
   ];
   const devIdx = 2, chatIdx = 5, msgIdx = 7, mediaIdx = 8, ownedIdx = 13;
+  stmts.push(db.prepare(`DELETE FROM starred_messages WHERE user_id = ? AND ${guard}`).bind(userId, ...gb));
   stmts.push(eventStmt(db, {
     kind: "account_deleted",
     userId,
