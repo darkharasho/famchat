@@ -241,7 +241,7 @@ class ReactionBody extends Plaintext {
 
 /// A photo: two encrypted blobs in R2 (the full JPEG and a thumbnail) under one fresh media [key]
 /// (`lib/crypto/media.dart`), each pinned by the SHA-256 of its ciphertext.
-class PhotoBody extends Plaintext {
+class PhotoBody extends Plaintext with Captioned {
   const PhotoBody({
     required this.mediaKey,
     required this.thumbKey,
@@ -252,6 +252,9 @@ class PhotoBody extends Plaintext {
     required this.height,
     required this.bytes,
     this.mime = 'image/jpeg',
+    this.caption,
+    this.replyTo,
+    this.mentions = const [],
   });
 
   /// Media keys (`/api/media/:key`) of the full image and the thumbnail.
@@ -263,6 +266,11 @@ class PhotoBody extends Plaintext {
   /// Full image size in pixels, and its JPEG size in bytes.
   final int width, height, bytes;
   final String mime;
+
+  @override
+  final String? caption, replyTo;
+  @override
+  final List<String> mentions;
 
   @override
   String get kind => 'photo';
@@ -279,6 +287,7 @@ class PhotoBody extends Plaintext {
         'height': height,
         'bytes': bytes,
         'mime': mime,
+        ...captionJson,
       };
 
   factory PhotoBody._fromJson(Map<String, Object?> j) => PhotoBody(
@@ -291,6 +300,9 @@ class PhotoBody extends Plaintext {
         height: _positive(j, 'height', 100000),
         bytes: _positive(j, 'bytes', 1 << 30),
         mime: _mime(j),
+        caption: _caption(j),
+        replyTo: _replyTo(j),
+        mentions: _mentions(j),
       );
 }
 
@@ -367,7 +379,7 @@ class VoiceBody extends Plaintext {
 
 /// A video: one encrypted MP4 blob in R2, and (when one could be made) an encrypted JPEG poster
 /// frame, both under one fresh media [key] and pinned by the SHA-256 of their ciphertext.
-class VideoBody extends Plaintext {
+class VideoBody extends Plaintext with Captioned {
   const VideoBody({
     required this.mediaKey,
     required this.key,
@@ -379,6 +391,9 @@ class VideoBody extends Plaintext {
     required this.durationMs,
     required this.bytes,
     this.mime = 'video/mp4',
+    this.caption,
+    this.replyTo,
+    this.mentions = const [],
   }) : assert((thumbKey == null) == (thumbSha256 == null));
 
   /// Receivers accept videos up to this long.
@@ -397,6 +412,11 @@ class VideoBody extends Plaintext {
   final String mime;
 
   @override
+  final String? caption, replyTo;
+  @override
+  final List<String> mentions;
+
+  @override
   String get kind => 'video';
 
   @override
@@ -412,6 +432,7 @@ class VideoBody extends Plaintext {
         'durationMs': durationMs,
         'bytes': bytes,
         'mime': mime,
+        ...captionJson,
       };
 
   factory VideoBody._fromJson(Map<String, Object?> j) {
@@ -427,6 +448,9 @@ class VideoBody extends Plaintext {
       durationMs: _positive(j, 'durationMs', maxDurationMs),
       bytes: _positive(j, 'bytes', 1 << 30),
       mime: _mime(j),
+      caption: _caption(j),
+      replyTo: _replyTo(j),
+      mentions: _mentions(j),
     );
   }
 }
@@ -470,6 +494,36 @@ bool isKlipyMediaUrl(String url) {
   final u = Uri.tryParse(url);
   if (u == null || u.scheme != 'https' || u.userInfo.isNotEmpty || u.hasPort) return false;
   return u.host == 'klipy.com' || u.host.endsWith('.klipy.com');
+}
+
+/// A photo or video's optional caption, with the message it replies to and the users @mentioned
+/// in the caption (docs/protocol.md "Messages"). A caption that doesn't check out is dropped; the
+/// media still shows.
+mixin Captioned {
+  String? get caption;
+  String? get replyTo;
+  List<String> get mentions;
+
+  Map<String, Object?> get captionJson => {
+        'caption': ?caption,
+        'replyTo': ?replyTo,
+        if (mentions.isNotEmpty) 'mentions': mentions,
+      };
+}
+
+String? _caption(Map<String, Object?> j) {
+  final c = j['caption'];
+  return c is String ? validMessageText(c) : null;
+}
+
+String? _replyTo(Map<String, Object?> j) {
+  final r = j['replyTo'];
+  return r is String && r.isNotEmpty ? r : null;
+}
+
+List<String> _mentions(Map<String, Object?> j) {
+  final m = j['mentions'];
+  return m is List && m.length <= maxMentions && m.every((u) => u is String) ? List.unmodifiable(m.cast<String>()) : const [];
 }
 
 String _mediaId(Map<String, Object?> j, String k) {

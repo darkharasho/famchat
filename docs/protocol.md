@@ -84,6 +84,12 @@ A voice message (plan 8) is one blob, an AAC-LC `.m4a` (about 48 kbps mono):
  "bytes", "mime":"video/mp4"}                 size of the file (phones compress to 720p first)
 ```
 
+A photo or video may carry a caption: `"caption":"..."` (trimmed, 1–4000 characters, as a text), and
+with it `"replyTo"` and `"mentions"` as a text has them (below). A caption that doesn't check out is
+ignored and the media still shows; clients from before captions show the media without it. When several
+photos and videos are sent together, the caption rides on the last. A forwarded copy keeps the caption
+(as it shows now) but not the reply or mentions.
+
 A text, GIF, photo, voice or video message may say `"forwarded": true`: a copy of a message from another chat. Media blobs are
 uploaded again under a new media key (media access follows the chat), so the copy stands alone.
 
@@ -99,7 +105,8 @@ them all (clients bold `@everyone` when a text has mentions).
 Edits and deletes are messages too, and count only when their sender is the target's sender:
 
 ```
-{"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages; the latest edit wins
+{"kind":"edit", "target":"<messageId>", "text":"..."}   new text for one of your text messages, or a new caption for
+                                                        one of your photos or videos; the latest edit wins
                                                         (with "previewOnly": true, a late link preview: "Link previews";
                                                         those never count when picking the latest edit)
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored

@@ -152,7 +152,10 @@ class MediaService {
 
   /// Compresses, encrypts and queues a photo; returns the message id. The message stays in the outbox
   /// until both blobs are uploaded. Throws [UnsupportedImageException] for an image that won't decode.
-  Future<String> sendPhoto(String chatId, Uint8List original) async {
+  ///
+  /// [caption], [replyTo] and [mentions] go inside the encrypted message (see `Captioned`).
+  Future<String> sendPhoto(String chatId, Uint8List original,
+      {String? caption, String? replyTo, List<String> mentions = const []}) async {
     final p = await processor.process(original);
     final key = newMediaKey();
     final messageId = newUlid();
@@ -171,6 +174,9 @@ class MediaService {
         width: p.width,
         height: p.height,
         bytes: p.full.length,
+        caption: caption,
+        replyTo: replyTo,
+        mentions: mentions.take(maxMentions).toList(),
       ),
       id: messageId,
     );
@@ -179,12 +185,21 @@ class MediaService {
   /// Encrypts and queues a processed video (its file, and its poster frame when there is one);
   /// returns the message id. Throws [VideoTooLargeException] past [maxVideoBytes] and
   /// [ArgumentError] for an empty file or a length outside (0, [VideoBody.maxDurationMs]].
-  Future<String> sendVideo(String chatId, ProcessedVideo v) async {
+  Future<String> sendVideo(String chatId, ProcessedVideo v,
+      {String? caption, String? replyTo, List<String> mentions = const []}) async {
     if (v.bytes.length > maxVideoBytes) throw VideoTooLargeException(v.bytes.length);
     if (v.bytes.isEmpty || v.width < 1 || v.height < 1) throw ArgumentError.value(v.bytes.length, 'bytes', 'empty video');
     final ms = v.duration.inMilliseconds;
     if (ms < 1 || ms > VideoBody.maxDurationMs) throw ArgumentError.value(v.duration, 'duration', 'bad length');
-    return _stageVideo(chatId, file: v.bytes, thumb: v.thumb, width: v.width, height: v.height, durationMs: ms);
+    return _stageVideo(chatId,
+        file: v.bytes,
+        thumb: v.thumb,
+        width: v.width,
+        height: v.height,
+        durationMs: ms,
+        caption: caption,
+        replyTo: replyTo,
+        mentions: mentions);
   }
 
   Future<String> _stageVideo(
@@ -195,6 +210,9 @@ class MediaService {
     required int height,
     required int durationMs,
     bool forwarded = false,
+    String? caption,
+    String? replyTo,
+    List<String> mentions = const [],
   }) async {
     final key = newMediaKey();
     final messageId = newUlid();
@@ -216,6 +234,9 @@ class MediaService {
         height: height,
         durationMs: durationMs,
         bytes: file.length,
+        caption: caption,
+        replyTo: replyTo,
+        mentions: mentions.take(maxMentions).toList(),
       ),
       id: messageId,
       forwarded: forwarded,
@@ -336,7 +357,8 @@ class MediaService {
   /// Copies a photo, voice or video message into [chatId] (forwarding): its blobs are loaded, then encrypted
   /// under a new key and uploaded again, since media access follows the chat it was sent to. Returns
   /// the new message id, or null when the media expired. Throws [ArgumentError] for other kinds.
-  Future<String?> forwardMedia(String chatId, Plaintext body) async {
+  /// [caption] is the caption it shows now (after edits); replies and mentions aren't copied.
+  Future<String?> forwardMedia(String chatId, Plaintext body, {String? caption}) async {
     final key = newMediaKey();
     final messageId = newUlid();
     switch (body) {
@@ -360,6 +382,7 @@ class MediaService {
             height: body.height,
             bytes: full.length,
             mime: body.mime,
+            caption: caption,
           ),
           id: messageId,
           forwarded: true,
@@ -388,7 +411,13 @@ class MediaService {
         final thumbRef = body.thumbRef;
         final thumb = thumbRef == null ? null : await load(thumbRef);
         return _stageVideo(chatId,
-            file: file, thumb: thumb, width: body.width, height: body.height, durationMs: body.durationMs, forwarded: true);
+            file: file,
+            thumb: thumb,
+            width: body.width,
+            height: body.height,
+            durationMs: body.durationMs,
+            forwarded: true,
+            caption: caption);
       default:
         throw ArgumentError.value(body.kind, 'body', 'not a media message');
     }

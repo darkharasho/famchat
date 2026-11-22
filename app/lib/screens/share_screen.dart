@@ -7,8 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../chat/providers.dart';
 import '../push/providers.dart' show rootMessengerKeyProvider;
-import '../media/providers.dart';
-import '../media/send_media.dart';
+import '../media/staged_media.dart';
 import '../share/share.dart';
 import '../theme/tokens.dart';
 import '../widgets/person_avatar.dart';
@@ -34,8 +33,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     if (_sending) return;
     _sending = true;
     // Read everything now: this screen is gone once the chat opens.
-    final media = ref.read(mediaServiceProvider);
-    final videos = ref.read(videoProcessorProvider);
+    final staged = ref.read(stagedMediaProvider(chatId).notifier);
     final db = ref.read(chatDbProvider);
     final messenger = ref.read(rootMessengerKeyProvider).currentState;
     final pending = ref.read(pendingShareProvider.notifier), source = ref.read(shareSourceProvider);
@@ -45,11 +43,15 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
       final draft = await db.draftOf(chatId);
       await db.setDraft(chatId, draft == null || draft.trim().isEmpty ? text : '$draft\n$text');
     }
+    // Photos and videos wait in the chat's tray, to go with a caption.
+    if (share.media.isNotEmpty) {
+      final left = staged.add(share.media);
+      if (left > 0) {
+        messenger?.showSnackBar(SnackBar(content: Text('Only $maxStagedMedia photos and videos can be sent at once.')));
+      }
+    }
     if (mounted) context.go('/chats/$chatId');
     _finish(pending, source);
-    if (media == null || share.media.isEmpty) return;
-    final report = await sendMedia(media, videos, chatId, share.media);
-    if (report.problem case final p?) messenger?.showSnackBar(SnackBar(content: Text(p)));
   }
 
   @override

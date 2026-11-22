@@ -2,6 +2,7 @@ import 'package:famchat/chat/chat_sync.dart';
 import 'package:famchat/media/photo_picker.dart';
 import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,27 +46,84 @@ void main() {
 
   int sends(ScriptedHubLink hub) => hub.sent.where((f) => f['type'] == 'send').length;
 
-  chatTestWidgets('pasting a photo asks first, then sends it', (tester) async {
+  ProviderContainer c(WidgetTester tester) => ProviderScope.containerOf(tester.element(find.byType(FamChatApp)));
+
+  Future<void> type(WidgetTester tester, String text) async {
+    await tester.enterText(find.byKey(const Key('composer')), text);
+    await settle(tester);
+  }
+
+  chatTestWidgets('a pasted photo waits in the tray, then goes with the message as its caption', (tester) async {
+    final hub = await open(tester, () => [PickedPhoto(png), PickedPhoto(png)]);
+    await ctrlV(tester);
+    expect(find.byKey(const Key('staged-tray')), findsOneWidget);
+    expect(find.text('2 items · your message goes with them'), findsOneWidget);
+    expect(sends(hub), 0);
+    await type(tester, 'beach day');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    expect(find.byKey(const Key('staged-tray')), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, isEmpty);
+    expect(find.byKey(const Key('photo-thumb')), findsNWidgets(2));
+    expect(find.text('beach day'), findsOneWidget, reason: 'under the last photo');
+    expect(sends(hub), 2);
+    final ids = [for (final f in hub.sent.where((f) => f['type'] == 'send')) f['id'] as String];
+    final photos = [for (final id in ids) (await inApp(tester, () => alice.db.messageById(id)))!];
+    expect(photos.map((r) => r.kind), ['photo', 'photo']);
+    expect(photos.first.body, isNot(contains('caption')));
+    expect(photos.last.body, contains('"caption":"beach day"'));
+  });
+
+  chatTestWidgets('✕ takes a photo out of the tray; removing the last sends nothing', (tester) async {
     final hub = await open(tester, () => [PickedPhoto(png)]);
     await ctrlV(tester);
-    expect(find.byKey(const Key('paste-confirm')), findsOneWidget);
-    expect(find.text('Send this photo?'), findsOneWidget);
+    expect(find.byKey(const Key('staged-tray')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('staged-remove-0')));
+    await settle(tester);
+    expect(find.byKey(const Key('staged-tray')), findsNothing);
+    expect(find.byTooltip('Send'), findsNothing, reason: 'the mic is back');
     expect(sends(hub), 0);
-    await tester.tap(find.widgetWithText(FilledButton, 'Send'));
+  });
+
+  chatTestWidgets('with nothing typed, Send (and Enter on a computer) sends the photos alone', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final hub = await open(tester, () => [PickedPhoto(png)]);
+    await ctrlV(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await settle(tester);
     expect(find.byKey(const Key('photo-thumb')), findsOneWidget);
     expect(sends(hub), 1);
+    debugDefaultTargetPlatformOverride = null;
   });
 
-  chatTestWidgets('cancelling a pasted photo sends nothing', (tester) async {
-    final hub = await open(tester, () => [PickedPhoto(png), PickedPhoto(png)]);
+  chatTestWidgets('staged photos stay when leaving the chat and coming back', (tester) async {
+    await open(tester, () => [PickedPhoto(png)]);
     await ctrlV(tester);
-    expect(find.text('Send 2 photos?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    final chatId = c(tester).read(routerProvider).state.pathParameters['id'];
+    c(tester).read(routerProvider).go('/');
     await settle(tester);
-    expect(find.byKey(const Key('paste-confirm')), findsNothing);
-    expect(find.byKey(const Key('photo-thumb')), findsNothing);
-    expect(sends(hub), 0);
+    c(tester).read(routerProvider).go('/chats/$chatId');
+    await settle(tester);
+    expect(find.byKey(const Key('staged-tray')), findsOneWidget);
+  });
+
+  chatTestWidgets('a caption can be edited like a text', (tester) async {
+    final hub = await open(tester, () => [PickedPhoto(png)]);
+    await ctrlV(tester);
+    await type(tester, 'beach');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    await tester.longPress(find.text('beach'));
+    await settle(tester);
+    await tester.tap(find.text('Edit'));
+    await settle(tester);
+    await type(tester, 'beach day');
+    await tester.tap(find.byTooltip('Save edit'));
+    await settle(tester);
+    expect(find.text('beach day'), findsOneWidget);
+    expect(find.text('edited'), findsOneWidget);
+    expect(sends(hub), 2);
   });
 
   chatTestWidgets('with no photo on the clipboard, text pastes as usual', (tester) async {

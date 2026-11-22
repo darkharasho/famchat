@@ -77,12 +77,16 @@ void main() {
     expect(find.text('a photo and a message'), findsOneWidget);
     await tester.tap(find.byKey(Key('share-to-$chatId')));
     await settle(tester);
+    // The photo waits in the tray and the text in the composer, to read over before sending.
+    expect(find.byKey(const Key('staged-tray')), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'from the beach');
+    expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), isEmpty);
+    expect(source.finished, 1);
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
     final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
     expect((sent.chatId, sent.kind), (chatId, 'photo'));
-    expect(Plaintext.decode(utf8.encode(sent.body!)), isA<PhotoBody>());
-    // The text waits in the composer, to edit before sending.
-    expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'from the beach');
-    expect(source.finished, 1);
+    expect((Plaintext.decode(utf8.encode(sent.body!)) as PhotoBody).caption, 'from the beach');
   });
 
   chatTestWidgets('a share waiting at launch opens the picker; Cancel drops it', (tester) async {
@@ -106,6 +110,6 @@ void main() {
     await tester.tap(find.byKey(Key('share-to-$chatId')), warnIfMissed: false);
     await settle(tester);
     expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'look at\nhttps://x.io');
-    expect(await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId)), hasLength(1));
+    expect(find.text('1 item · your message goes with them'), findsOneWidget, reason: 'staged once');
   });
 }

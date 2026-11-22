@@ -90,6 +90,8 @@ void main() {
     await settle(tester);
     await tester.tap(find.text('Photos and videos'));
     await settle(tester);
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
     final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
     expect(sent.kind, 'video');
     final body = Plaintext.decode(utf8.encode(sent.body!)) as VideoBody;
@@ -108,6 +110,8 @@ void main() {
     await tester.tap(find.byTooltip('Attach'));
     await settle(tester);
     await tester.tap(find.text('Photos and videos'));
+    await settle(tester);
+    await tester.tap(find.byTooltip('Send'));
     await settle(tester);
     expect(find.text('That video is too large to send (64 MB max).'), findsOneWidget);
     expect((await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single.kind, 'video');

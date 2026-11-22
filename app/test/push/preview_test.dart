@@ -84,6 +84,21 @@ void main() {
     expect(await preview(await envelopeOf(photo)), '📷 Photo');
   });
 
+  test('a captioned photo shows its caption', () async {
+    final photo = PhotoBody(
+      mediaKey: '01JMEDAA000000000000000000',
+      thumbKey: '01JTHMB0000000000000000000',
+      key: Uint8List.fromList(List.filled(32, 1)),
+      sha256: Uint8List.fromList(List.filled(32, 2)),
+      thumbSha256: Uint8List.fromList(List.filled(32, 3)),
+      width: 2048,
+      height: 1536,
+      bytes: 512000,
+      caption: 'Beach **day**\nso fun',
+    );
+    expect(await preview(await envelopeOf(photo)), '📷 Beach day so fun');
+  });
+
   test('voice returns 🎤 Voice message', () async {
     final voice = VoiceBody(
       mediaKey: '01JMEDAA000000000000000000',
