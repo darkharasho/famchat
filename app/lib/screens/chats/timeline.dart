@@ -17,6 +17,11 @@ final class DayEntry extends TimelineEntry {
   final DateTime day;
 }
 
+/// "New messages": the line above the first message that was unread when the chat was opened.
+final class UnreadEntry extends TimelineEntry {
+  const UnreadEntry();
+}
+
 final class MessageEntry extends TimelineEntry {
   const MessageEntry(this.message, {required this.firstInGroup, required this.lastInGroup});
 
@@ -36,8 +41,9 @@ bool _sameRun(MessageRow a, MessageRow b) {
   return a.senderUserId == b.senderUserId && _dayOf(ta) == _dayOf(tb) && tb.difference(ta).abs() <= groupGap;
 }
 
-/// [visible] oldest first → the entries to draw, oldest first.
-List<TimelineEntry> buildTimeline(List<MessageRow> visible) {
+/// [visible] oldest first → the entries to draw, oldest first. [unreadFrom]: the id of the message
+/// to put the "New messages" line above (after its day's separator); a run never spans the line.
+List<TimelineEntry> buildTimeline(List<MessageRow> visible, {String? unreadFrom}) {
   final out = <TimelineEntry>[];
   for (var i = 0; i < visible.length; i++) {
     final m = visible[i];
@@ -45,10 +51,12 @@ List<TimelineEntry> buildTimeline(List<MessageRow> visible) {
     final next = i + 1 < visible.length ? visible[i + 1] : null;
     final day = _dayOf(_at(m));
     if (prev == null || _dayOf(_at(prev)) != day) out.add(DayEntry(day));
+    final unread = m.id == unreadFrom;
+    if (unread) out.add(const UnreadEntry());
     out.add(MessageEntry(
       m,
-      firstInGroup: prev == null || !_sameRun(prev, m),
-      lastInGroup: next == null || !_sameRun(m, next),
+      firstInGroup: prev == null || unread || !_sameRun(prev, m),
+      lastInGroup: next == null || next.id == unreadFrom || !_sameRun(m, next),
     ));
   }
   return out;
