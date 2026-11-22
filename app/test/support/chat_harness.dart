@@ -148,6 +148,8 @@ Future<ScriptedHubLink> pumpChatApp(
       // No system file dialogs or other apps in tests.
       filePickerProvider.overrideWithValue(filePicker ?? () async => const []),
       fileActionsProvider.overrideWithValue(fileActions ?? FakeFileActions()),
+      // Nothing written to disk in tests, so nothing to delete when a disappearing message goes.
+      mediaFileDropProvider.overrideWithValue(null),
     ],
     child: const FamChatApp(),
   ));

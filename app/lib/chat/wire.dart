@@ -201,7 +201,20 @@ class ChatDto {
     this.archivedAt,
     this.markedUnread = false,
     this.avatarKey,
+    this.disappearSecs,
+    this.disappearChangedBy,
+    this.disappearChangedAt,
+    this.disappearChangedSeq,
   });
+
+  /// The chat's disappearing-message timer in seconds (docs/protocol.md "Disappearing messages"), or
+  /// null when it's off.
+  final int? disappearSecs;
+
+  /// Who last changed the timer, when (Unix ms), and the chat's `lastSeq` then (the timeline line
+  /// goes right after that message). All null until the first change.
+  final String? disappearChangedBy;
+  final int? disappearChangedAt, disappearChangedSeq;
 
   /// This user's pin (Unix ms when pinned), or null.
   final int? pinnedAt;
@@ -248,6 +261,11 @@ class ChatDto {
         archivedAt: j['archivedAt'] is int ? j['archivedAt'] as int : null,
         markedUnread: j['markedUnread'] == true,
         avatarKey: j['avatarKey'] is String ? j['avatarKey'] as String : null,
+        // Absent from servers before disappearing messages.
+        disappearSecs: j['disappearSecs'] is int ? j['disappearSecs'] as int : null,
+        disappearChangedBy: j['disappearChangedBy'] is String ? j['disappearChangedBy'] as String : null,
+        disappearChangedAt: j['disappearChangedAt'] is int ? j['disappearChangedAt'] as int : null,
+        disappearChangedSeq: j['disappearChangedSeq'] is int ? j['disappearChangedSeq'] as int : null,
       );
 }
 
@@ -260,11 +278,15 @@ class MessageDto {
     required this.senderDeviceId,
     required this.envelope,
     required this.createdAt,
+    this.disappearSecs,
   });
 
   final String chatId, id, senderUserId, senderDeviceId;
   final int seq, createdAt;
   final Map<String, Object?> envelope;
+
+  /// The disappearing timer the server stamped on it (seconds), or null for none.
+  final int? disappearSecs;
 
   factory MessageDto.fromJson(Map<String, Object?> j) => MessageDto(
         chatId: _f(j, 'chatId'),
@@ -274,7 +296,18 @@ class MessageDto {
         senderDeviceId: _f(j, 'senderDeviceId'),
         envelope: _f(j, 'envelope'),
         createdAt: _f(j, 'createdAt'),
+        disappearSecs: j['disappearSecs'] is int ? j['disappearSecs'] as int : null,
       );
+}
+
+/// A message the server deleted (docs/protocol.md "Disappearing messages", `GET /me/gone`).
+class GoneDto {
+  const GoneDto({required this.chatId, required this.messageId, required this.seq});
+  final String chatId, messageId;
+  final int seq;
+
+  factory GoneDto.fromJson(Map<String, Object?> j) =>
+      GoneDto(chatId: _f(j, 'chatId'), messageId: _f(j, 'messageId'), seq: _f(j, 'seq'));
 }
 
 class MissingWrap {
@@ -369,6 +402,13 @@ abstract interface class ChatApi {
 
   /// Renames a group (1–60 characters).
   Future<ChatDto> renameChat(String chatId, String title);
+
+  /// Sets the chat's disappearing-message timer: null (off), 86400, 604800 or 7776000 seconds.
+  Future<ChatDto> setDisappearing(String chatId, int? secs);
+
+  /// Messages the server deleted after [after] (a cursor from the last call, 0 at first), oldest
+  /// first, and the cursor to pass next time. A full page ([limit]) means ask again.
+  Future<({List<GoneDto> gone, int cursor})> gone({required int after, int limit = 500});
 
   /// Sets a group's photo (a JPEG); returns its key.
   Future<String> setChatAvatar(String chatId, Uint8List jpeg);

@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/models.dart';
@@ -65,6 +66,15 @@ final chatSyncProvider = Provider<ChatSync?>((ref) {
   unawaited(sync.start());
   ref.onDispose(() => unawaited(sync.stop()));
   return sync;
+});
+
+/// Disappearing messages: timers may sleep with the app, so expired ones are looked for again each
+/// time it comes back to the foreground (ChatsShell watches this).
+final disappearSweepProvider = Provider<void>((ref) {
+  final sync = ref.watch(chatSyncProvider);
+  if (sync == null) return;
+  final lifecycle = AppLifecycleListener(onResume: sync.sweepSoon);
+  ref.onDispose(lifecycle.dispose);
 });
 
 /// This user's families (`GET /families`), any status; empty when signed out. A `family` event

@@ -94,6 +94,10 @@ class _Chat {
   int currentEpoch = 1, lastSeq = 0;
   int? lastMessageAt;
 
+  /// The disappearing timer (server/src/routes/chats.ts PATCH) and its latest change.
+  int? disappearSecs, disappearChangedAt, disappearChangedSeq;
+  String? disappearChangedBy;
+
   /// A group's family (the server's default, family 1, unless a test moves it); null for direct chats.
   int? familyId;
   final members = <String, _Member>{};
@@ -116,6 +120,10 @@ class _Chat {
         markedUnread: members[viewer]?.markedUnread ?? false,
         avatarKey: avatarKey,
         familyId: familyId,
+        disappearSecs: disappearSecs,
+        disappearChangedBy: disappearChangedBy,
+        disappearChangedAt: disappearChangedAt,
+        disappearChangedSeq: disappearChangedSeq,
         members: [
           for (final e in members.entries)
             MemberDto(userId: e.key, joinedSeq: e.value.joinedSeq, lastReadSeq: e.value.lastReadSeq),
@@ -359,6 +367,7 @@ class FakeChatBackend {
       senderDeviceId: senderDeviceId,
       envelope: envelope,
       createdAt: now(),
+      disappearSecs: c.disappearSecs,
     );
     c.messages.add(m);
     c.lastMessageAt = m.createdAt;
@@ -391,6 +400,28 @@ class FakeChatBackend {
     for (final e in byChat.entries) {
       _notify(_chats[e.key]!.members.keys, {'type': 'media_expired', 'chatId': e.key, 'keys': e.value});
     }
+  }
+
+  /// Tombstones of deleted disappearing messages (server/src/hub.ts), oldest first, by cursor.
+  final tombstones = <({int cursor, String chatId, String messageId, int seq})>[];
+  int _tombstoneCursor = 0;
+
+  /// Deletes disappearing messages as the hub's alarm does: the rows go, a tombstone is kept for
+  /// each, and members' open sockets get `gone`.
+  void serverDelete(String chatId, List<String> ids) {
+    final c = _chats[chatId]!;
+    final deleted = <String>[];
+    for (final id in ids) {
+      final m = c.messages.where((x) => x.id == id).firstOrNull;
+      if (m == null) continue;
+      c.messages.remove(m);
+      tombstones.add((cursor: ++_tombstoneCursor, chatId: chatId, messageId: id, seq: m.seq));
+      for (final st in stars.values) {
+        st.remove(id);
+      }
+      deleted.add(id);
+    }
+    if (deleted.isNotEmpty) _notify(c.members.keys, {'type': 'gone', 'chatId': chatId, 'ids': deleted});
   }
 
   ChatDto chatDto(String id, [String? viewer]) => _chats[id]!.dto(viewer);
@@ -462,6 +493,7 @@ class FakeChatBackend {
         'senderDeviceId': m.senderDeviceId,
         'envelope': m.envelope,
         'createdAt': m.createdAt,
+        'disappearSecs': ?m.disappearSecs,
       };
 
   Iterable<FakeHubLink> _socketsOf(String userId) => _hubs.values.where((h) => h.connected && h.userId == userId);
@@ -532,6 +564,7 @@ class FakeChatBackend {
           senderDeviceId: h.deviceId,
           envelope: env,
           createdAt: now(),
+          disappearSecs: c.disappearSecs,
         );
         c.messages.add(msg);
         c.lastMessageAt = msg.createdAt;
@@ -787,6 +820,33 @@ class FakeChatApi implements ChatApi {
         c.title = title.trim();
         b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
         return c.dto(userId);
+      });
+
+  @override
+  Future<ChatDto> setDisappearing(String chatId, int? secs) => _run('PATCH /chats/$chatId', () {
+        final c = b._memberChat(chatId, userId);
+        if (secs != null && ![86400, 604800, 7776000].contains(secs)) throw ApiException(400, 'invalid_request');
+        if (c.disappearSecs != secs) {
+          c
+            ..disappearSecs = secs
+            ..disappearChangedBy = userId
+            ..disappearChangedAt = b.now()
+            ..disappearChangedSeq = c.lastSeq;
+        }
+        b._notify(c.members.keys, {'type': 'chat', 'chatId': chatId});
+        return c.dto(userId);
+      });
+
+  @override
+  Future<({List<GoneDto> gone, int cursor})> gone({required int after, int limit = 500}) => _run('GET /me/gone', () {
+        final page = [
+          for (final t in b.tombstones)
+            if (t.cursor > after && (b._chats[t.chatId]?.members.containsKey(userId) ?? false)) t,
+        ].take(limit).toList();
+        return (
+          gone: [for (final t in page) GoneDto(chatId: t.chatId, messageId: t.messageId, seq: t.seq)],
+          cursor: page.isEmpty ? after : page.last.cursor,
+        );
       });
 
   @override

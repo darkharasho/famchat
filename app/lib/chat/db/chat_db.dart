@@ -46,6 +46,14 @@ class LocalChats extends Table {
   /// A group's photo key (see [ChatDto.avatarKey]), or null.
   TextColumn get avatarKey => text().nullable()();
 
+  /// The disappearing-message timer in seconds (see [ChatDto.disappearSecs]), or null when off.
+  IntColumn get disappearSecs => integer().nullable()();
+
+  /// The latest timer change: who, when (Unix ms) and after which seq its line goes; null before any.
+  TextColumn get disappearChangedBy => text().nullable()();
+  IntColumn get disappearChangedAt => integer().nullable()();
+  IntColumn get disappearChangedSeq => integer().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -64,6 +72,7 @@ class LocalMembers extends Table {
 /// Messages, including this device's outbox (`state == 'pending'`, `seq == null`).
 @DataClassName('MessageRow')
 @TableIndex(name: 'local_messages_chat_seq', columns: {#chatId, #seq})
+@TableIndex(name: 'local_messages_expires_at', columns: {#expiresAt})
 class LocalMessages extends Table {
   TextColumn get id => text()();
   TextColumn get chatId => text()();
@@ -86,6 +95,14 @@ class LocalMessages extends Table {
 
   /// pending | sent | failed
   TextColumn get state => text()();
+
+  /// The disappearing timer the server stamped on it (seconds), or null for none.
+  IntColumn get disappearSecs => integer().nullable()();
+
+  /// When this device deletes it (Unix ms; docs/protocol.md "Disappearing messages"): my own message
+  /// at sent + timer; someone else's at my read time + timer, or at the backstop (sent + timer +
+  /// 30 days) while I haven't read it. Null for messages without a timer.
+  IntColumn get expiresAt => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -306,7 +323,7 @@ class ChatDb extends _$ChatDb {
   ChatDb(super.e);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -351,6 +368,16 @@ class ChatDb extends _$ChatDb {
           }
           // Filled in by the next sync.
           if (from < 11) await m.createTable(localStars);
+          if (from < 12) {
+            // Messages stored so far carry no timer; chats get theirs at the next sync.
+            await m.addColumn(localChats, localChats.disappearSecs);
+            await m.addColumn(localChats, localChats.disappearChangedBy);
+            await m.addColumn(localChats, localChats.disappearChangedAt);
+            await m.addColumn(localChats, localChats.disappearChangedSeq);
+            await m.addColumn(localMessages, localMessages.disappearSecs);
+            await m.addColumn(localMessages, localMessages.expiresAt);
+            await m.createIndex(localMessagesExpiresAt);
+          }
         },
       );
 
@@ -443,6 +470,10 @@ class ChatDb extends _$ChatDb {
             archivedAt: Value(c.archivedAt),
             markedUnread: Value(c.markedUnread),
             avatarKey: Value(c.avatarKey),
+            disappearSecs: Value(c.disappearSecs),
+            disappearChangedBy: Value(c.disappearChangedBy),
+            disappearChangedAt: Value(c.disappearChangedAt),
+            disappearChangedSeq: Value(c.disappearChangedSeq),
           ),
           onConflict: DoUpdate((_) => LocalChatsCompanion(
                 kind: Value(c.kind),
@@ -458,6 +489,10 @@ class ChatDb extends _$ChatDb {
                 archivedAt: Value(c.archivedAt),
                 markedUnread: Value(c.markedUnread),
                 avatarKey: Value(c.avatarKey),
+                disappearSecs: Value(c.disappearSecs),
+                disappearChangedBy: Value(c.disappearChangedBy),
+                disappearChangedAt: Value(c.disappearChangedAt),
+                disappearChangedSeq: Value(c.disappearChangedSeq),
               )),
         );
         await (delete(localMembers)..where((m) => m.chatId.equals(c.id))).go();
@@ -469,6 +504,8 @@ class ChatDb extends _$ChatDb {
         if (me != null) {
           await (update(localChats)..where((t) => t.id.equals(c.id) & t.myLastReadSeq.isSmallerThanValue(me.lastReadSeq)))
               .write(LocalChatsCompanion(myLastReadSeq: Value(me.lastReadSeq)));
+          // Read on another of my devices while this one was away.
+          await stampRead(c.id, me.lastReadSeq);
         }
       });
 
@@ -476,6 +513,9 @@ class ChatDb extends _$ChatDb {
 
   /// Lets [upsertChat] take this user's read position from the server's member list.
   set myUserId(String id) => _myUserId = id;
+
+  /// The time (Unix ms) read positions are stamped with (see [stampRead]); the sync engine's clock.
+  int Function() clock = () => DateTime.now().millisecondsSinceEpoch;
 
   Future<ChatRow?> chatById(String id) => (select(localChats)..where((c) => c.id.equals(id))).getSingleOrNull();
 
@@ -494,9 +534,65 @@ class ChatDb extends _$ChatDb {
   Future<void> setSyncedSeq(String chatId, int seq) =>
       (update(localChats)..where((c) => c.id.equals(chatId))).write(LocalChatsCompanion(syncedSeq: Value(seq)));
 
-  Future<void> setMyLastRead(String chatId, int seq) => (update(localChats)
-        ..where((c) => c.id.equals(chatId) & c.myLastReadSeq.isSmallerThanValue(seq)))
-      .write(LocalChatsCompanion(myLastReadSeq: Value(seq)));
+  Future<void> setMyLastRead(String chatId, int seq) => transaction(() async {
+        await (update(localChats)..where((c) => c.id.equals(chatId) & c.myLastReadSeq.isSmallerThanValue(seq)))
+            .write(LocalChatsCompanion(myLastReadSeq: Value(seq)));
+        await stampRead(chatId, seq);
+      });
+
+  // --- disappearing messages ---
+
+  /// My read position in [chatId] reached [seq]: others' messages with a timer up to it now expire
+  /// [clock] + their timer, unless they already expire sooner (read earlier, or the backstop).
+  /// Only rows whose time moves are written, so a repeat changes nothing.
+  Future<void> stampRead(String chatId, int seq) async {
+    final me = _myUserId;
+    if (me == null) return;
+    await customUpdate(
+      'UPDATE local_messages SET expires_at = ?1 + disappear_secs * 1000 '
+      'WHERE chat_id = ?2 AND seq IS NOT NULL AND seq <= ?3 AND sender_user_id != ?4 AND disappear_secs IS NOT NULL '
+      'AND (expires_at IS NULL OR expires_at > ?1 + disappear_secs * 1000)',
+      variables: [Variable.withInt(clock()), Variable.withString(chatId), Variable.withInt(seq), Variable.withString(me)],
+      updates: {localMessages},
+    );
+  }
+
+  /// The soonest time a message here expires (Unix ms), or null when none has a timer.
+  Future<int?> nextExpiry() async {
+    final q = selectOnly(localMessages)..addColumns([localMessages.expiresAt.min()]);
+    return (await q.getSingle()).read(localMessages.expiresAt.min());
+  }
+
+  /// [nextExpiry], again whenever messages change.
+  Stream<int?> watchNextExpiry() {
+    final q = selectOnly(localMessages)..addColumns([localMessages.expiresAt.min()]);
+    return q.watchSingle().map((r) => r.read(localMessages.expiresAt.min())).distinct();
+  }
+
+  /// Ids of messages whose time came by [now] (Unix ms).
+  Future<List<String>> expiredIds(int now) async {
+    final q = selectOnly(localMessages)
+      ..addColumns([localMessages.id])
+      ..where(localMessages.expiresAt.isSmallerOrEqualValue(now));
+    return [for (final r in await q.get()) r.read(localMessages.id)!];
+  }
+
+  /// Deletes messages [ids] for good (disappearing messages: expired here, or gone from the server)
+  /// with every change targeting them (reactions, edits, deletes, pins, votes, moves) and my stars
+  /// on them. Search reads these rows, so it no longer finds them; the chat list recounts from
+  /// what's left. Returns the rows removed (for their media).
+  Future<List<MessageRow>> purgeMessages(Iterable<String> ids) => transaction(() async {
+        final all = ids.toSet().toList();
+        final out = <MessageRow>[];
+        for (var i = 0; i < all.length; i += 500) {
+          final chunk = all.sublist(i, i + 500 > all.length ? all.length : i + 500);
+          final rows = await (select(localMessages)..where((m) => m.id.isIn(chunk) | m.targetId.isIn(chunk))).get();
+          if (rows.isNotEmpty) await (delete(localMessages)..where((m) => m.id.isIn([for (final r in rows) r.id]))).go();
+          await (delete(localStars)..where((s) => s.messageId.isIn(chunk))).go();
+          out.addAll(rows);
+        }
+        return out;
+      });
 
   Future<void> setMemberRead(String chatId, String userId, int seq) => (update(localMembers)
         ..where((m) => m.chatId.equals(chatId) & m.userId.equals(userId) & m.lastReadSeq.isSmallerThanValue(seq)))
@@ -526,9 +622,17 @@ class ChatDb extends _$ChatDb {
   /// Overwrites every column, nulls included.
   Future<void> replaceMessage(MessageRow m) => into(localMessages).insertOnConflictUpdate(m.toCompanion(false));
 
-  Future<void> ackMessage(String id, {required int seq, required int createdAt}) =>
+  /// [disappearSecs]: the timer the server stamped on it; my own message then expires at
+  /// [createdAt] + timer.
+  Future<void> ackMessage(String id, {required int seq, required int createdAt, int? disappearSecs}) =>
       (update(localMessages)..where((m) => m.id.equals(id))).write(
-        LocalMessagesCompanion(seq: Value(seq), createdAt: Value(createdAt), state: const Value('sent')),
+        LocalMessagesCompanion(
+          seq: Value(seq),
+          createdAt: Value(createdAt),
+          state: const Value('sent'),
+          disappearSecs: Value(disappearSecs),
+          expiresAt: Value(disappearSecs == null ? null : createdAt + disappearSecs * 1000),
+        ),
       );
 
   Future<void> setMessageState(String id, String state) =>

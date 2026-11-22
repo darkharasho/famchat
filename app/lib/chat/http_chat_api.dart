@@ -122,6 +122,18 @@ class HttpChatApi implements ChatApi {
       ChatDto.fromJson((await _call('PATCH', '/chats/${_seg(chatId)}', {'title': title}))!['chat'] as Map<String, Object?>);
 
   @override
+  Future<ChatDto> setDisappearing(String chatId, int? secs) async => ChatDto.fromJson(
+      (await _call('PATCH', '/chats/${_seg(chatId)}', {'disappearSecs': secs}))!['chat'] as Map<String, Object?>);
+
+  @override
+  Future<({List<GoneDto> gone, int cursor})> gone({required int after, int limit = 500}) async {
+    final j = await _get('/me/gone', {'after': '$after', 'limit': '$limit'});
+    final cursor = j['cursor'];
+    if (cursor is! int) throw const FormatException('bad cursor');
+    return (gone: [for (final g in _items(j, 'gone')) GoneDto.fromJson(g)], cursor: cursor);
+  }
+
+  @override
   Future<String> setChatAvatar(String chatId, Uint8List jpeg) async {
     final j = await _api.authedUpload('/chats/${_seg(chatId)}/avatar', bytes: jpeg, method: 'PUT', contentType: 'image/jpeg');
     final key = j?['avatarKey'];

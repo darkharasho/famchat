@@ -71,3 +71,6 @@ Future<void> sweepVideoFiles() async {}
 
 /// A player for what [playableVideo] returned.
 VideoPlayerController videoControllerFor(Uri uri) => VideoPlayerController.networkUrl(uri);
+
+/// Nothing is written to disk on the web.
+Future<void> dropVideoFiles(String id) async {}

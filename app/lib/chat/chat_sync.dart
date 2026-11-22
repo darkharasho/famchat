@@ -124,9 +124,15 @@ class ChatSync {
   }
 
   Future<void> start() async {
+    _stopped = false;
     db.myUserId = me.userId;
+    db.clock = () => _now().millisecondsSinceEpoch;
     await db.bindDevice(me.deviceId);
     unawaited(_enqueue(_reclassifyUnknown));
+    // Disappearing messages whose time came while the app was closed go first; then a timer waits
+    // for the next one (re-armed whenever messages change).
+    unawaited(_enqueue(_sweep));
+    _subs.add(db.watchNextExpiry().listen(_armSweep));
     _subs.add(hub.events.listen((e) {
       // A send's ack is recorded at once: the chain may be busy with a slow sync, and the
       // message should stop "sending" (and let the app sleep) as soon as the server has it.
@@ -154,6 +160,9 @@ class ChatSync {
 
   Future<void> stop() async {
     _syncRetry?.cancel();
+    _sweepTimer?.cancel();
+    _sweepTimer = null;
+    _stopped = true;
     for (final s in _subs) {
       await s.cancel();
     }
@@ -229,6 +238,11 @@ class ChatSync {
     } catch (_) {
       // Stars wait for the next sync or `stars` event; they never hold up messages and keys.
     }
+    try {
+      await syncGone();
+    } catch (_) {
+      // Tombstones wait for the next sync; the device's own timers still run meanwhile.
+    }
     await keys.fetch();
     for (final c in chats) {
       try {
@@ -299,11 +313,13 @@ class ChatSync {
     final existing = await db.messageById(m.id);
     final MessageRow row;
     if (existing != null) {
-      if (existing.seq == null) await db.ackMessage(m.id, seq: m.seq, createdAt: m.createdAt);
+      if (existing.seq == null) {
+        await db.ackMessage(m.id, seq: m.seq, createdAt: m.createdAt, disappearSecs: m.disappearSecs);
+      }
       _inflight.remove(m.id);
       row = existing;
     } else {
-      row = decrypted ?? await _decrypt(m);
+      row = (decrypted ?? await _decrypt(m)).copyWith(expiresAt: Value(_expiryOf(m, chat.myLastReadSeq)));
       await db.insertMessageIfAbsent(row);
     }
     await db.setSyncedSeq(m.chatId, m.seq);
@@ -311,6 +327,22 @@ class ChatSync {
     await db.noteActivity(m.chatId, m.seq, changeKinds.contains(row.kind) ? 0 : m.createdAt);
     return existing == null ? row : null;
   }
+
+  /// When this device deletes [m] (docs/protocol.md "Disappearing messages"), or null for no timer:
+  /// my own at sent + timer; someone else's at my read time + timer once my read position
+  /// ([myLastReadSeq]) passed it, until then at the backstop (sent + timer + 30 days).
+  int? _expiryOf(MessageDto m, int myLastReadSeq) {
+    final secs = m.disappearSecs;
+    if (secs == null) return null;
+    if (m.senderUserId == me.userId) return m.createdAt + secs * 1000;
+    final backstop = m.createdAt + secs * 1000 + disappearBackstop.inMilliseconds;
+    if (m.seq > myLastReadSeq) return backstop;
+    final read = _now().millisecondsSinceEpoch + secs * 1000;
+    return read < backstop ? read : backstop;
+  }
+
+  /// Past the timer, the server deletes a message by then even if not everyone read it.
+  static const disappearBackstop = Duration(days: 30);
 
   /// Verifies and decrypts; never throws for bad input. Kinds: text, reaction, photo, voice, unknown,
   /// undecryptable (key not held yet; envelope kept), invalid (fails verification for good).
@@ -327,6 +359,7 @@ class ChatSync {
       envelope: null,
       createdAt: m.createdAt,
       state: 'sent',
+      disappearSecs: m.disappearSecs,
     );
     final Envelope env;
     try {
@@ -440,8 +473,9 @@ class ChatSync {
         senderDeviceId: r.senderDeviceId,
         envelope: (jsonDecode(env) as Map).cast<String, Object?>(),
         createdAt: r.createdAt,
+        disappearSecs: r.disappearSecs,
       ));
-      if (row.kind != 'undecryptable') await db.replaceMessage(row);
+      if (row.kind != 'undecryptable') await db.replaceMessage(row.copyWith(expiresAt: Value(r.expiresAt)));
     }
   }
 
@@ -477,6 +511,10 @@ class ChatSync {
         await _flushOutbox();
       case 'stars':
         await refreshStars();
+      case 'gone':
+        // The server deleted these disappearing messages (everyone read them, or the backstop).
+        final ids = [...?(e['ids'] as List?)?.whereType<String>()];
+        if (ids.isNotEmpty) await purge(ids);
       case 'removed':
         await db.deleteChat(e['chatId'] as String);
       case 'device':
@@ -537,7 +575,14 @@ class ChatSync {
     _inflight.remove(id);
     _staleRetries.remove(id);
     final row = await db.messageById(id);
-    if (row != null && row.seq == null) await db.ackMessage(id, seq: seq, createdAt: at);
+    if (row != null && row.seq == null) {
+      // The ack doesn't say which timer the server stamped: it took the chat's at delivery, which
+      // this device knows from the chat's last `chat` event.
+      final secs = e.containsKey('disappearSecs')
+          ? e['disappearSecs'] as int?
+          : (await db.chatById(row.chatId))?.disappearSecs;
+      await db.ackMessage(id, seq: seq, createdAt: at, disappearSecs: secs);
+    }
     return row;
   }
 
@@ -882,6 +927,112 @@ class ChatSync {
 
   /// Longest group title (the server's limit).
   static const maxTitleLength = 60;
+
+  /// The timers a chat's disappearing messages may have (seconds); null is off.
+  static const disappearOptions = [86400, 604800, 7776000];
+
+  /// Sets [chatId]'s disappearing-message timer for everyone in it (any member may): one of
+  /// [disappearOptions], or null to turn it off. Messages already sent keep the timer they had.
+  Future<void> setDisappearing(String chatId, int? secs) async {
+    if (secs != null && !disappearOptions.contains(secs)) throw ArgumentError.value(secs, 'secs', 'not a timer option');
+    final chat = await api.setDisappearing(chatId, secs);
+    await db.upsertChat(chat);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Disappearing messages
+
+  Timer? _sweepTimer;
+  bool _stopped = false;
+
+  /// Longest a sweep timer waits before looking again (timers drift while a device sleeps).
+  static const sweepRecheck = Duration(hours: 1);
+
+  /// Called with the rows each purge removed, so their media (cache, files) goes too; set by the
+  /// media layer. Purges made while it's unset are handed over once it's set.
+  void Function(List<MessageRow> rows)? get onPurged => _onPurged;
+  set onPurged(void Function(List<MessageRow> rows)? f) {
+    _onPurged = f;
+    if (f != null && _purgedBacklog.isNotEmpty) {
+      final rows = [..._purgedBacklog];
+      _purgedBacklog.clear();
+      f(rows);
+    }
+  }
+
+  void Function(List<MessageRow> rows)? _onPurged;
+  final _purgedBacklog = <MessageRow>[];
+
+  /// Deletes messages [ids] here for good, with their changes, stars and media (see
+  /// [ChatDb.purgeMessages]); returns the rows removed.
+  Future<List<MessageRow>> purge(Iterable<String> ids) async {
+    final rows = await db.purgeMessages(ids);
+    if (rows.isEmpty) return rows;
+    final f = _onPurged;
+    if (f != null) {
+      f(rows);
+    } else if (_purgedBacklog.length < 5000) {
+      _purgedBacklog.addAll(rows);
+    }
+    return rows;
+  }
+
+  /// Deletes every message whose time came (in the sync queue); returns how many went.
+  Future<int> purgeExpired() async {
+    var n = 0;
+    await _enqueue(() async => n = await _purgeExpiredNow());
+    return n;
+  }
+
+  Future<int> _purgeExpiredNow() async {
+    final ids = (await db.expiredIds(_now().millisecondsSinceEpoch)).toSet();
+    if (ids.isEmpty) return 0;
+    return (await purge(ids)).where((r) => ids.contains(r.id)).length;
+  }
+
+  /// Purges what expired and waits for the next one. Run on start, by the timer, and on resume.
+  Future<void> _sweep() async {
+    await _purgeExpiredNow();
+    _armSweep(await db.nextExpiry());
+  }
+
+  /// The app came back to the foreground: timers may have slept, so look now.
+  void sweepSoon() {
+    if (!_stopped) unawaited(_enqueue(_sweep));
+  }
+
+  void _armSweep(int? at) {
+    _sweepTimer?.cancel();
+    _sweepTimer = null;
+    if (at == null || _stopped) return;
+    var wait = Duration(milliseconds: at - _now().millisecondsSinceEpoch);
+    if (wait.isNegative) wait = Duration.zero;
+    if (wait > sweepRecheck) wait = sweepRecheck;
+    _sweepTimer = Timer(wait, () {
+      _sweepTimer = null;
+      if (!_stopped) unawaited(_enqueue(_sweep));
+    });
+  }
+
+  /// Meta key of the `GET /me/gone` cursor.
+  static const goneCursorKey = 'goneCursor';
+
+  /// Drops the messages the server deleted while this device wasn't listening (`GET /me/gone`
+  /// from the stored cursor, page by page).
+  Future<void> syncGone() async {
+    var cursor = int.tryParse(await db.metaValue(goneCursorKey) ?? '') ?? 0;
+    for (;;) {
+      final page = await api.gone(after: cursor, limit: goneLimit);
+      if (page.gone.isNotEmpty) await purge([for (final g in page.gone) g.messageId]);
+      if (page.cursor != cursor) {
+        cursor = page.cursor;
+        await db.setMeta(goneCursorKey, '$cursor');
+      }
+      if (page.gone.length < goneLimit) return;
+    }
+  }
+
+  static const goneLimit = 500;
 
   /// Sets group [chatId]'s photo ([jpeg], see `lib/profile/avatar.dart`), or removes it when null;
   /// returns the new photo's key.

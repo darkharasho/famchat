@@ -208,6 +208,48 @@ class $LocalChatsTable extends LocalChats
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _disappearSecsMeta = const VerificationMeta(
+    'disappearSecs',
+  );
+  @override
+  late final GeneratedColumn<int> disappearSecs = GeneratedColumn<int>(
+    'disappear_secs',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _disappearChangedByMeta =
+      const VerificationMeta('disappearChangedBy');
+  @override
+  late final GeneratedColumn<String> disappearChangedBy =
+      GeneratedColumn<String>(
+        'disappear_changed_by',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _disappearChangedAtMeta =
+      const VerificationMeta('disappearChangedAt');
+  @override
+  late final GeneratedColumn<int> disappearChangedAt = GeneratedColumn<int>(
+    'disappear_changed_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _disappearChangedSeqMeta =
+      const VerificationMeta('disappearChangedSeq');
+  @override
+  late final GeneratedColumn<int> disappearChangedSeq = GeneratedColumn<int>(
+    'disappear_changed_seq',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -228,6 +270,10 @@ class $LocalChatsTable extends LocalChats
     archivedAt,
     markedUnread,
     avatarKey,
+    disappearSecs,
+    disappearChangedBy,
+    disappearChangedAt,
+    disappearChangedSeq,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -372,6 +418,42 @@ class $LocalChatsTable extends LocalChats
         avatarKey.isAcceptableOrUnknown(data['avatar_key']!, _avatarKeyMeta),
       );
     }
+    if (data.containsKey('disappear_secs')) {
+      context.handle(
+        _disappearSecsMeta,
+        disappearSecs.isAcceptableOrUnknown(
+          data['disappear_secs']!,
+          _disappearSecsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_by')) {
+      context.handle(
+        _disappearChangedByMeta,
+        disappearChangedBy.isAcceptableOrUnknown(
+          data['disappear_changed_by']!,
+          _disappearChangedByMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_at')) {
+      context.handle(
+        _disappearChangedAtMeta,
+        disappearChangedAt.isAcceptableOrUnknown(
+          data['disappear_changed_at']!,
+          _disappearChangedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('disappear_changed_seq')) {
+      context.handle(
+        _disappearChangedSeqMeta,
+        disappearChangedSeq.isAcceptableOrUnknown(
+          data['disappear_changed_seq']!,
+          _disappearChangedSeqMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -453,6 +535,22 @@ class $LocalChatsTable extends LocalChats
         DriftSqlType.string,
         data['${effectivePrefix}avatar_key'],
       ),
+      disappearSecs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_secs'],
+      ),
+      disappearChangedBy: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}disappear_changed_by'],
+      ),
+      disappearChangedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_changed_at'],
+      ),
+      disappearChangedSeq: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_changed_seq'],
+      ),
     );
   }
 
@@ -497,6 +595,14 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
 
   /// A group's photo key (see [ChatDto.avatarKey]), or null.
   final String? avatarKey;
+
+  /// The disappearing-message timer in seconds (see [ChatDto.disappearSecs]), or null when off.
+  final int? disappearSecs;
+
+  /// The latest timer change: who, when (Unix ms) and after which seq its line goes; null before any.
+  final String? disappearChangedBy;
+  final int? disappearChangedAt;
+  final int? disappearChangedSeq;
   const ChatRow({
     required this.id,
     required this.kind,
@@ -516,6 +622,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     this.archivedAt,
     required this.markedUnread,
     this.avatarKey,
+    this.disappearSecs,
+    this.disappearChangedBy,
+    this.disappearChangedAt,
+    this.disappearChangedSeq,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -553,6 +663,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     map['marked_unread'] = Variable<bool>(markedUnread);
     if (!nullToAbsent || avatarKey != null) {
       map['avatar_key'] = Variable<String>(avatarKey);
+    }
+    if (!nullToAbsent || disappearSecs != null) {
+      map['disappear_secs'] = Variable<int>(disappearSecs);
+    }
+    if (!nullToAbsent || disappearChangedBy != null) {
+      map['disappear_changed_by'] = Variable<String>(disappearChangedBy);
+    }
+    if (!nullToAbsent || disappearChangedAt != null) {
+      map['disappear_changed_at'] = Variable<int>(disappearChangedAt);
+    }
+    if (!nullToAbsent || disappearChangedSeq != null) {
+      map['disappear_changed_seq'] = Variable<int>(disappearChangedSeq);
     }
     return map;
   }
@@ -593,6 +715,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       avatarKey: avatarKey == null && nullToAbsent
           ? const Value.absent()
           : Value(avatarKey),
+      disappearSecs: disappearSecs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearSecs),
+      disappearChangedBy: disappearChangedBy == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedBy),
+      disappearChangedAt: disappearChangedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedAt),
+      disappearChangedSeq: disappearChangedSeq == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearChangedSeq),
     );
   }
 
@@ -620,6 +754,14 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       archivedAt: serializer.fromJson<int?>(json['archivedAt']),
       markedUnread: serializer.fromJson<bool>(json['markedUnread']),
       avatarKey: serializer.fromJson<String?>(json['avatarKey']),
+      disappearSecs: serializer.fromJson<int?>(json['disappearSecs']),
+      disappearChangedBy: serializer.fromJson<String?>(
+        json['disappearChangedBy'],
+      ),
+      disappearChangedAt: serializer.fromJson<int?>(json['disappearChangedAt']),
+      disappearChangedSeq: serializer.fromJson<int?>(
+        json['disappearChangedSeq'],
+      ),
     );
   }
   @override
@@ -644,6 +786,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
       'archivedAt': serializer.toJson<int?>(archivedAt),
       'markedUnread': serializer.toJson<bool>(markedUnread),
       'avatarKey': serializer.toJson<String?>(avatarKey),
+      'disappearSecs': serializer.toJson<int?>(disappearSecs),
+      'disappearChangedBy': serializer.toJson<String?>(disappearChangedBy),
+      'disappearChangedAt': serializer.toJson<int?>(disappearChangedAt),
+      'disappearChangedSeq': serializer.toJson<int?>(disappearChangedSeq),
     };
   }
 
@@ -666,6 +812,10 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     Value<int?> archivedAt = const Value.absent(),
     bool? markedUnread,
     Value<String?> avatarKey = const Value.absent(),
+    Value<int?> disappearSecs = const Value.absent(),
+    Value<String?> disappearChangedBy = const Value.absent(),
+    Value<int?> disappearChangedAt = const Value.absent(),
+    Value<int?> disappearChangedSeq = const Value.absent(),
   }) => ChatRow(
     id: id ?? this.id,
     kind: kind ?? this.kind,
@@ -687,6 +837,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     archivedAt: archivedAt.present ? archivedAt.value : this.archivedAt,
     markedUnread: markedUnread ?? this.markedUnread,
     avatarKey: avatarKey.present ? avatarKey.value : this.avatarKey,
+    disappearSecs: disappearSecs.present
+        ? disappearSecs.value
+        : this.disappearSecs,
+    disappearChangedBy: disappearChangedBy.present
+        ? disappearChangedBy.value
+        : this.disappearChangedBy,
+    disappearChangedAt: disappearChangedAt.present
+        ? disappearChangedAt.value
+        : this.disappearChangedAt,
+    disappearChangedSeq: disappearChangedSeq.present
+        ? disappearChangedSeq.value
+        : this.disappearChangedSeq,
   );
   ChatRow copyWithCompanion(LocalChatsCompanion data) {
     return ChatRow(
@@ -722,6 +884,18 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ? data.markedUnread.value
           : this.markedUnread,
       avatarKey: data.avatarKey.present ? data.avatarKey.value : this.avatarKey,
+      disappearSecs: data.disappearSecs.present
+          ? data.disappearSecs.value
+          : this.disappearSecs,
+      disappearChangedBy: data.disappearChangedBy.present
+          ? data.disappearChangedBy.value
+          : this.disappearChangedBy,
+      disappearChangedAt: data.disappearChangedAt.present
+          ? data.disappearChangedAt.value
+          : this.disappearChangedAt,
+      disappearChangedSeq: data.disappearChangedSeq.present
+          ? data.disappearChangedSeq.value
+          : this.disappearChangedSeq,
     );
   }
 
@@ -745,13 +919,17 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           ..write('pinnedAt: $pinnedAt, ')
           ..write('archivedAt: $archivedAt, ')
           ..write('markedUnread: $markedUnread, ')
-          ..write('avatarKey: $avatarKey')
+          ..write('avatarKey: $avatarKey, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('disappearChangedBy: $disappearChangedBy, ')
+          ..write('disappearChangedAt: $disappearChangedAt, ')
+          ..write('disappearChangedSeq: $disappearChangedSeq')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     kind,
     title,
@@ -770,7 +948,11 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
     archivedAt,
     markedUnread,
     avatarKey,
-  );
+    disappearSecs,
+    disappearChangedBy,
+    disappearChangedAt,
+    disappearChangedSeq,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -792,7 +974,11 @@ class ChatRow extends DataClass implements Insertable<ChatRow> {
           other.pinnedAt == this.pinnedAt &&
           other.archivedAt == this.archivedAt &&
           other.markedUnread == this.markedUnread &&
-          other.avatarKey == this.avatarKey);
+          other.avatarKey == this.avatarKey &&
+          other.disappearSecs == this.disappearSecs &&
+          other.disappearChangedBy == this.disappearChangedBy &&
+          other.disappearChangedAt == this.disappearChangedAt &&
+          other.disappearChangedSeq == this.disappearChangedSeq);
 }
 
 class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
@@ -814,6 +1000,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
   final Value<int?> archivedAt;
   final Value<bool> markedUnread;
   final Value<String?> avatarKey;
+  final Value<int?> disappearSecs;
+  final Value<String?> disappearChangedBy;
+  final Value<int?> disappearChangedAt;
+  final Value<int?> disappearChangedSeq;
   final Value<int> rowid;
   const LocalChatsCompanion({
     this.id = const Value.absent(),
@@ -834,6 +1024,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.archivedAt = const Value.absent(),
     this.markedUnread = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.disappearChangedBy = const Value.absent(),
+    this.disappearChangedAt = const Value.absent(),
+    this.disappearChangedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalChatsCompanion.insert({
@@ -855,6 +1049,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     this.archivedAt = const Value.absent(),
     this.markedUnread = const Value.absent(),
     this.avatarKey = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.disappearChangedBy = const Value.absent(),
+    this.disappearChangedAt = const Value.absent(),
+    this.disappearChangedSeq = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        kind = Value(kind),
@@ -882,6 +1080,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Expression<int>? archivedAt,
     Expression<bool>? markedUnread,
     Expression<String>? avatarKey,
+    Expression<int>? disappearSecs,
+    Expression<String>? disappearChangedBy,
+    Expression<int>? disappearChangedAt,
+    Expression<int>? disappearChangedSeq,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -903,6 +1105,13 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       if (archivedAt != null) 'archived_at': archivedAt,
       if (markedUnread != null) 'marked_unread': markedUnread,
       if (avatarKey != null) 'avatar_key': avatarKey,
+      if (disappearSecs != null) 'disappear_secs': disappearSecs,
+      if (disappearChangedBy != null)
+        'disappear_changed_by': disappearChangedBy,
+      if (disappearChangedAt != null)
+        'disappear_changed_at': disappearChangedAt,
+      if (disappearChangedSeq != null)
+        'disappear_changed_seq': disappearChangedSeq,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -926,6 +1135,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     Value<int?>? archivedAt,
     Value<bool>? markedUnread,
     Value<String?>? avatarKey,
+    Value<int?>? disappearSecs,
+    Value<String?>? disappearChangedBy,
+    Value<int?>? disappearChangedAt,
+    Value<int?>? disappearChangedSeq,
     Value<int>? rowid,
   }) {
     return LocalChatsCompanion(
@@ -947,6 +1160,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
       archivedAt: archivedAt ?? this.archivedAt,
       markedUnread: markedUnread ?? this.markedUnread,
       avatarKey: avatarKey ?? this.avatarKey,
+      disappearSecs: disappearSecs ?? this.disappearSecs,
+      disappearChangedBy: disappearChangedBy ?? this.disappearChangedBy,
+      disappearChangedAt: disappearChangedAt ?? this.disappearChangedAt,
+      disappearChangedSeq: disappearChangedSeq ?? this.disappearChangedSeq,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1008,6 +1225,18 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
     if (avatarKey.present) {
       map['avatar_key'] = Variable<String>(avatarKey.value);
     }
+    if (disappearSecs.present) {
+      map['disappear_secs'] = Variable<int>(disappearSecs.value);
+    }
+    if (disappearChangedBy.present) {
+      map['disappear_changed_by'] = Variable<String>(disappearChangedBy.value);
+    }
+    if (disappearChangedAt.present) {
+      map['disappear_changed_at'] = Variable<int>(disappearChangedAt.value);
+    }
+    if (disappearChangedSeq.present) {
+      map['disappear_changed_seq'] = Variable<int>(disappearChangedSeq.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1035,6 +1264,10 @@ class LocalChatsCompanion extends UpdateCompanion<ChatRow> {
           ..write('archivedAt: $archivedAt, ')
           ..write('markedUnread: $markedUnread, ')
           ..write('avatarKey: $avatarKey, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('disappearChangedBy: $disappearChangedBy, ')
+          ..write('disappearChangedAt: $disappearChangedAt, ')
+          ..write('disappearChangedSeq: $disappearChangedSeq, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1477,6 +1710,28 @@ class $LocalMessagesTable extends LocalMessages
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _disappearSecsMeta = const VerificationMeta(
+    'disappearSecs',
+  );
+  @override
+  late final GeneratedColumn<int> disappearSecs = GeneratedColumn<int>(
+    'disappear_secs',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _expiresAtMeta = const VerificationMeta(
+    'expiresAt',
+  );
+  @override
+  late final GeneratedColumn<int> expiresAt = GeneratedColumn<int>(
+    'expires_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1490,6 +1745,8 @@ class $LocalMessagesTable extends LocalMessages
     envelope,
     createdAt,
     state,
+    disappearSecs,
+    expiresAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1586,6 +1843,21 @@ class $LocalMessagesTable extends LocalMessages
     } else if (isInserting) {
       context.missing(_stateMeta);
     }
+    if (data.containsKey('disappear_secs')) {
+      context.handle(
+        _disappearSecsMeta,
+        disappearSecs.isAcceptableOrUnknown(
+          data['disappear_secs']!,
+          _disappearSecsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('expires_at')) {
+      context.handle(
+        _expiresAtMeta,
+        expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta),
+      );
+    }
     return context;
   }
 
@@ -1639,6 +1911,14 @@ class $LocalMessagesTable extends LocalMessages
         DriftSqlType.string,
         data['${effectivePrefix}state'],
       )!,
+      disappearSecs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappear_secs'],
+      ),
+      expiresAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}expires_at'],
+      ),
     );
   }
 
@@ -1670,6 +1950,14 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
 
   /// pending | sent | failed
   final String state;
+
+  /// The disappearing timer the server stamped on it (seconds), or null for none.
+  final int? disappearSecs;
+
+  /// When this device deletes it (Unix ms; docs/protocol.md "Disappearing messages"): my own message
+  /// at sent + timer; someone else's at my read time + timer, or at the backstop (sent + timer +
+  /// 30 days) while I haven't read it. Null for messages without a timer.
+  final int? expiresAt;
   const MessageRow({
     required this.id,
     required this.chatId,
@@ -1682,6 +1970,8 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     this.envelope,
     required this.createdAt,
     required this.state,
+    this.disappearSecs,
+    this.expiresAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1705,6 +1995,12 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     }
     map['created_at'] = Variable<int>(createdAt);
     map['state'] = Variable<String>(state);
+    if (!nullToAbsent || disappearSecs != null) {
+      map['disappear_secs'] = Variable<int>(disappearSecs);
+    }
+    if (!nullToAbsent || expiresAt != null) {
+      map['expires_at'] = Variable<int>(expiresAt);
+    }
     return map;
   }
 
@@ -1725,6 +2021,12 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           : Value(envelope),
       createdAt: Value(createdAt),
       state: Value(state),
+      disappearSecs: disappearSecs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearSecs),
+      expiresAt: expiresAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(expiresAt),
     );
   }
 
@@ -1745,6 +2047,8 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       envelope: serializer.fromJson<String?>(json['envelope']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       state: serializer.fromJson<String>(json['state']),
+      disappearSecs: serializer.fromJson<int?>(json['disappearSecs']),
+      expiresAt: serializer.fromJson<int?>(json['expiresAt']),
     );
   }
   @override
@@ -1762,6 +2066,8 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       'envelope': serializer.toJson<String?>(envelope),
       'createdAt': serializer.toJson<int>(createdAt),
       'state': serializer.toJson<String>(state),
+      'disappearSecs': serializer.toJson<int?>(disappearSecs),
+      'expiresAt': serializer.toJson<int?>(expiresAt),
     };
   }
 
@@ -1777,6 +2083,8 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     Value<String?> envelope = const Value.absent(),
     int? createdAt,
     String? state,
+    Value<int?> disappearSecs = const Value.absent(),
+    Value<int?> expiresAt = const Value.absent(),
   }) => MessageRow(
     id: id ?? this.id,
     chatId: chatId ?? this.chatId,
@@ -1789,6 +2097,10 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     envelope: envelope.present ? envelope.value : this.envelope,
     createdAt: createdAt ?? this.createdAt,
     state: state ?? this.state,
+    disappearSecs: disappearSecs.present
+        ? disappearSecs.value
+        : this.disappearSecs,
+    expiresAt: expiresAt.present ? expiresAt.value : this.expiresAt,
   );
   MessageRow copyWithCompanion(LocalMessagesCompanion data) {
     return MessageRow(
@@ -1807,6 +2119,10 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
       envelope: data.envelope.present ? data.envelope.value : this.envelope,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       state: data.state.present ? data.state.value : this.state,
+      disappearSecs: data.disappearSecs.present
+          ? data.disappearSecs.value
+          : this.disappearSecs,
+      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
     );
   }
 
@@ -1823,7 +2139,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           ..write('targetId: $targetId, ')
           ..write('envelope: $envelope, ')
           ..write('createdAt: $createdAt, ')
-          ..write('state: $state')
+          ..write('state: $state, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('expiresAt: $expiresAt')
           ..write(')'))
         .toString();
   }
@@ -1841,6 +2159,8 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
     envelope,
     createdAt,
     state,
+    disappearSecs,
+    expiresAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -1856,7 +2176,9 @@ class MessageRow extends DataClass implements Insertable<MessageRow> {
           other.targetId == this.targetId &&
           other.envelope == this.envelope &&
           other.createdAt == this.createdAt &&
-          other.state == this.state);
+          other.state == this.state &&
+          other.disappearSecs == this.disappearSecs &&
+          other.expiresAt == this.expiresAt);
 }
 
 class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
@@ -1871,6 +2193,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
   final Value<String?> envelope;
   final Value<int> createdAt;
   final Value<String> state;
+  final Value<int?> disappearSecs;
+  final Value<int?> expiresAt;
   final Value<int> rowid;
   const LocalMessagesCompanion({
     this.id = const Value.absent(),
@@ -1884,6 +2208,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     this.envelope = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.state = const Value.absent(),
+    this.disappearSecs = const Value.absent(),
+    this.expiresAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalMessagesCompanion.insert({
@@ -1898,6 +2224,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     this.envelope = const Value.absent(),
     required int createdAt,
     required String state,
+    this.disappearSecs = const Value.absent(),
+    this.expiresAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        chatId = Value(chatId),
@@ -1918,6 +2246,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     Expression<String>? envelope,
     Expression<int>? createdAt,
     Expression<String>? state,
+    Expression<int>? disappearSecs,
+    Expression<int>? expiresAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1932,6 +2262,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
       if (envelope != null) 'envelope': envelope,
       if (createdAt != null) 'created_at': createdAt,
       if (state != null) 'state': state,
+      if (disappearSecs != null) 'disappear_secs': disappearSecs,
+      if (expiresAt != null) 'expires_at': expiresAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1948,6 +2280,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     Value<String?>? envelope,
     Value<int>? createdAt,
     Value<String>? state,
+    Value<int?>? disappearSecs,
+    Value<int?>? expiresAt,
     Value<int>? rowid,
   }) {
     return LocalMessagesCompanion(
@@ -1962,6 +2296,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
       envelope: envelope ?? this.envelope,
       createdAt: createdAt ?? this.createdAt,
       state: state ?? this.state,
+      disappearSecs: disappearSecs ?? this.disappearSecs,
+      expiresAt: expiresAt ?? this.expiresAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2002,6 +2338,12 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
     if (state.present) {
       map['state'] = Variable<String>(state.value);
     }
+    if (disappearSecs.present) {
+      map['disappear_secs'] = Variable<int>(disappearSecs.value);
+    }
+    if (expiresAt.present) {
+      map['expires_at'] = Variable<int>(expiresAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2022,6 +2364,8 @@ class LocalMessagesCompanion extends UpdateCompanion<MessageRow> {
           ..write('envelope: $envelope, ')
           ..write('createdAt: $createdAt, ')
           ..write('state: $state, ')
+          ..write('disappearSecs: $disappearSecs, ')
+          ..write('expiresAt: $expiresAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5295,6 +5639,10 @@ abstract class _$ChatDb extends GeneratedDatabase {
     'local_messages_chat_seq',
     'CREATE INDEX local_messages_chat_seq ON local_messages (chat_id, seq)',
   );
+  late final Index localMessagesExpiresAt = Index(
+    'local_messages_expires_at',
+    'CREATE INDEX local_messages_expires_at ON local_messages (expires_at)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -5313,6 +5661,7 @@ abstract class _$ChatDb extends GeneratedDatabase {
     localStars,
     meta,
     localMessagesChatSeq,
+    localMessagesExpiresAt,
   ];
 }
 
@@ -5335,6 +5684,10 @@ typedef $$LocalChatsTableCreateCompanionBuilder = LocalChatsCompanion Function({
   Value<int?> archivedAt,
   Value<bool> markedUnread,
   Value<String?> avatarKey,
+  Value<int?> disappearSecs,
+  Value<String?> disappearChangedBy,
+  Value<int?> disappearChangedAt,
+  Value<int?> disappearChangedSeq,
   Value<int> rowid,
 });
 typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
@@ -5356,6 +5709,10 @@ typedef $$LocalChatsTableUpdateCompanionBuilder = LocalChatsCompanion Function({
   Value<int?> archivedAt,
   Value<bool> markedUnread,
   Value<String?> avatarKey,
+  Value<int?> disappearSecs,
+  Value<String?> disappearChangedBy,
+  Value<int?> disappearChangedAt,
+  Value<int?> disappearChangedSeq,
   Value<int> rowid,
 });
 
@@ -5455,6 +5812,26 @@ class $$LocalChatsTableFilterComposer
 
   ColumnFilters<String> get avatarKey => $composableBuilder(
     column: $table.avatarKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5557,6 +5934,26 @@ class $$LocalChatsTableOrderingComposer
     column: $table.avatarKey,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalChatsTableAnnotationComposer
@@ -5635,6 +6032,26 @@ class $$LocalChatsTableAnnotationComposer
 
   GeneratedColumn<String> get avatarKey =>
       $composableBuilder(column: $table.avatarKey, builder: (column) => column);
+
+  GeneratedColumn<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get disappearChangedBy => $composableBuilder(
+    column: $table.disappearChangedBy,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get disappearChangedAt => $composableBuilder(
+    column: $table.disappearChangedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get disappearChangedSeq => $composableBuilder(
+    column: $table.disappearChangedSeq,
+    builder: (column) => column,
+  );
 }
 
 class $$LocalChatsTableTableManager
@@ -5683,6 +6100,10 @@ class $$LocalChatsTableTableManager
                 Value<int?> archivedAt = const Value.absent(),
                 Value<bool> markedUnread = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<String?> disappearChangedBy = const Value.absent(),
+                Value<int?> disappearChangedAt = const Value.absent(),
+                Value<int?> disappearChangedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion(
                 id: id,
@@ -5703,6 +6124,10 @@ class $$LocalChatsTableTableManager
                 archivedAt: archivedAt,
                 markedUnread: markedUnread,
                 avatarKey: avatarKey,
+                disappearSecs: disappearSecs,
+                disappearChangedBy: disappearChangedBy,
+                disappearChangedAt: disappearChangedAt,
+                disappearChangedSeq: disappearChangedSeq,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5725,6 +6150,10 @@ class $$LocalChatsTableTableManager
                 Value<int?> archivedAt = const Value.absent(),
                 Value<bool> markedUnread = const Value.absent(),
                 Value<String?> avatarKey = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<String?> disappearChangedBy = const Value.absent(),
+                Value<int?> disappearChangedAt = const Value.absent(),
+                Value<int?> disappearChangedSeq = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalChatsCompanion.insert(
                 id: id,
@@ -5745,6 +6174,10 @@ class $$LocalChatsTableTableManager
                 archivedAt: archivedAt,
                 markedUnread: markedUnread,
                 avatarKey: avatarKey,
+                disappearSecs: disappearSecs,
+                disappearChangedBy: disappearChangedBy,
+                disappearChangedAt: disappearChangedAt,
+                disappearChangedSeq: disappearChangedSeq,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5977,6 +6410,8 @@ typedef $$LocalMessagesTableCreateCompanionBuilder =
       Value<String?> envelope,
       required int createdAt,
       required String state,
+      Value<int?> disappearSecs,
+      Value<int?> expiresAt,
       Value<int> rowid,
     });
 typedef $$LocalMessagesTableUpdateCompanionBuilder =
@@ -5992,6 +6427,8 @@ typedef $$LocalMessagesTableUpdateCompanionBuilder =
       Value<String?> envelope,
       Value<int> createdAt,
       Value<String> state,
+      Value<int?> disappearSecs,
+      Value<int?> expiresAt,
       Value<int> rowid,
     });
 
@@ -6056,6 +6493,16 @@ class $$LocalMessagesTableFilterComposer
 
   ColumnFilters<String> get state => $composableBuilder(
     column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6123,6 +6570,16 @@ class $$LocalMessagesTableOrderingComposer
     column: $table.state,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalMessagesTableAnnotationComposer
@@ -6170,6 +6627,14 @@ class $$LocalMessagesTableAnnotationComposer
 
   GeneratedColumn<String> get state =>
       $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<int> get disappearSecs => $composableBuilder(
+    column: $table.disappearSecs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get expiresAt =>
+      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
 }
 
 class $$LocalMessagesTableTableManager
@@ -6214,6 +6679,8 @@ class $$LocalMessagesTableTableManager
                 Value<String?> envelope = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<String> state = const Value.absent(),
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<int?> expiresAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalMessagesCompanion(
                 id: id,
@@ -6227,6 +6694,8 @@ class $$LocalMessagesTableTableManager
                 envelope: envelope,
                 createdAt: createdAt,
                 state: state,
+                disappearSecs: disappearSecs,
+                expiresAt: expiresAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6242,6 +6711,8 @@ class $$LocalMessagesTableTableManager
                 Value<String?> envelope = const Value.absent(),
                 required int createdAt,
                 required String state,
+                Value<int?> disappearSecs = const Value.absent(),
+                Value<int?> expiresAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalMessagesCompanion.insert(
                 id: id,
@@ -6255,6 +6726,8 @@ class $$LocalMessagesTableTableManager
                 envelope: envelope,
                 createdAt: createdAt,
                 state: state,
+                disappearSecs: disappearSecs,
+                expiresAt: expiresAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

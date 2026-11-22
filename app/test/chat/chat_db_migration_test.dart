@@ -36,6 +36,13 @@ void main() {
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('B', 'Bo', 0, 'k2', 'k2')")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 1');
     }));
     addTearDown(db.close);
@@ -70,6 +77,13 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 2');
     }));
     addTearDown(db.close);
@@ -102,6 +116,13 @@ void main() {
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 3');
     }));
     addTearDown(db.close);
@@ -133,6 +154,13 @@ void main() {
         ..execute("INSERT INTO local_chats (id, kind, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'direct', 'A', 1, 1, 0, 0)")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 4');
     }));
     addTearDown(db.close);
@@ -162,6 +190,13 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 5');
     }));
     addTearDown(db.close);
@@ -190,6 +225,13 @@ void main() {
         ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
         ..execute("INSERT INTO local_users (id, name, is_admin, identity_pub, trusted_identity_pub) VALUES ('A', 'Ann', 1, 'k', 'k')")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 6');
     }));
     addTearDown(db.close);
@@ -217,7 +259,14 @@ void main() {
         ..execute('ALTER TABLE local_chats DROP COLUMN archived_at')
         ..execute('ALTER TABLE local_chats DROP COLUMN marked_unread')
         ..execute('ALTER TABLE local_chats DROP COLUMN avatar_key')
-        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at');
+        ..execute('ALTER TABLE local_users DROP COLUMN last_seen_at')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq');
       seed(raw);
       raw.execute('PRAGMA user_version = 7');
     }));
@@ -267,6 +316,13 @@ void main() {
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 8');
     }));
     addTearDown(db.close);
@@ -311,6 +367,13 @@ void main() {
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
         ..execute('DROP TABLE local_stars')
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 9');
     }));
     addTearDown(db.close);
@@ -341,6 +404,13 @@ void main() {
         ..execute('DROP TABLE local_stars')
         ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
             "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
         ..execute('PRAGMA user_version = 10');
     }));
     addTearDown(db.close);
@@ -348,6 +418,42 @@ void main() {
     expect(await db.watchStars().first, isEmpty);
     await db.setStar('C', 'M', starred: true, at: 3);
     expect((await db.watchStars(chatId: 'C').first).single.messageId, 'M');
+  });
+
+  test('schema 11 to 12: disappearing timers on chats and messages, and an expiry index; rows kept', () async {
+    final dir = await Directory.systemTemp.createTemp('famchat_migration');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/chat.db');
+    final fresh = ChatDb(NativeDatabase(file));
+    await fresh.customSelect('SELECT 1').get();
+    await fresh.close();
+
+    final db = ChatDb(NativeDatabase(file, setup: (raw) {
+      raw
+        ..execute('DROP INDEX local_messages_expires_at')
+        ..execute('ALTER TABLE local_messages DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_messages DROP COLUMN expires_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_secs')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_by')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_at')
+        ..execute('ALTER TABLE local_chats DROP COLUMN disappear_changed_seq')
+        ..execute("INSERT INTO local_chats (id, kind, title, created_by, current_epoch, epoch_ready, last_seq, created_at) "
+            "VALUES ('C', 'group', 'Us', 'A', 1, 1, 4, 0)")
+        ..execute("INSERT INTO local_messages (id, chat_id, seq, sender_user_id, sender_device_id, kind, body, created_at, state) "
+            "VALUES ('M', 'C', 4, 'B', 'D', 'text', '{}', 5, 'sent')")
+        ..execute('PRAGMA user_version = 11');
+    }));
+    addTearDown(db.close);
+    db.myUserId = 'A';
+    final chat = (await db.chatById('C'))!;
+    expect(chat.title, 'Us');
+    expect(chat.disappearSecs, isNull);
+    expect(chat.disappearChangedSeq, isNull);
+    final m = (await db.messageById('M'))!;
+    expect((m.disappearSecs, m.expiresAt), (null, null), reason: 'messages stored before carry no timer');
+    expect(await db.nextExpiry(), isNull);
+    final indexes = await db.customSelect("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'local_messages_expires_at'").get();
+    expect(indexes, hasLength(1));
   });
 
   test('family pins: replaced as a whole, families absent from the map are dropped', () async {

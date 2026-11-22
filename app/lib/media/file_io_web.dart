@@ -30,3 +30,6 @@ void _download(String name, String mime, Uint8List bytes) {
 
 /// Nothing is written to disk on the web.
 Future<void> sweepOpenedFiles() async {}
+
+/// Nothing is written to disk on the web.
+Future<void> dropOpenedFile(String id) async {}

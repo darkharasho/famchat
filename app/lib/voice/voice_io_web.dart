@@ -15,3 +15,6 @@ Future<void> releasePlayable(Uri uri) async {}
 
 /// Nothing is written to disk on the web.
 Future<void> sweepVoiceFiles() async {}
+
+/// Nothing is written to disk on the web.
+Future<void> dropVoiceFiles(String id) async {}

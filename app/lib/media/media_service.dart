@@ -2,6 +2,7 @@
 // download, verify and decrypt on demand with a bounded local cache, and track expired media.
 // Generic over kinds: a photo stages two blobs (thumb, file); plan 8's voice stages one.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import '../api/models.dart';
@@ -108,6 +109,7 @@ class MediaService {
     this.retryDelays = const [Duration(seconds: 5), Duration(seconds: 15), Duration(minutes: 1)],
     Offload? offload,
     DateTime Function()? now,
+    this.dropFiles,
   })  : _offload = offload ?? _inline,
         _now = now ?? DateTime.now;
 
@@ -118,6 +120,10 @@ class MediaService {
 
   /// Upper bound of decrypted media kept locally.
   final int cacheBytes;
+
+  /// Deletes decrypted copies of a message's media written to disk (opened files, played clips and
+  /// videos) once the message is purged; null where nothing is written (tests).
+  final Future<void> Function(String messageId)? dropFiles;
 
   /// Waits before re-trying an upload that failed for a transient reason (the last repeats).
   final List<Duration> retryDelays;
@@ -141,6 +147,7 @@ class MediaService {
   Future<void> start() async {
     await db.bindDevice(sync.me.deviceId);
     sync.beforeSend = _beforeSend;
+    sync.onPurged = _onPurged;
     _events = sync.hub.events.listen(_onEvent);
     // Upload rows of sent messages, and of messages long gone (chat left, data wiped), aren't needed.
     final cutoff = _now().subtract(orphanGrace).millisecondsSinceEpoch;
@@ -161,6 +168,7 @@ class MediaService {
     _retryTimers.clear();
     await _events?.cancel();
     if (sync.beforeSend == _beforeSend) sync.beforeSend = null;
+    if (sync.onPurged == _onPurged) sync.onPurged = null;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -622,6 +630,29 @@ class MediaService {
     return plain;
   }
 
+  /// Disappearing messages that went: their decrypted media leaves the cache and the disk, and any
+  /// upload still waiting is dropped.
+  void _onPurged(List<MessageRow> rows) {
+    final keys = {for (final r in rows) ...mediaKeysOf(r)};
+    _purgeLane = _purgeLane.then((_) async {
+      try {
+        if (keys.isNotEmpty) await db.cacheDropPrefixed(keys);
+        for (final r in rows) {
+          await db.deleteUploadsFor(r.id);
+          await dropFiles?.call(r.id);
+        }
+      } catch (e, st) {
+        // Signed out meanwhile (the databases are closed) or a file was busy: best effort.
+        // ignore: avoid_print
+        if (!_stopped) print('purge media: $e\n$st');
+      }
+    });
+  }
+
+  /// Completes once the media of every purge so far is dropped (tests).
+  Future<void> get purgesDone => _purgeLane;
+  Future<void> _purgeLane = Future.value();
+
   void _onEvent(Map<String, Object?> e) {
     if (e['type'] != 'media_expired') return;
     final keys = [...?(e['keys'] as List?)?.whereType<String>()];
@@ -631,4 +662,23 @@ class MediaService {
       await db.cacheDropPrefixed(keys);
     }());
   }
+}
+
+/// The media keys [row]'s body names: a photo's or video's file and thumbnail, a voice clip, a
+/// file, and a link preview's image (texts and the edits that attach one).
+Set<String> mediaKeysOf(MessageRow row) {
+  final body = row.body;
+  if (body == null) return const {};
+  final Object? j;
+  try {
+    j = jsonDecode(body);
+  } on FormatException {
+    return const {};
+  }
+  if (j is! Map<String, Object?>) return const {};
+  return {
+    if (j['mediaKey'] case final String k) k,
+    if (j['thumbKey'] case final String k) k,
+    if (j['preview'] case {'image': {'mediaKey': final String k}}) k,
+  };
 }

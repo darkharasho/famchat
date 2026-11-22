@@ -137,6 +137,16 @@ Future<void> releaseVideo(Uri uri) async {
   }
 }
 
+/// Deletes the decrypted video of message [id] (a disappearing message that went), if one is left.
+Future<void> dropVideoFiles(String id) async {
+  try {
+    final f = File('${(await _dir()).path}/play_${_safe(id)}.mp4');
+    if (await f.exists()) await f.delete();
+  } catch (_) {
+    // best effort; swept at the next start
+  }
+}
+
 /// Removes decrypted videos left by a previous run, and video_compress's leftovers.
 Future<void> sweepVideoFiles() async {
   try {

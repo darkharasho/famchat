@@ -10,7 +10,7 @@ import '../chat/providers.dart';
 import '../session/session_controller.dart';
 import '../voice/voice_io.dart';
 import 'clipboard_media.dart';
-import 'file_actions.dart' show sweepOpenedFiles;
+import 'file_actions.dart' show dropOpenedFile, sweepOpenedFiles;
 import 'http_media_api.dart';
 import 'media_api.dart';
 import 'media_db.dart';
@@ -53,6 +53,16 @@ final videoFilesProvider = Provider<VideoFiles>(
   (ref) => const VideoFiles(playable: playableVideo, release: releaseVideo, controllerFor: videoControllerFor),
 );
 
+/// Deletes the decrypted copies of a purged message's media written to disk (null in tests: no disk).
+final mediaFileDropProvider = Provider<Future<void> Function(String messageId)?>((ref) => dropMessageFiles);
+
+/// Opened files, played voice clips and videos of message [id].
+Future<void> dropMessageFiles(String id) async {
+  await dropOpenedFile(id);
+  await dropVoiceFiles(id);
+  await dropVideoFiles(id);
+}
+
 /// Decrypted media kept locally: smaller on the web, where storage may live in memory.
 const mediaCacheBytes = kIsWeb ? 48 * 1024 * 1024 : 256 * 1024 * 1024;
 
@@ -75,6 +85,7 @@ final mediaServiceProvider = Provider<MediaService?>((ref) {
     processor: ref.watch(photoProcessorProvider),
     cacheBytes: mediaCacheBytes,
     offload: ref.watch(mediaOffloadProvider),
+    dropFiles: ref.watch(mediaFileDropProvider),
   );
   unawaited(media.start());
   ref.onDispose(() => unawaited(media.stop()));

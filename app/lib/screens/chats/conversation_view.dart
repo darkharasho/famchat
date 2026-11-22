@@ -61,6 +61,7 @@ import 'album_grid.dart';
 import 'media_pager.dart';
 import 'pin_bar.dart';
 import 'file_bubble.dart' show saveFileMessage;
+import 'disappearing_sheet.dart';
 import 'poll_bubble.dart';
 import 'poll_sheet.dart';
 import 'staged_tray.dart';
@@ -1333,6 +1334,14 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         .toList();
     final byId = {for (final m in visible) m.id: m};
     final byIdAll = {for (final m in messages) m.id: m};
+    // A message being replied to or edited may disappear meanwhile (its timer, or the server).
+    if (loaded.hasValue && [_replyTo, _editing].any((m) => m != null && !byIdAll.containsKey(m.id))) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_editing != null && !byIdAll.containsKey(_editing!.id)) _endEdit();
+        if (_replyTo != null && !byIdAll.containsKey(_replyTo!.id)) setState(() => _replyTo = null);
+      });
+    }
     QuotedMessage? quoteFor(MessageRow m) {
       final target = replyTargetOf(m);
       if (target == null) return null;
@@ -1354,8 +1363,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
 
     final typingNames = [for (final u in typing) if (u != me) users[u]?.name ?? 'Someone'];
     _findUnread(visible, me);
-    final timeline = buildTimeline(visible, unreadFrom: _unreadFrom, albumOf: (m) => changes.isDeleted(m.id) ? null : albumIdOf(m))
-        ;
+    final noteText = disappearNoteText(chat, nameOf);
+    final timeline = buildTimeline(
+      visible,
+      unreadFrom: _unreadFrom,
+      albumOf: (m) => changes.isDeleted(m.id) ? null : albumIdOf(m),
+      note: noteText == null ? null : NoteEntry(chat.disappearChangedSeq!, noteText),
+    );
     _albumOwner = {
       for (final e in timeline.whereType<AlbumEntry>())
         for (final m in e.items) m.id: e.items.last.id,
@@ -1437,6 +1451,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     Widget entry(TimelineEntry e) => switch (e) {
           DayEntry(:final day) => DaySeparator(key: ValueKey('day-${day.millisecondsSinceEpoch}'), label: dayLabel(day, now)),
           UnreadEntry() => KeyedSubtree(key: const ValueKey('unread-line'), child: UnreadDivider(key: _unreadKey)),
+          NoteEntry(:final text) =>
+            DisappearNoteLine(key: const ValueKey('disappear-note'), text: text, on: chat.disappearSecs != null),
           MessageEntry(message: final m) when gameEvents.containsKey(m.id) => AppearIn(
               key: ValueKey(m.id),
               animate: _initialIds != null && !_initialIds!.contains(m.id) && _animated.add(m.id),
@@ -1514,6 +1530,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       semanticLabel: 'Muted',
                     ),
                   ],
+                  if (chat.disappearSecs != null) ...[
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: 'Disappearing messages: ${disappearLabel(chat.disappearSecs)}',
+                      child: Icon(
+                        Icons.timer_outlined,
+                        key: const Key('disappearing-icon'),
+                        size: 16,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        semanticLabel: 'Disappearing messages: ${disappearLabel(chat.disappearSecs)}',
+                      ),
+                    ),
+                  ],
                 ]),
                 if (subtitle != null)
                   Text(
@@ -1535,6 +1564,31 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               tooltip: 'Chat info',
               icon: const Icon(Icons.info_outline_rounded),
               onPressed: () => context.go('/chats/$chatId/info'),
+            ),
+            PopupMenuButton<String>(
+              key: const Key('chat-menu'),
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (v) => switch (v) {
+                'disappearing' => unawaited(changeDisappearing(context, ref, chat)),
+                'media' => context.go('/chats/$chatId/media'),
+                _ => null,
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  key: const Key('chat-menu-disappearing'),
+                  value: 'disappearing',
+                  child: ListTile(
+                    leading: Icon(chat.disappearSecs == null ? Icons.timer_off_outlined : Icons.timer_outlined),
+                    title: const Text('Disappearing messages'),
+                    subtitle: Text(disappearLabel(chat.disappearSecs)),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'media',
+                  child: ListTile(leading: Icon(Icons.photo_library_outlined), title: Text('Media, links and starred')),
+                ),
+              ],
             ),
             const SizedBox(width: Space.xs),
           ],
@@ -1582,7 +1636,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: _touch ? _dismissInput : null,
-                child: visible.isEmpty
+                child: entries.isEmpty
                   ? EmptyState(
                       art: PersonAvatar(
                         label: title,
@@ -1611,6 +1665,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               AlbumEntry(:final items) => items.last.id == id,
                               DayEntry(:final day) => 'day-${day.millisecondsSinceEpoch}' == id,
                               UnreadEntry() => id == 'unread-line',
+                              NoteEntry() => id == 'disappear-note',
                             });
                         return i < 0 ? null : i;
                       },

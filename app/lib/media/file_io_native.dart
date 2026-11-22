@@ -53,6 +53,16 @@ Future<OpenOutcome> openFileBytes({required String id, required String name, req
 Future<bool> saveFileBytes({required String name, required String mime, required Uint8List bytes}) async =>
     await FilePicker.saveFile(fileName: diskFileName(name), bytes: bytes, mimeType: mime) != null;
 
+/// Deletes what [openFileBytes] wrote for message [id] (a disappearing message that went).
+Future<void> dropOpenedFile(String id) async {
+  try {
+    final folder = Directory('${(await _dir()).path}/${_safe(id)}');
+    if (await folder.exists()) await folder.delete(recursive: true);
+  } catch (_) {
+    // best effort; swept at the next start
+  }
+}
+
 /// Removes files opened in a previous run.
 Future<void> sweepOpenedFiles() async {
   try {

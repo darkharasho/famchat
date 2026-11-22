@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/screens/chats/timeline.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,7 @@ String describe(List<TimelineEntry> t) => t
     .map((e) => switch (e) {
           DayEntry(:final day) => '[${day.month}/${day.day}]',
           UnreadEntry() => '|new|',
+          NoteEntry(:final afterSeq) => '(note $afterSeq)',
           MessageEntry(:final message, :final firstInGroup, :final lastInGroup) =>
             '${message.id}${firstInGroup ? '<' : ''}${lastInGroup ? '>' : ''}',
           AlbumEntry(:final items, :final firstInGroup, :final lastInGroup) =>
@@ -40,6 +42,22 @@ void main() {
       ], unreadFrom: 'b');
       expect(describe(t), '[3/3] a<> |new| b< c> [3/4] d<>');
       expect(describe(buildTimeline([msg('d', 'u1', DateTime(2026, 3, 4, 9, 0))], unreadFrom: 'd')), '[3/4] |new| d<>');
+    });
+
+    test('the disappearing line goes right after its seq, splits the run, and sits before the outbox', () {
+      MessageRow s(String id, int? seq, DateTime at) => msg(id, 'u1', at).copyWith(seq: Value(seq));
+      final day = DateTime(2026, 3, 3, 9);
+      final rows = [
+        s('a', 1, day),
+        s('b', 2, day.add(const Duration(minutes: 1))),
+        s('c', 4, day.add(const Duration(minutes: 2))), // seq 3 was a hidden change
+        s('p', null, day.add(const Duration(minutes: 3))),
+      ];
+      expect(describe(buildTimeline(rows, note: const NoteEntry(3, 'x'))), '[3/3] a< b> (note 3) c< p>');
+      expect(describe(buildTimeline(rows, note: const NoteEntry(0, 'x'))), '(note 0) [3/3] a< b c p>');
+      expect(describe(buildTimeline(rows, note: const NoteEntry(9, 'x'))), '[3/3] a< b c> (note 9) p<>');
+      expect(describe(buildTimeline(rows.take(3).toList(), note: const NoteEntry(9, 'x'))), '[3/3] a< b c> (note 9)');
+      expect(describe(buildTimeline(const [], note: const NoteEntry(5, 'x'))), '(note 5)');
     });
 
     test('a lone message starts a day and is a group of one', () {

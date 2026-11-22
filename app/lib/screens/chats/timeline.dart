@@ -22,6 +22,15 @@ final class UnreadEntry extends TimelineEntry {
   const UnreadEntry();
 }
 
+/// A line about the chat itself, right after message [afterSeq] ("Mom turned on disappearing
+/// messages: 7 days").
+final class NoteEntry extends TimelineEntry {
+  const NoteEntry(this.afterSeq, this.text);
+
+  final int afterSeq;
+  final String text;
+}
+
 final class MessageEntry extends TimelineEntry {
   const MessageEntry(this.message, {required this.firstInGroup, required this.lastInGroup});
 
@@ -53,7 +62,10 @@ bool _sameRun(MessageRow a, MessageRow b) {
 /// [visible] oldest first → the entries to draw, oldest first. [unreadFrom]: the id of the message
 /// to put the "New messages" line above (after its day's separator); a run never spans the line.
 /// [albumOf]: a message's album id (null for none, or for one that shouldn't group, e.g. deleted).
-List<TimelineEntry> buildTimeline(List<MessageRow> visible, {String? unreadFrom, String? Function(MessageRow)? albumOf}) {
+/// [note] goes after the last message with a seq up to its [NoteEntry.afterSeq] (first when there
+/// is none, before the outbox); a run never spans it.
+List<TimelineEntry> buildTimeline(List<MessageRow> visible,
+    {String? unreadFrom, String? Function(MessageRow)? albumOf, NoteEntry? note}) {
   // Units: single messages, or albums of 2+.
   final units = <List<MessageRow>>[];
   for (final m in visible) {
@@ -70,22 +82,31 @@ List<TimelineEntry> buildTimeline(List<MessageRow> visible, {String? unreadFrom,
       units.add([m]);
     }
   }
+  // The unit the note goes before (units.length: at the end).
+  final noteAt = note == null
+      ? -1
+      : switch (units.indexWhere((u) => u.first.seq == null || u.first.seq! > note.afterSeq)) {
+          -1 => units.length,
+          final i => i,
+        };
   final out = <TimelineEntry>[];
   for (var i = 0; i < units.length; i++) {
     final u = units[i];
     final first = u.first, lastRow = u.last;
     final prev = i > 0 ? units[i - 1].last : null;
     final next = i + 1 < units.length ? units[i + 1].first : null;
+    if (i == noteAt) out.add(note!);
     final day = _dayOf(_at(first));
     if (prev == null || _dayOf(_at(prev)) != day) out.add(DayEntry(day));
     final unread = first.id == unreadFrom;
     if (unread) out.add(const UnreadEntry());
-    final firstInGroup = prev == null || unread || !_sameRun(prev, first);
-    final lastInGroup = next == null || next.id == unreadFrom || !_sameRun(lastRow, next);
+    final firstInGroup = prev == null || unread || i == noteAt || !_sameRun(prev, first);
+    final lastInGroup = next == null || next.id == unreadFrom || i + 1 == noteAt || !_sameRun(lastRow, next);
     out.add(u.length > 1
         ? AlbumEntry(List.unmodifiable(u), firstInGroup: firstInGroup, lastInGroup: lastInGroup)
         : MessageEntry(first, firstInGroup: firstInGroup, lastInGroup: lastInGroup));
   }
+  if (noteAt == units.length) out.add(note!);
   return out;
 }
 
