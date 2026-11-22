@@ -112,4 +112,18 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('composer'))).controller!.text, 'look at\nhttps://x.io');
     expect(find.text('1 item · your message goes with them'), findsOneWidget, reason: 'staged once');
   });
+
+  chatTestWidgets('shared files go at once as files; the share is done before they send', (tester) async {
+    final chatId = await start(tester);
+    source.share(IncomingShare(files: [XFile.fromData(png, path: '/shared/plan.pdf')]));
+    await settle(tester);
+    expect(find.text('a file'), findsOneWidget);
+    await tester.tap(find.byKey(Key('share-to-$chatId')));
+    await settle(tester);
+    expect(source.finished, 1);
+    final sent = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    expect((sent.chatId, sent.kind), (chatId, 'file'));
+    final f = Plaintext.decode(utf8.encode(sent.body!)) as FileBody;
+    expect((f.name, f.mime, f.bytes), ('plan.pdf', 'application/pdf', png.length));
+  });
 }

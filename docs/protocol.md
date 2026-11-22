@@ -96,10 +96,13 @@ A file (any type) is one blob, purpose `"file"`, like a voice clip:
 
 Receivers clean `name`: path separators (`/`, `\`, `:`), control characters and bidi marks
 (U+200E/F, U+202A–U+202E, U+2066–U+2069, U+061C) and line separators are removed, it is trimmed and
-cut to 255 characters (keeping a short extension), and an empty or dots-only name becomes `file`. A
+cut to 255 characters (keeping a short extension), trailing dots and spaces are stripped (Windows
+drops them when writing a file, so `evil.exe.` would land as `evil.exe`), and a name with nothing
+left becomes `file`. A
 name that needs cleaning is cleaned, never a reason to drop the message. A `mime` that isn't a plain
 `type/subtype` (at most 100 characters) shows as `application/octet-stream`; a bad `replyTo` is
-ignored. Apps never run a received file: ones that execute code are only saved, never opened.
+ignored. Apps never run a received file: only an allowlist of document, media and archive types is
+opened with a tap; anything else is only saved.
 
 A photo or video may carry a caption: `"caption":"..."` (trimmed, 1–4000 characters, as a text), and
 with it `"replyTo"` and `"mentions"` as a text has them (below). A caption that doesn't check out is

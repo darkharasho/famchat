@@ -569,10 +569,12 @@ const maxFileName = 255;
 final _unsafeInName = RegExp(r'[/\\:\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028-\u202E\u2066-\u2069]');
 
 /// [name] safe to show and to offer as a save name: separators and control characters removed,
-/// trimmed, cut to [maxFileName] characters (keeping the extension when it's short), and "file"
-/// when nothing is left or only dots are (so it can never be `.` or `..`).
+/// trimmed, cut to [maxFileName] characters (keeping the extension when it's short), trailing dots
+/// and spaces stripped (Windows drops them when writing, so "evil.exe." would be saved as
+/// "evil.exe"), and "file" when nothing is left (so it can never be `.` or `..`).
 String cleanFileName(String name) {
-  var n = name.replaceAll(_unsafeInName, '').trim();
+  final trailing = RegExp(r'[.\s]+$');
+  var n = name.replaceAll(_unsafeInName, '').trim().replaceFirst(trailing, '');
   final runes = n.runes.toList();
   if (runes.length > maxFileName) {
     final dot = n.lastIndexOf('.');
@@ -584,7 +586,9 @@ String cleanFileName(String name) {
       n = String.fromCharCodes(runes.take(maxFileName)).trimRight();
     }
   }
-  return n.isEmpty || RegExp(r'^\.+$').hasMatch(n) ? 'file' : n;
+  // Cutting can leave some at the end again.
+  n = n.replaceFirst(trailing, '');
+  return n.isEmpty ? 'file' : n;
 }
 
 /// A GIF from KLIPY (docs/protocol.md "GIFs"). KLIPY's terms have each viewer load it straight from

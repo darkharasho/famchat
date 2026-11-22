@@ -1,6 +1,6 @@
 // A file inside a bubble: its type icon, name, size and type. Tapping downloads and decrypts it,
-// then opens it in the system's app for it (the web downloads it). Programs and scripts are never
-// opened from here, only saved.
+// then opens it in the system's app for it (the web downloads it). Only documents, media and
+// archives open with a tap (opensWithTap); anything else is only saved.
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -78,16 +78,16 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
   void _say(String text, {SnackBarAction? action}) =>
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text), action: action));
 
+  /// Not a type a tap opens: offer to save it instead.
+  void _saveInstead() => _say(
+        "FamChat only opens documents, photos, music and videos. Save this one, then open it yourself if you trust it.",
+        action: SnackBarAction(label: 'Save', onPressed: () => saveFileMessage(context, ref, widget.body)),
+      );
+
   Future<void> _open() async {
     if (_loading) return;
     final body = widget.body;
-    if (isRunnable(body.name)) {
-      _say(
-        "FamChat doesn't open programs. Save it, then open it yourself if you trust it.",
-        action: SnackBarAction(label: 'Save', onPressed: () => saveFileMessage(context, ref, body)),
-      );
-      return;
-    }
+    if (!opensWithTap(diskFileName(body.name))) return _saveInstead();
     final actions = ref.read(fileActionsProvider);
     setState(() {
       _loading = true;
@@ -101,6 +101,7 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
       if (!mounted) return;
       if (outcome == OpenOutcome.noApp) _say('Nothing here can open "${body.name}". Save it instead.');
       if (outcome == OpenOutcome.failed) _say("Couldn't open that file.");
+      if (outcome == OpenOutcome.notAllowed) _saveInstead();
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     } finally {

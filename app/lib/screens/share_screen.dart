@@ -55,12 +55,17 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
       }
     }
     if (mounted) context.go('/chats/$chatId');
-    // Other files go at once, as they are (there's no caption to wait for).
-    if (share.files.isNotEmpty && media != null) {
-      final report = await sendFiles(media, chatId, [for (final f in share.files) OutgoingFile.xfile(f)]);
-      if (report.problem case final p?) messenger?.showSnackBar(SnackBar(content: Text(p)));
-    }
+    // Done with this share before sending its files (they're in hand): one that comes meanwhile
+    // stays.
     _finish(pending, source);
+    // Other files go at once, as they are (there's no caption to wait for).
+    if (share.files.isEmpty) return;
+    if (media == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text("Couldn't send the files. Share them again in a moment.")));
+      return;
+    }
+    final report = await sendFiles(media, chatId, [for (final f in share.files) OutgoingFile.xfile(f)]);
+    if (report.problem case final p?) messenger?.showSnackBar(SnackBar(content: Text(p)));
   }
 
   @override

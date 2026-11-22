@@ -88,8 +88,62 @@ void main() {
       expect(fileTypeLabel('.bashrc'), 'File');
       expect(mimeForName('notes.TXT'), 'text/plain');
       expect(mimeForName('thing.unknown'), isNull);
-      expect(isRunnable('setup.EXE'), isTrue);
-      expect(isRunnable('setup.exe.pdf'), isFalse);
+    });
+
+    test('a tap opens only allowlisted types, judged by the name as written to disk', () {
+      for (final n in ['a.pdf', 'b.JPG', 'c.mp3', 'd.mov', 'e.docx', 'f.xlsx', 'g.pptx', 'h.pages', 'i.txt', 'j.csv',
+          'k.md', 'l.json', 'm.zip', 'n.7z', 'o.tar', 'p.gz', 'q.rar', 'setup.exe.pdf']) {
+        expect(opensWithTap(diskFileName(n)), isTrue, reason: n);
+      }
+      for (final n in [
+        'setup.exe', 'run.bat', 'x.ps1', 'x.py', 'x.pyw', 'x.msp', 'x.msc', 'x.scf', 'x.chm', 'x.application',
+        'x.appref-ms', 'x.gadget', 'x.ws', 'x.wsc', 'x.sct', 'x.vb', 'x.settingcontent-ms', 'x.search-ms',
+        'x.library-ms', 'x.diagcab', 'x.xll', 'x.xbap', 'x.jnlp', 'x.cab', 'x.iso', 'x.img', 'x.vhdx',
+        'x.terminal', 'x.fileloc', 'x.scpt', 'x.dylib', 'x.command', 'x.app', 'x.html', 'x.svg', 'x.js', 'x.lnk',
+        'macro.docm', 'macro.xlsm', 'macro.pptm', 'README', '.bashrc',
+        // Windows drops trailing dots and spaces when writing: these land as programs.
+        'evil.exe.', 'evil.bat..', 'evil.exe. .', 'evil.pdf.exe . ',
+      ]) {
+        expect(opensWithTap(diskFileName(n)), isFalse, reason: n);
+      }
+      // Names that went through the wire's cleaning too.
+      expect(opensWithTap(diskFileName(cleanFileName('evil.exe.'))), isFalse);
+    });
+
+    test('names on disk: no characters Windows forbids, no device names, at most 255 bytes', () {
+      expect(diskFileName('a<b>c:d"e|f?g*h.txt'), 'a_b_c_d_e_f_g_h.txt');
+      expect(diskFileName('CON'), '_CON');
+      expect(diskFileName('con.txt'), '_con.txt');
+      expect(diskFileName('Lpt1.tar.gz'), '_Lpt1.tar.gz');
+      expect(diskFileName('NUL .pdf'), '_NUL .pdf');
+      expect(diskFileName('console.txt'), 'console.txt');
+      expect(diskFileName('evil.exe. .'), 'evil.exe');
+      expect(diskFileName('...'), 'file');
+      expect(diskFileName('Résumé (final).docx'), 'Résumé (final).docx');
+      final long = diskFileName('${'家' * 200}.pdf');
+      expect(utf8.encode(long).length, lessThanOrEqualTo(255));
+      expect(long, endsWith('.pdf'));
+      expect(long, startsWith('家家'));
+      expect(utf8.encode(diskFileName('${'😀' * 100}.txt')).length, lessThanOrEqualTo(255));
+      expect(diskFileName('${'😀' * 100}.txt'), endsWith('😀.txt'), reason: 'no character split');
+      expect(diskFileName('a' * 300), 'a' * 255);
+    });
+
+    test("shared paths in FamChat's own storage are refused, except straight in the cache", () {
+      const private = ['/data/user/0/dev.famchat.app', '/data/data/dev.famchat.app'];
+      const caches = ['/data/user/0/dev.famchat.app/cache', '/data/data/dev.famchat.app/cache'];
+      bool ok(String p) => sharedPathAllowed(p, privateDirs: private, cacheDirs: caches);
+      expect(ok('/data/user/0/dev.famchat.app/cache/plan.pdf'), isTrue, reason: 'the plugin copies streams here');
+      expect(ok('/data/data/dev.famchat.app/cache/IMG_1.jpg'), isTrue);
+      expect(ok('/storage/emulated/0/Download/plan.pdf'), isTrue);
+      expect(ok('/data/user/0/dev.famchat.app.other/files/x'), isTrue, reason: 'another app');
+      expect(ok('/data/user/0/dev.famchat.app/app_flutter/chat.sqlite'), isFalse);
+      expect(ok('/data/data/dev.famchat.app/databases/x.db'), isFalse);
+      expect(ok('/data/user/0/dev.famchat.app/files/key'), isFalse);
+      expect(ok('/data/user/0/dev.famchat.app/cache/files/01J/Tax.pdf'), isFalse, reason: 'decrypted files');
+      expect(ok('/data/user/0/dev.famchat.app/cache/video/play.mp4'), isFalse);
+      expect(ok('/data/user/0/dev.famchat.app/cache/../files/key'), isFalse);
+      expect(ok('/data/user/0/dev.famchat.app'), isFalse);
     });
 
     test('long names are cut in the middle, keeping the extension', () {
@@ -125,7 +179,7 @@ void main() {
       addTearDown(() => dir.delete(recursive: true));
       final pdf = File('${dir.path}/plan.pdf')..writeAsBytesSync(doc);
       final txt = File('${dir.path}/list.txt')..writeAsBytesSync(utf8.encode('eggs'));
-      final s = await sharedToIncoming([
+      final s = await sharedToIncoming(allow: (_) => true, [
         SharedMediaFile(path: pdf.path, type: SharedMediaType.file, mimeType: 'application/pdf'),
         // Android calls a shared text file "text", with its path.
         SharedMediaFile(path: txt.path, type: SharedMediaType.text, mimeType: 'text/plain'),
@@ -135,6 +189,16 @@ void main() {
       expect(s.media, isEmpty);
       expect(s.text, 'see you /soon');
       expect(shareSummary(s), '2 files and a message');
+
+      // What the filter refuses is dropped, photos and text files included.
+      final refused = await sharedToIncoming(allow: (p) => p != txt.path, [
+        SharedMediaFile(path: txt.path, type: SharedMediaType.text, mimeType: 'text/plain'),
+        SharedMediaFile(path: pdf.path, type: SharedMediaType.image, mimeType: 'image/png'),
+        SharedMediaFile(path: txt.path, type: SharedMediaType.file),
+      ]);
+      expect(refused.files, isEmpty);
+      expect(refused.text, isNull);
+      expect(refused.media, hasLength(1));
     });
   });
 
@@ -223,12 +287,12 @@ void main() {
 
     chatTestWidgets('nothing to open it with says so', (tester) async {
       final chatId = await open(tester);
-      final (_, id) = await bobsFile(tester, chatId, 'model.stl');
+      final (_, id) = await bobsFile(tester, chatId, 'plan.pages');
       await settle(tester);
       actions.outcome = OpenOutcome.noApp;
       await tester.tap(find.byKey(Key('file-$id')));
       await settle(tester);
-      expect(find.text('Nothing here can open "model.stl". Save it instead.'), findsOneWidget);
+      expect(find.text('Nothing here can open "plan.pages". Save it instead.'), findsOneWidget);
     });
 
     chatTestWidgets("programs aren't opened, only saved", (tester) async {
@@ -238,7 +302,7 @@ void main() {
       await tester.tap(find.byKey(Key('file-$id')));
       await settle(tester);
       expect(actions.opened, isEmpty);
-      expect(find.textContaining("FamChat doesn't open programs"), findsOneWidget);
+      expect(find.textContaining('FamChat only opens documents'), findsOneWidget);
       await tester.tap(find.widgetWithText(SnackBarAction, 'Save'));
       await settle(tester);
       expect(actions.saved.single.name, 'setup.exe');
@@ -306,6 +370,35 @@ void main() {
       expect(find.text('"holiday.iso" is too large to send (64 MB max).'), findsOneWidget);
       expect(read, isFalse);
       expect(await outbox(tester), isEmpty);
+    });
+
+    chatTestWidgets('a file of unknown size is read only up to the limit', (tester) async {
+      await open(tester);
+      var chunks = 0;
+      Stream<List<int>> endless() async* {
+        while (true) {
+          chunks++;
+          yield Uint8List(4 * 1024 * 1024);
+        }
+      }
+
+      toPick = [
+        OutgoingFile(name: 'stream.bin', length: () async => null, read: () => throw StateError('read whole'), openRead: endless),
+        OutgoingFile(
+          name: 'small.txt',
+          length: () async => null,
+          read: () => throw StateError('read whole'),
+          openRead: () => Stream.value(utf8.encode('hello')),
+        ),
+      ];
+      await tester.tap(find.byTooltip('Attach'));
+      await settle(tester);
+      await tester.tap(find.text('File'));
+      await settle(tester);
+      expect(find.text('"stream.bin" is too large to send (64 MB max).'), findsOneWidget);
+      expect(chunks, lessThanOrEqualTo(maxFileBytes ~/ (4 * 1024 * 1024) + 2));
+      final sent = [for (final r in await outbox(tester)) Plaintext.decode(utf8.encode(r.body!)) as FileBody];
+      expect(sent.map((f) => (f.name, f.bytes)), [('small.txt', 5)]);
     });
 
     chatTestWidgets('the chat list shows 📎 and the name', (tester) async {

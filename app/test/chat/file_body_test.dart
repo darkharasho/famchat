@@ -136,6 +136,15 @@ void main() {
       expect(cleanFileName('.bashrc'), '.bashrc');
     });
 
+    test('trailing dots and spaces are stripped (Windows drops them when writing)', () {
+      expect(cleanFileName('evil.exe.'), 'evil.exe');
+      expect(cleanFileName('evil.bat..'), 'evil.bat');
+      expect(cleanFileName('evil.exe. .'), 'evil.exe');
+      expect(cleanFileName('evil.exe . . '), 'evil.exe');
+      expect(cleanFileName('. . .'), 'file');
+      expect(cleanFileName('${'a' * 300}.exe. '), endsWith('.exe'));
+    });
+
     test('long names are cut to 255 characters, keeping the extension', () {
       final c = cleanFileName('${'a' * 400}.pdf');
       expect(c.length, 255);

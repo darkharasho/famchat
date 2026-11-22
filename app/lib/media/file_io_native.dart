@@ -6,7 +6,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../chat/plaintext.dart' show FileBody;
+import '../chat/files.dart' show diskFileName, mimeForName, opensWithTap;
 import 'file_actions.dart';
 
 /// Decrypted files are written to the app's own cache directory, one folder per message, for the
@@ -19,15 +19,26 @@ Future<Directory> _dir() async {
 
 String _safe(String id) => id.replaceAll(RegExp('[^A-Za-z0-9_-]'), '_');
 
-/// Writes [bytes] under [name] (already cleaned: no separators, never "." or "..") and opens it
-/// with the system's app for it.
+/// Writes [bytes] under [name] made safe for disk ([diskFileName]) and opens it with the system's app
+/// for it, if it's a type a tap may open (checked on the name as written).
 Future<OpenOutcome> openFileBytes({required String id, required String name, required String mime, required Uint8List bytes}) async {
+  final onDisk = diskFileName(name);
+  if (!opensWithTap(onDisk)) return OpenOutcome.notAllowed;
   final folder = Directory('${(await _dir()).path}/${_safe(id)}');
   await folder.create(recursive: true);
-  final f = File('${folder.path}/$name');
+  final f = File('${folder.path}/$onDisk');
   await f.writeAsBytes(bytes, flush: true);
+  if (Platform.isWindows) {
+    // Marked as from the internet, so Windows (and Office) treat it with care.
+    try {
+      await File('${f.path}:Zone.Identifier').writeAsString('[ZoneTransfer]\r\nZoneId=3\r\n', flush: true);
+    } catch (_) {
+      // not NTFS, or not allowed: best effort
+    }
+  }
   if (Platform.isAndroid || Platform.isIOS) {
-    final r = await OpenFilex.open(f.path, type: mime == FileBody.defaultMime ? null : mime);
+    // The type follows the (allowlisted) extension, not what the sender claimed.
+    final r = await OpenFilex.open(f.path, type: mimeForName(onDisk));
     return switch (r.type) {
       ResultType.done => OpenOutcome.opened,
       ResultType.noAppToOpen => OpenOutcome.noApp,
@@ -40,7 +51,7 @@ Future<OpenOutcome> openFileBytes({required String id, required String name, req
 
 /// The system's save dialog (Files/Downloads on phones); false when cancelled.
 Future<bool> saveFileBytes({required String name, required String mime, required Uint8List bytes}) async =>
-    await FilePicker.saveFile(fileName: name, bytes: bytes, mimeType: mime) != null;
+    await FilePicker.saveFile(fileName: diskFileName(name), bytes: bytes, mimeType: mime) != null;
 
 /// Removes files opened in a previous run.
 Future<void> sweepOpenedFiles() async {

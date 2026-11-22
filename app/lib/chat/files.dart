@@ -1,6 +1,8 @@
 // Files sent in a chat: reading a file message, and how one is described (type, size, label).
 import 'dart:convert';
 
+import 'package:characters/characters.dart';
+
 import 'db/chat_db.dart';
 import 'plaintext.dart';
 
@@ -108,17 +110,76 @@ const _mimes = {
   'gif': 'image/gif',
   'mp4': 'video/mp4',
   'mov': 'video/quicktime',
+  'm4v': 'video/x-m4v',
+  'webm': 'video/webm',
+  'mkv': 'video/x-matroska',
+  'avi': 'video/x-msvideo',
+  'webp': 'image/webp',
+  'heic': 'image/heic',
+  'heif': 'image/heif',
+  'bmp': 'image/bmp',
+  'tif': 'image/tiff',
+  'tiff': 'image/tiff',
+  'aac': 'audio/aac',
+  'flac': 'audio/flac',
+  'opus': 'audio/opus',
+  'aiff': 'audio/aiff',
+  'tar': 'application/x-tar',
+  'tgz': 'application/gzip',
+  'rar': 'application/vnd.rar',
 };
 
 /// A MIME type for [name] when the platform gave none, or null.
 String? mimeForName(String name) => _mimes[fileExtension(name)];
 
-/// Programs and scripts: never opened from FamChat with a tap (opening one runs it). They can be
-/// saved and opened from there.
-const runnableExtensions = {
-  'exe', 'msi', 'msix', 'appx', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl', 'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse',
-  'wsf', 'wsh', 'hta', 'lnk', 'url', 'reg', 'inf', 'jar', 'sh', 'bash', 'zsh', 'command', 'tool', 'app', 'pkg',
-  'dmg', 'desktop', 'appimage', 'run', 'bin', 'deb', 'rpm', 'apk', 'xapk', 'aab', 'ipa', 'mobileconfig', 'workflow',
+/// What a tap may open in another app: documents, media and archives, by extension. Anything else
+/// (programs, scripts, shortcuts, disk images, macro documents, …) is only saved, never opened:
+/// opening one can run it.
+const openableExtensions = {
+  'pdf',
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff',
+  'mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'aiff',
+  'mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi',
+  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'pages', 'numbers', 'key',
+  'txt', 'csv', 'md', 'json',
+  'zip', '7z', 'tar', 'gz', 'tgz', 'rar',
 };
 
-bool isRunnable(String name) => runnableExtensions.contains(fileExtension(name));
+/// Whether a tap may open [name] (the name as written to disk) in another app.
+bool opensWithTap(String name) => openableExtensions.contains(fileExtension(name));
+
+/// Characters Windows doesn't allow in a file name (and the separators everywhere).
+final _forbiddenOnDisk = RegExp(r'[<>:"/\\|?*\u0000-\u001F]');
+
+/// Device names Windows reserves, with any extension ("CON.txt" is the console).
+final _reservedOnWindows = RegExp(r'^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$', caseSensitive: false);
+
+/// Longest file name on disk, in UTF-8 bytes (ext4 and APFS count bytes).
+const maxDiskNameBytes = 255;
+
+/// [name] as a file name every platform can write: characters Windows forbids become `_`, reserved
+/// device names get a `_` in front, trailing dots and spaces go, and it's cut to
+/// [maxDiskNameBytes] UTF-8 bytes keeping the extension (never splitting a character). [name]
+/// itself is still what's shown.
+String diskFileName(String name) {
+  final trailing = RegExp(r'[.\s]+$');
+  var n = name.replaceAll(_forbiddenOnDisk, '_').trim().replaceFirst(trailing, '');
+  final dot = n.indexOf('.');
+  if (_reservedOnWindows.hasMatch((dot < 0 ? n : n.substring(0, dot)).trimRight())) n = '_$n';
+  if (utf8.encode(n).length > maxDiskNameBytes) {
+    final ext = fileExtension(n);
+    final suffix = ext.isEmpty || ext.length > 16 ? '' : '.${n.substring(n.length - ext.length)}';
+    final room = maxDiskNameBytes - utf8.encode(suffix).length;
+    final base = StringBuffer();
+    var used = 0;
+    for (final c in n.substring(0, n.length - suffix.length).characters) {
+      final size = utf8.encode(c).length;
+      if (used + size > room) break;
+      base.write(c);
+      used += size;
+    }
+    n = '${base.toString().replaceFirst(trailing, '')}$suffix';
+  }
+  n = n.replaceFirst(trailing, '');
+  return n.isEmpty ? 'file' : n;
+}

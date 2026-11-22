@@ -55,6 +55,17 @@ class PendingShare extends Notifier<IncomingShare?> {
 
 final pendingShareProvider = NotifierProvider<PendingShare, IncomingShare?>(PendingShare.new);
 
+/// Whether a shared file at [path] (absolute, links already resolved) may be sent: not when it's
+/// in one of [privateDirs] (the app's own storage), unless it sits directly in one of [cacheDirs]
+/// (where the share plugin copies shared streams; not in a folder there, such as decrypted files).
+bool sharedPathAllowed(String path, {required List<String> privateDirs, required List<String> cacheDirs}) {
+  String dir(String d) => d.endsWith('/') ? d : '$d/';
+  if (path.split('/').any((part) => part == '..' || part == '.')) return false;
+  if (!privateDirs.any((d) => path.startsWith(dir(d)) || path == d)) return true;
+  final parent = path.substring(0, path.lastIndexOf('/') + 1);
+  return cacheDirs.any((c) => parent == dir(c));
+}
+
 /// "2 photos and a video", "a file and a message".
 String shareSummary(IncomingShare s) {
   String count(int n, String one) => n == 1 ? 'a $one' : '$n ${one}s';

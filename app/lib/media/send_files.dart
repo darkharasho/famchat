@@ -1,4 +1,6 @@
 // Sending picked, dropped or shared files: each its own `file` message.
+import 'dart:typed_data';
+
 import '../chat/files.dart' show mimeForName;
 import '../chat/plaintext.dart' show FileBody, cleanFileName;
 import 'file_actions.dart';
@@ -30,9 +32,9 @@ Future<FileSendReport> sendFiles(MediaService media, String chatId, List<Outgoin
     final mime = given == null || given.isEmpty || given == FileBody.defaultMime ? mimeForName(name) ?? given : given;
     try {
       final size = await f.length();
-      if (size > maxFileBytes) throw FileTooLargeException(size);
-      await media.sendFile(chatId,
-          name: name, bytes: await f.read(), mime: mime, replyTo: report.sent == 0 ? replyTo : null);
+      if (size != null && size > maxFileBytes) throw FileTooLargeException(size);
+      final bytes = size == null ? await _readUpToLimit(f) : await f.read();
+      await media.sendFile(chatId, name: name, bytes: bytes, mime: mime, replyTo: report.sent == 0 ? replyTo : null);
       report.sent++;
     } on FileTooLargeException {
       report.tooLarge.add(name);
@@ -41,4 +43,17 @@ Future<FileSendReport> sendFiles(MediaService media, String chatId, List<Outgoin
     }
   }
   return report;
+}
+
+/// [f]'s bytes when its size is unknown: read in chunks, stopping with [FileTooLargeException] as
+/// soon as it's past [maxFileBytes] (a huge file is never read whole).
+Future<Uint8List> _readUpToLimit(OutgoingFile f) async {
+  final open = f.openRead;
+  if (open == null) return f.read(); // sendFile still refuses it past the limit
+  final out = BytesBuilder(copy: false);
+  await for (final chunk in open()) {
+    out.add(chunk);
+    if (out.length > maxFileBytes) throw FileTooLargeException(out.length);
+  }
+  return out.takeBytes();
 }

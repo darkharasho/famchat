@@ -8,8 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'file_io.dart' as io;
 
-/// How opening a file went.
-enum OpenOutcome { opened, noApp, failed }
+/// How opening a file went. [notAllowed]: not a type a tap opens (see `opensWithTap`); save it.
+enum OpenOutcome { opened, noApp, failed, notAllowed }
 
 abstract interface class FileActions {
   /// Opens decrypted file [bytes] of message [id] in the system's app for it (the web downloads it).
@@ -33,20 +33,25 @@ class PlatformFileActions implements FileActions {
 
 final fileActionsProvider = Provider<FileActions>((ref) => const PlatformFileActions());
 
-/// A file about to be sent: its size is known before its bytes are read.
+/// A file about to be sent: its size is checked before its bytes are read.
 class OutgoingFile {
-  const OutgoingFile({required this.name, required this.length, required this.read, this.mime});
+  const OutgoingFile({required this.name, required this.length, required this.read, this.openRead, this.mime});
 
   OutgoingFile.xfile(XFile f, {String? name})
-      : this(name: name ?? f.name, length: f.length, read: f.readAsBytes, mime: f.mimeType);
+      : this(name: name ?? f.name, length: f.length, read: f.readAsBytes, openRead: f.openRead, mime: f.mimeType);
 
   OutgoingFile.bytes(String name, Uint8List bytes, {String? mime})
       : this(name: name, length: () async => bytes.length, read: () async => bytes, mime: mime);
 
   final String name;
   final String? mime;
-  final Future<int> Function() length;
+
+  /// Its size, or null when the platform can't tell without reading it.
+  final Future<int?> Function() length;
   final Future<Uint8List> Function() read;
+
+  /// Its bytes in chunks, to read a file of unknown size only up to the limit.
+  final Stream<List<int>> Function()? openRead;
 }
 
 typedef FilesPicker = Future<List<OutgoingFile>> Function();
@@ -56,8 +61,9 @@ Future<List<OutgoingFile>> pickFiles() async => [
       for (final f in await fp.FilePicker.pickFiles())
         OutgoingFile(
           name: f.name,
-          length: () async => f.lengthSync() ?? await f.length() ?? 0,
+          length: () async => f.lengthSync() ?? await f.length(),
           read: f.readAsBytes,
+          openRead: f.readAsByteStream,
           mime: f.xFile.mimeType,
         ),
     ];
