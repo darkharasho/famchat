@@ -15,14 +15,15 @@ submits it for review. --wait gives a just-uploaded build that long to
 appear and finish processing. App Store Connect allows one version in flight: an older version waiting
 for review or in review is pulled only with --replace-waiting (named before it covered reviews in
 progress); without it, the submission stops. --keep-required still never pulls a version Apple is
-reviewing already, or one that has to be reviewed (scripts/review-required.sh: native changes no patch can bring to the App Store's live
+reviewing already, or one that has to be reviewed (scripts/review-required.sh, configured by
+NATIVE_CHECK and NATIVE_TAG_PREFIX: changes no over-the-air update can bring to the App Store's live
 version); the submission stops with exit status 3 instead, and the build waits in TestFlight.
 
 reconcile brings the App Store to build NAME+NUMBER (the newest that reached TestFlight) eventually,
 without holding releases up: it does nothing while that version is live, approved, in review or
 waiting for review, or was rejected (that needs a person); otherwise it submits it, pulling an older
 version in flight unless that one has to be reviewed (--keep-required), in which case it waits for
-the next run. Patches carry Dart changes to every installed version meanwhile. Exits 0 unless
+the next run. Over-the-air updates reach every installed version meanwhile. Exits 0 unless
 something failed.
 Never prints keys.
 """
