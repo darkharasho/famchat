@@ -111,6 +111,8 @@ void main() {
     await tester.tap(find.byKey(const Key('photo-thumb')));
     await settle(tester);
     expect(find.byKey(const Key('photo-full')), findsOneWidget);
+    // The photo gets the whole window, not the close button's corner.
+    expect(tester.getSize(find.byType(InteractiveViewer)), const Size(400, 800));
     await tester.tap(find.byTooltip('Close'));
     await settle(tester);
     expect(find.byKey(const Key('photo-full')), findsNothing);

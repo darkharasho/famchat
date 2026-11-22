@@ -289,16 +289,22 @@ class _VideoViewerState extends ConsumerState<VideoViewer> {
         autofocus: true,
         child: Scaffold(
           backgroundColor: Colors.black,
+          // Every child is positioned, so the stack fills the screen (the body's constraints are
+          // loose: an unpositioned button would size it to the button).
           body: Stack(children: [
             Positioned.fill(child: content),
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: IconButton.filled(
-                  tooltip: 'Close',
-                  style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: () => Navigator.of(context).maybePop(),
+            Positioned(
+              top: 0,
+              left: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton.filled(
+                    tooltip: 'Close',
+                    style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
                 ),
               ),
             ),
