@@ -663,10 +663,13 @@ class ChatSync {
   }
 
   static List<String> _mentionsOf(MessageRow row) {
-    if (row.kind != 'text' || row.body == null) return const [];
+    if ((row.kind != 'text' && !captionKinds.contains(row.kind)) || row.body == null) return const [];
     try {
       final p = Plaintext.decode(utf8.encode(row.body!));
-      return p is TextBody ? p.mentions : const [];
+      return switch (p) {
+        TextBody(:final mentions) || PhotoBody(:final mentions) || VideoBody(:final mentions) => mentions,
+        _ => const [],
+      };
     } on FormatException {
       return const [];
     }
@@ -737,7 +740,7 @@ class ChatSync {
   /// link preview; null when it's gone, deleted, someone else's, or not a text.
   Future<(String, bool)?> _ownText(String chatId, String messageId) async {
     final m = await db.messageById(messageId);
-    if (m == null || m.chatId != chatId || m.senderUserId != me.userId) return null;
+    if (m == null || m.chatId != chatId || m.senderUserId != me.userId || m.kind != 'text') return null;
     final changes = messageChanges([m, ...await db.changesTo(chatId, messageId)]);
     final text = changes.textOf(m);
     return text == null ? null : (text, changes.previewOf(m) != null);

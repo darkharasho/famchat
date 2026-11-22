@@ -23,6 +23,12 @@ String? mediaLabel(String kind) => switch (kind) {
       _ => null,
     };
 
+/// A captioned photo or video in a line: its emoji and the caption, e.g. "📷 Beach day".
+String captionLabel(String kind, String caption) {
+  final emoji = kind == 'video' ? '🎥' : '📷';
+  return '$emoji ${stripMarkdown(caption).replaceAll(RegExp(r'\s+'), ' ').trim()}';
+}
+
 /// The text a notification shows for a message: its text (cut to [maxPreviewChars]) or a media
 /// label. Null when anything fails or the kind has no preview; never throws. It applies the same
 /// checks as ChatSync, and also refuses a revoked sender device.
@@ -91,6 +97,11 @@ Future<String?> _previewOf(ChatDb db, Plaintext p, MessageRow row) async {
     return chars.length <= maxPreviewChars ? text : '${chars.take(maxPreviewChars)}…';
   }
   if (p is GameBody || p is MoveBody) return gamePushLabel(db, row.chatId, row);
+  if (p case Captioned(:final caption?)) {
+    final label = captionLabel(p.kind, caption);
+    final chars = label.characters;
+    return chars.length <= maxPreviewChars ? label : '${chars.take(maxPreviewChars)}…';
+  }
   return mediaLabel(p.kind);
 }
 

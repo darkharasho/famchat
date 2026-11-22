@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:famchat/chat/db/chat_db.dart';
 import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
+import 'package:famchat/screens/chats/chat_list.dart' show messageSnippet;
 import 'package:flutter_test/flutter_test.dart';
 
 var _n = 0;
@@ -189,5 +191,72 @@ void main() {
       ];
       expect(messageChanges(deleted).previewOf(deleted.first), isNull);
     });
+  });
+
+  PhotoBody photo({String? caption, String? replyTo, List<String> mentions = const []}) => PhotoBody(
+        mediaKey: '01JMEDAA000000000000000000',
+        thumbKey: '01JTHMB0000000000000000000',
+        key: Uint8List.fromList(List.filled(32, 1)),
+        sha256: Uint8List.fromList(List.filled(32, 2)),
+        thumbSha256: Uint8List.fromList(List.filled(32, 3)),
+        width: 20,
+        height: 10,
+        bytes: 500,
+        caption: caption,
+        replyTo: replyTo,
+        mentions: mentions,
+      );
+
+  test('a photo or video carries a caption, reply and mentions', () {
+    final p = Plaintext.decode(photo(caption: 'beach day', replyTo: 'r', mentions: ['u']).encode()) as PhotoBody;
+    expect((p.caption, p.replyTo), ('beach day', 'r'));
+    expect(p.mentions, ['u']);
+    final v = Plaintext.decode(VideoBody(
+      mediaKey: '01JMEDAA000000000000000000',
+      key: Uint8List.fromList(List.filled(32, 1)),
+      sha256: Uint8List.fromList(List.filled(32, 2)),
+      width: 20,
+      height: 10,
+      durationMs: 1000,
+      bytes: 500,
+      caption: 'clip',
+    ).encode()) as VideoBody;
+    expect(v.caption, 'clip');
+    expect(photo().toJson().keys, isNot(contains('caption')));
+  });
+
+  test('a bad caption, reply or mention list is dropped and the photo still shows', () {
+    for (final bad in [
+      {'caption': 5},
+      {'caption': ''},
+      {'caption': '   '},
+      {'caption': 'x' * (maxTextLength + 1)},
+      {'replyTo': 7},
+      {'mentions': 'u'},
+      {'mentions': [1]},
+    ]) {
+      final p = Plaintext.decode(utf8.encode(jsonEncode({...photo().toJson(), ...bad})));
+      expect(p, isA<PhotoBody>(), reason: '$bad');
+      p as PhotoBody;
+      expect((p.caption, p.replyTo), (null, null), reason: '$bad');
+      expect(p.mentions, isEmpty, reason: '$bad');
+    }
+  });
+
+  test("a caption is the message's text: edits by its sender replace it", () {
+    final rows = [
+      row('a', photo(caption: 'beach', replyTo: 'r', mentions: ['u']), id: 'p'),
+      row('a', const EditBody('p', 'beach day')),
+      row('b', const EditBody('p', 'hacked')),
+      row('a', photo(), id: 'q'),
+    ];
+    final c = messageChanges(rows);
+    expect(c.textOf(rows[0]), 'beach day');
+    expect(c.edited, {'p'});
+    expect(c.textOf(rows[3]), isNull);
+    expect(replyTargetOf(rows[0]), 'r');
+    expect(mentionsOf(rows[0]), ['u']);
+    expect(messageSnippet(rows[0], c), '📷 beach day');
+    expect(messageSnippet(rows[3], c), '📷 Photo');
   });
 }

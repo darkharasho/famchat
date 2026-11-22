@@ -85,4 +85,13 @@ void main() {
     expect(matchRanges('Ha ha HA', 'ha'), [(0, 2), (3, 5), (6, 8)]);
     expect(matchRanges('abc', ''), isEmpty);
   });
+
+  test('finds photo and video captions', () async {
+    final photo = text('p1', 'A', 1, '').copyWith(
+      kind: 'photo',
+      body: Value(jsonEncode({'kind': 'photo', 'caption': 'Beach day'})),
+    );
+    await put([photo, text('t1', 'A', 2, 'no beach')]);
+    expect((await searchMessages(db, 'beach day')).map((h) => (h.message.id, h.text)), [('p1', 'Beach day')]);
+  });
 }

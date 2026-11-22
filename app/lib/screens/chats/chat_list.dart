@@ -399,7 +399,10 @@ String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
     'text' => stripMarkdown(changes.textOf(m) ?? '').replaceAll('\n', ' '),
-    _ => gameListLabel(m) ?? mediaLabel(m.kind) ?? 'Message',
+    _ => switch (changes.textOf(m)) {
+        final caption? => captionLabel(m.kind, caption),
+        null => gameListLabel(m) ?? mediaLabel(m.kind) ?? 'Message',
+      },
   };
 }
 

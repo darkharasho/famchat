@@ -46,7 +46,7 @@ Future<String> forwardMessage({
       return sync.enqueueMessage(toChatId, body, forwarded: true);
     case PhotoBody() || VoiceBody() || VideoBody():
       if (media == null) throw const ForwardException('media unavailable');
-      final id = await media.forwardMedia(toChatId, body);
+      final id = await media.forwardMedia(toChatId, body, caption: changes.textOf(message));
       if (id == null) throw const ForwardException('media expired');
       return id;
     default:
