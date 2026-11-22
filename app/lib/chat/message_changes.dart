@@ -6,7 +6,7 @@ import 'db/chat_db.dart';
 import 'plaintext.dart';
 
 /// Kinds that change another message instead of showing as one (poll votes and ends included).
-const changeKinds = {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end'};
+const changeKinds = {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end', 'transcript'};
 
 /// Kinds the timeline doesn't show as messages: changes, and game moves (which are sent non-silent
 /// and count as activity and unread, unlike changes).
@@ -17,7 +17,7 @@ const captionKinds = {'photo', 'video'};
 
 /// The edits and deletes in force over a chat's messages.
 class MessageChanges {
-  MessageChanges._(this._texts, this._deleted, this._previews, this.pinned, this.pinEvents);
+  MessageChanges._(this._texts, this._deleted, this._previews, this._transcripts, this.pinned, this.pinEvents);
 
   /// Ids of the pinned messages, newest pin first, at most [maxPins].
   final List<String> pinned;
@@ -31,6 +31,12 @@ class MessageChanges {
 
   /// Link previews attached after sending (preview-only edits), by message id.
   final Map<String, LinkPreview> _previews;
+
+  /// Voice messages' transcripts from their sender (the latest), by message id.
+  final Map<String, String> _transcripts;
+
+  /// The transcript [m] shows: its sender's latest, or null (none, deleted, or not a voice message).
+  String? transcriptOf(MessageRow m) => m.kind == 'voice' && !_deleted.contains(m.id) ? _transcripts[m.id] : null;
 
   /// Ids of messages showing edited text.
   Set<String> get edited => _texts.keys.toSet();
@@ -66,14 +72,19 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
   final texts = <String, String>{};
   final deleted = <String>{};
   final previews = <String, LinkPreview>{};
+  final transcripts = <String, String>{};
   for (final r in rows) {
-    if ((r.kind != 'edit' && r.kind != 'delete') || r.state == 'failed' || r.targetId == null) continue;
+    if ((r.kind != 'edit' && r.kind != 'delete' && r.kind != 'transcript') || r.state == 'failed' || r.targetId == null) continue;
     final target = byId[r.targetId!];
     if (target == null || target.senderUserId != r.senderUserId || deleted.contains(target.id)) continue;
     if (r.kind == 'delete') {
       deleted.add(target.id);
       texts.remove(target.id);
       previews.remove(target.id);
+      transcripts.remove(target.id);
+    } else if (r.kind == 'transcript') {
+      if (target.kind != 'voice') continue;
+      if (_decode(r) case TranscriptBody(:final text)) transcripts[target.id] = text;
     } else if (target.kind == 'text' || captionKinds.contains(target.kind)) {
       final edit = _decode(r);
       if (edit is! EditBody) continue;
@@ -111,7 +122,7 @@ MessageChanges messageChanges(Iterable<MessageRow> rows) {
     }
   }
   final pinned = [for (final id in current.reversed) if (!deleted.contains(id)) id];
-  return MessageChanges._(texts, deleted, previews, pinned, pinEvents);
+  return MessageChanges._(texts, deleted, previews, transcripts, pinned, pinEvents);
 }
 
 /// The id [m] replies to, or null.

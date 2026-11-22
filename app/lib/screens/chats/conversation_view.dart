@@ -1570,6 +1570,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                   if (group && mentionsOf(m).isNotEmpty) everyoneName,
                 ],
                 linkPreview: changes.previewOf(m),
+                transcript: changes.transcriptOf(m),
                 custom: pollIn(m),
                 onOpenQuote: replyTargetOf(m) == null ? null : () => _jumpTo(replyTargetOf(m)!),
                 highlighted: _highlight == m.id,

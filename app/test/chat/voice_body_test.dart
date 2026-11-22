@@ -72,4 +72,35 @@ void main() {
   test('accepts 15 minutes', () {
     expect((decode({...json(voice()), 'durationMs': 900000}) as VoiceBody).durationMs, 900000);
   });
+
+  group('transcript', () {
+    test('decodes target, text and lang, and round-trips', () {
+      final t = decode({'kind': 'transcript', 'target': 'm1', 'text': 'hi', 'lang': 'en'}) as TranscriptBody;
+      expect((t.kind, t.target, t.text, t.lang), ('transcript', 'm1', 'hi', 'en'));
+      final back = Plaintext.decode(t.encode()) as TranscriptBody;
+      expect((back.target, back.text, back.lang), ('m1', 'hi', 'en'));
+    });
+
+    test('lang is optional; a bad lang is dropped', () {
+      TranscriptBody t(Object? lang) =>
+          decode({'kind': 'transcript', 'target': 'm1', 'text': 'hi', 'lang': ?lang}) as TranscriptBody;
+      expect(t(null).lang, isNull);
+      expect(t(5).lang, isNull);
+      expect(t('x' * 17).lang, isNull);
+      expect(t(null).toJson().containsKey('lang'), isFalse);
+    });
+
+    test('rejects empty or missing target or text, and text over 20000', () {
+      for (final j in [
+        {'kind': 'transcript', 'text': 'hi'},
+        {'kind': 'transcript', 'target': '', 'text': 'hi'},
+        {'kind': 'transcript', 'target': 'm1'},
+        {'kind': 'transcript', 'target': 'm1', 'text': ''},
+        {'kind': 'transcript', 'target': 'm1', 'text': 'x' * (maxTranscriptLength + 1)},
+      ]) {
+        expect(() => decode(j), throwsFormatException, reason: '$j');
+      }
+      expect(decode({'kind': 'transcript', 'target': 'm1', 'text': 'x' * maxTranscriptLength}), isA<TranscriptBody>());
+    });
+  });
 }

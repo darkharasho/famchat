@@ -111,4 +111,39 @@ void main() {
     await put([photo, text('t1', 'A', 2, 'no beach')]);
     expect((await searchMessages(db, 'beach day')).map((h) => (h.message.id, h.text)), [('p1', 'Beach day')]);
   });
+
+  group('voice transcripts', () {
+    MessageRow clip(String id, int seq, {String sender = 'bob'}) => text(id, 'A', seq, '', sender: sender).copyWith(
+          kind: 'voice',
+          body: Value(jsonEncode({'kind': 'voice', 'mediaKey': 'k', 'durationMs': 1000})),
+        );
+
+    test('finds a voice message by its transcript', () async {
+      await put([clip('v1', 1), change('t1', 'A', 2, 'transcript', 'v1', newText: 'Pick up milk')]);
+      final hits = await searchMessages(db, 'milk');
+      expect(hits.map((h) => h.message.id), ['v1']);
+      expect(hits.single.text, '🎤 Pick up milk');
+    });
+
+    test("others' transcripts and deleted clips don't match", () async {
+      await put([
+        clip('v1', 1),
+        change('t1', 'A', 2, 'transcript', 'v1', newText: 'pick up milk', sender: 'carol'),
+        clip('v2', 3),
+        change('t2', 'A', 4, 'transcript', 'v2', newText: 'more milk'),
+        change('d2', 'A', 5, 'delete', 'v2'),
+      ]);
+      expect(await searchMessages(db, 'milk'), isEmpty);
+    });
+
+    test('only the latest transcript matches', () async {
+      await put([
+        clip('v1', 1),
+        change('t1', 'A', 2, 'transcript', 'v1', newText: 'milk'),
+        change('t2', 'A', 3, 'transcript', 'v1', newText: 'bread'),
+      ]);
+      expect(await searchMessages(db, 'milk'), isEmpty);
+      expect((await searchMessages(db, 'bread')).single.text, '🎤 bread');
+    });
+  });
 }

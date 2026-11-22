@@ -931,6 +931,29 @@ void main() {
     expect((await d.db.messageById('M3'))!.kind, 'invalid');
   });
 
+  test('a transcript an older version stored as unknown becomes a change to its clip', () async {
+    final d = await backend.addUser('Alice');
+    await d.db.bindDevice(d.deviceId);
+    await d.db.insertMessageIfAbsent(MessageRow(
+      id: 'T1',
+      chatId: 'C',
+      seq: 2,
+      senderUserId: 'U',
+      senderDeviceId: 'D',
+      kind: 'unknown',
+      body: jsonEncode({'kind': 'transcript', 'target': 'V1', 'text': 'pick up milk'}),
+      targetId: null,
+      envelope: null,
+      createdAt: 2,
+      state: 'sent',
+    ));
+    await start(d);
+    final t = (await d.db.messageById('T1'))!;
+    expect(t.kind, 'transcript');
+    expect(t.targetId, 'V1');
+    expect(changeKinds, contains('transcript'));
+  });
+
   test('sendMove stores a pending move row with targetId and sends it without silent', () async {
     final alice = await start(await backend.addUser('Alice'));
     final bob = await start(await backend.addUser('Bob'));

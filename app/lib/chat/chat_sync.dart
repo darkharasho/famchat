@@ -472,6 +472,7 @@ class ChatSync {
       PollBody() => base.copyWith(kind: 'poll', body: Value(body)),
       VoteBody(:final target) => base.copyWith(kind: 'vote', body: Value(body), targetId: Value(target)),
       PollEndBody(:final target) => base.copyWith(kind: 'poll_end', body: Value(body), targetId: Value(target)),
+      TranscriptBody(:final target) => base.copyWith(kind: 'transcript', body: Value(body), targetId: Value(target)),
       UnknownBody() => base.copyWith(kind: 'unknown', body: Value(body)),
     };
   }

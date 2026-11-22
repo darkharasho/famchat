@@ -135,6 +135,22 @@ Edits and deletes are messages too, and count only when their sender is the targ
 {"kind":"delete", "target":"<messageId>"}               unsend one of your messages; later edits are ignored
 ```
 
+A voice message's transcript is a change too, and counts only from the clip's sender. Its target is
+one of their `voice` messages:
+
+```
+{"kind":"transcript", "target":"<voiceMessageId>",   the words of the clip; the latest one wins, and none count
+ "text":"...",                                       once the clip is deleted. text: 1..20000 chars
+ "lang":"en"?}                                       the detected language (≤16 chars; anything else is ignored)
+```
+
+Transcripts are made on the sender's device, after the clip is sent; the server and third parties never
+see the audio or the words. Like other changes they're sent `silent` with the clip's `disappearSecs`,
+and are hidden from the timeline, unread counts and notifications. Clients show the text under the clip
+and search it. A version that doesn't know the kind stores it as `unknown` and shows it once it updates.
+Senders don't transcribe scheduled clips, or clips over 3 minutes on their own; forwarding a clip sends
+a copy of its transcript for the new message.
+
 Pins are messages too, but anyone in the chat can pin any message (docs: "Pins"):
 
 ```
