@@ -21,13 +21,16 @@ String formatClock(Duration d) {
 const _waveWidth = 168.0, _waveHeight = 32.0;
 
 class VoiceBubble extends ConsumerWidget {
-  const VoiceBubble({super.key, required this.body, required this.messageId, this.mine = false});
+  const VoiceBubble({super.key, required this.body, required this.messageId, this.mine = false, this.transcript});
 
   final VoiceBody body;
   final String messageId;
 
   /// In the sender's own (amber) bubble.
   final bool mine;
+
+  /// The words of the clip, shown under it (the sender's, or one made on this device).
+  final String? transcript;
 
   Duration get _length => Duration(milliseconds: body.durationMs);
 
@@ -42,11 +45,12 @@ class VoiceBubble extends ConsumerWidget {
     final buttonFg = mine ? t.mineBubble : scheme.onPrimary;
     final expired = (ref.watch(expiredMediaProvider).value ?? const <String>{}).contains(body.mediaKey);
     if (expired) {
-      return Row(key: const Key('voice-expired'), mainAxisSize: MainAxisSize.min, children: [
+      // The words outlast the audio.
+      return _withTranscript(Row(key: const Key('voice-expired'), mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.mic_off_outlined, color: meta),
         const SizedBox(width: 8),
         Flexible(child: Text('Voice message expired', style: TextStyle(color: meta, fontStyle: FontStyle.italic))),
-      ]);
+      ]), ink);
     }
     final state = ref.watch(voicePlaybackProvider.select((s) => s.messageId == messageId ? s : null));
     final progress = ref.watch(uploadProgressProvider(messageId)).value;
@@ -75,7 +79,7 @@ class VoiceBubble extends ConsumerWidget {
     }
     final position = state?.position ?? Duration.zero;
     final showPosition = state != null && (state.playing || position > Duration.zero);
-    return Semantics(
+    final player = Semantics(
       label: 'Voice message, ${formatClock(_length)}',
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Stack(alignment: Alignment.center, children: [
@@ -119,7 +123,48 @@ class VoiceBubble extends ConsumerWidget {
         ),
       ]),
     );
+    return _withTranscript(player, ink);
   }
+
+  Widget _withTranscript(Widget player, Color ink) {
+    final words = transcript;
+    if (words == null) return player;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      player,
+      const SizedBox(height: 6),
+      SizedBox(width: _playerWidth, child: _Transcript(words, color: ink)),
+    ]);
+  }
+}
+
+/// About the player row's width: the transcript wraps to it.
+const _playerWidth = 40.0 + 10 + _waveWidth + 8 + 40;
+
+/// A transcript, three lines until tapped.
+class _Transcript extends StatefulWidget {
+  const _Transcript(this.text, {required this.color});
+  final String text;
+  final Color color;
+
+  @override
+  State<_Transcript> createState() => _TranscriptState();
+}
+
+class _TranscriptState extends State<_Transcript> {
+  var _expanded = false;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Text(
+          widget.text,
+          key: const Key('voice-transcript'),
+          maxLines: _expanded ? null : 3,
+          overflow: _expanded ? null : TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: widget.color),
+        ),
+      );
 }
 
 /// Bars for [peaks] (0–255) scaled to the loudest one; the first [progress] of them in [played].

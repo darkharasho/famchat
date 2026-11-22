@@ -97,6 +97,7 @@ class MessageBubble extends StatefulWidget {
     this.shownText,
     this.mentionNames = const [],
     this.linkPreview,
+    this.transcript,
     this.edited = false,
     this.deleted = false,
     this.quote,
@@ -183,6 +184,9 @@ class MessageBubble extends StatefulWidget {
 
   /// The card for the text's link, if the sender made one.
   final LinkPreview? linkPreview;
+
+  /// A voice message's transcript, shown under the clip.
+  final String? transcript;
 
   /// Shows "edited" in the bubble; [deleted] shows the message as deleted.
   final bool edited, deleted;
@@ -570,7 +574,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       ]);
     } else if (voice != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-        VoiceBubble(body: voice, messageId: m.id, mine: mine),
+        VoiceBubble(body: voice, messageId: m.id, mine: mine, transcript: widget.transcript),
         if (showEdited) edited,
       ]);
     } else {
