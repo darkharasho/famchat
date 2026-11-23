@@ -118,7 +118,7 @@ List<GameState> _walk(
           second == null ||
           (body.game.seeded && body.seed == null) ||
           games.any((g) => !g.inert && g.outcome == null && g.type.long == body.game.long);
-      final g = _Game(r.id, body.game, body.first, second ?? '', inert, r.seq, body.seed, body.optionalJumps, body.wholeDeck);
+      final g = _Game(r.id, body.game, body.first, second ?? '', inert, r.seq, body.seed, body.optionalJumps, body.wholeDeck, body.twosBeatAces);
       games.add(g);
       byId[r.id] = g;
     } else if (r.kind == 'move') {
@@ -238,7 +238,7 @@ class GameCache {
       end = old.end;
       from = old.moves.length;
     } else {
-      g = _Game(r.id, s.body.game, s.body.first, second, inert, r.seq, s.body.seed, s.body.optionalJumps, s.body.wholeDeck);
+      g = _Game(r.id, s.body.game, s.body.first, second, inert, r.seq, s.body.seed, s.body.optionalJumps, s.body.wholeDeck, s.body.twosBeatAces);
     }
     for (var i = from; i < moves.length; i++) {
       applied++;
@@ -315,7 +315,8 @@ class _Game {
     int? seed, [
     bool optionalJumps = false,
     bool wholeDeck = false,
-  ]) : board = initialBoard(type, seed, optionalJumps, wholeDeck);
+    bool twosBeatAces = false,
+  ]) : board = initialBoard(type, seed, optionalJumps, wholeDeck, twosBeatAces);
 
   final String id;
   final GameType type;

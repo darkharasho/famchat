@@ -109,6 +109,7 @@ sealed class Plaintext {
                 seed: validSeed,
                 optionalJumps: type == GameType.checkers && j['jumps'] == 'optional',
                 wholeDeck: type == GameType.war && j['until'] == 'all_cards',
+                twosBeatAces: type == GameType.war && j['twos'] == 'beat_aces',
               );
       case 'move':
         final target = j['target'], game = j['game'], ply = wireInt(j['ply']), action = j['action'];
@@ -714,7 +715,7 @@ String _mime(Map<String, Object?> j) {
 /// Starts a game in a direct chat; the message's id is the game's id (docs/protocol.md "Games").
 /// [first] is the user who moves first (X, dark, white).
 class GameBody extends Plaintext {
-  const GameBody(this.game, this.first, {this.seed, this.optionalJumps = false, this.wholeDeck = false});
+  const GameBody(this.game, this.first, {this.seed, this.optionalJumps = false, this.wholeDeck = false, this.twosBeatAces = false});
   final GameType game;
   final String first;
 
@@ -726,6 +727,9 @@ class GameBody extends Plaintext {
 
   /// War only: play until one player has every card (`"until": "all_cards"`; docs/protocol.md "Games").
   final bool wholeDeck;
+
+  /// War only: a 2 beats an ace (`"twos": "beat_aces"`; docs/protocol.md "Games").
+  final bool twosBeatAces;
   @override
   String get kind => 'game';
   @override
@@ -736,6 +740,7 @@ class GameBody extends Plaintext {
     'seed': ?seed,
     if (optionalJumps && game == GameType.checkers) 'jumps': 'optional',
     if (wholeDeck && game == GameType.war) 'until': 'all_cards',
+    if (twosBeatAces && game == GameType.war) 'twos': 'beat_aces',
   };
 }
 

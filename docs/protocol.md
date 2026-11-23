@@ -206,7 +206,7 @@ Integer fields (`ply` and the numbers in `play` moves) accept any integral numbe
 `3.5`, strings and non-finite numbers are invalid. Clients read them the same way on every platform.
 
 A `move` may carry `"rules":<n>`, the sender's version of that game's rules (Landlord 4: tax, bail and card
-payments go into the Rest Stop pot, and the bank has unlimited houses and hotels; War 2: the whole-deck mode; every other game 1). Every device replays the same moves, so two devices with
+payments go into the Rest Stop pot, and the bank has unlimited houses and hotels; War 2: the whole-deck mode, 3: twos beat aces; every other game 1). Every device replays the same moves, so two devices with
 different rules end up in different positions. A device that sees a move with a newer `rules` than its own, or
 whose newest `play` at the current ply from the player to move is illegal there (until a later play applies), lets
 nobody move and asks to update; a device whose opponent's newest move has an older `rules` says so. A missing or invalid `rules` (versions before it)
@@ -270,6 +270,9 @@ Move fields of `play`:
   is empty when they need a card shuffles their pile into it (the seed's generator, carrying on after the deal), a
   war lays `min(3, cards held by the player with fewer - 1)` each, a player with no card to flip loses the battle,
   and the game ends when one player holds every card (reason `cards`). Other games, and other values, ignore the field.
+  A `war` game may also carry `"twos":"beat_aces"` (a house rule picked when starting it, kept by a rematch): a 2
+  beats an ace; the ace still beats every other card, and the 2 still loses to them. Other games, and other values,
+  ignore the field.
 - Landlord: `{"a": "<action>", ...}`. A two-player property-trading game on a 40-space board (`0..39` clockwise
   from Start; prices, rents and the two 16-card decks, Luck ids `0..15` and Family Fund `16..31`, are fixed in
   `app/lib/games/landlord/`). Setup: the generator is created from the seed, Luck `[0..15]` is shuffled, then

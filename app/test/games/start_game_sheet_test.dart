@@ -81,4 +81,15 @@ void main() {
     expect((r as StartChoice).wholeDeck, isTrue);
     expect(r.optionalJumps, isFalse);
   });
+
+  testWidgets('the War chip lets a 2 beat an ace', (tester) async {
+    final r = await pick(tester, () async {
+      await tester.tap(find.byKey(const Key('twos-beat-aces')));
+      await tester.pump();
+      expect(find.text('Flip cards, higher wins. Most cards after one deck. A 2 beats an ace'), findsOneWidget);
+      await tester.tap(find.text('War'));
+    });
+    expect((r! as StartChoice).twosBeatAces, isTrue);
+    expect((r as StartChoice).wholeDeck, isFalse);
+  });
 }

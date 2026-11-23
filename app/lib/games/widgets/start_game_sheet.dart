@@ -35,6 +35,7 @@ Future<void> showStartGameSheet(BuildContext context, String chatId) async {
     first: me,
     optionalJumps: choice.optionalJumps,
     wholeDeck: choice.wholeDeck,
+    twosBeatAces: choice.twosBeatAces,
   );
   if (context.mounted) unawaited(openGame(context, chatId, id));
 }
@@ -45,6 +46,7 @@ class StartChoice {
     this.type, {
     this.optionalJumps = false,
     this.wholeDeck = false,
+    this.twosBeatAces = false,
   });
 
   final GameType type;
@@ -54,6 +56,9 @@ class StartChoice {
 
   /// War: play until one player has every card.
   final bool wholeDeck;
+
+  /// War: a 2 beats an ace.
+  final bool twosBeatAces;
 }
 
 /// The sheet's body: every game, quick ones first, then long ones. Pops with
@@ -61,7 +66,8 @@ class StartChoice {
 /// one kind is unfinished, that kind's games can't start: a line offers to
 /// open the running one instead. Checkers carries a chip to make jumps
 /// optional (by default a capture, when there is one, must be taken), and War
-/// one to play until someone has the whole deck (by default one pass).
+/// chips to play until someone has the whole deck (by default one pass) and
+/// to let a 2 beat an ace (by default aces always win).
 class StartGameSheet extends ConsumerStatefulWidget {
   const StartGameSheet({super.key, required this.chatId});
 
@@ -74,6 +80,7 @@ class StartGameSheet extends ConsumerStatefulWidget {
 class _StartGameSheetState extends ConsumerState<StartGameSheet> {
   bool _optionalJumps = false;
   bool _wholeDeck = false;
+  bool _twosBeatAces = false;
 
   @override
   Widget build(BuildContext context) {
@@ -129,10 +136,36 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
       subtitle: t.long
           ? const Text('A long game, played over days')
           : t == GameType.war
-          ? Text(
-              _wholeDeck
-                  ? 'Flip cards, higher wins. Play until someone has them all'
-                  : 'Flip cards, higher wins. Most cards after one deck',
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_wholeDeck ? 'Flip cards, higher wins. Play until someone has them all' : 'Flip cards, higher wins. Most cards after one deck'}'
+                  '${_twosBeatAces ? '. A 2 beats an ace' : ''}',
+                ),
+                if (enabled)
+                  Padding(
+                    padding: const EdgeInsets.only(top: Space.xs),
+                    child: Wrap(
+                      spacing: Space.sm,
+                      runSpacing: Space.xs,
+                      children: [
+                        FilterChip(
+                          key: const Key('whole-deck'),
+                          label: const Text('Whole deck'),
+                          selected: _wholeDeck,
+                          onSelected: (v) => setState(() => _wholeDeck = v),
+                        ),
+                        FilterChip(
+                          key: const Key('twos-beat-aces'),
+                          label: const Text('2 beats ace'),
+                          selected: _twosBeatAces,
+                          onSelected: (v) => setState(() => _twosBeatAces = v),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             )
           : t == GameType.checkers
           ? Text(
@@ -148,13 +181,6 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
               selected: _optionalJumps,
               onSelected: (v) => setState(() => _optionalJumps = v),
             )
-          : t == GameType.war && enabled
-          ? FilterChip(
-              key: const Key('whole-deck'),
-              label: const Text('Whole deck'),
-              selected: _wholeDeck,
-              onSelected: (v) => setState(() => _wholeDeck = v),
-            )
           : null,
       onTap: enabled
           ? () => Navigator.pop(
@@ -163,6 +189,7 @@ class _StartGameSheetState extends ConsumerState<StartGameSheet> {
                 t,
                 optionalJumps: t == GameType.checkers && _optionalJumps,
                 wholeDeck: t == GameType.war && _wholeDeck,
+                twosBeatAces: t == GameType.war && _twosBeatAces,
               ),
             )
           : null,

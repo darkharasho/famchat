@@ -54,10 +54,10 @@ enum GameType {
   /// whenever a change makes the same moves play out differently.
   /// Landlord: 2 tax goes into the Rest Stop pot; 3 bail and card payments
   /// too; 4 the bank never runs out of houses or hotels. War: 2 the whole-deck
-  /// mode.
+  /// mode; 3 the twos-beat-aces house rule.
   int get rules => switch (this) {
     landlord => 4,
-    war => 2,
+    war => 3,
     _ => 1,
   };
 
@@ -97,13 +97,14 @@ abstract class Board {
 
 /// The starting position of [t]. [seed] is the `game` message's seed, used
 /// by [GameType.seeded] games (a missing one deals from 0; such games are
-/// inert anyway). [optionalJumps] is checkers' house rule and [wholeDeck]
-/// War's (each ignored by other games).
+/// inert anyway). [optionalJumps] is checkers' house rule, and [wholeDeck]
+/// and [twosBeatAces] War's (each ignored by other games).
 Board initialBoard(
   GameType t, [
   int? seed,
   bool optionalJumps = false,
   bool wholeDeck = false,
+  bool twosBeatAces = false,
 ]) {
   switch (t) {
     case GameType.tictactoe:
@@ -121,7 +122,7 @@ Board initialBoard(
     case GameType.gofish:
       return GoFishBoard.deal(seed ?? 0);
     case GameType.war:
-      return WarBoard.deal(seed ?? 0, wholeDeck: wholeDeck);
+      return WarBoard.deal(seed ?? 0, wholeDeck: wholeDeck, twosBeatAces: twosBeatAces);
     case GameType.landlord:
       return LandlordBoard.setup(seed ?? 0);
   }
