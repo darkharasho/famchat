@@ -61,8 +61,8 @@ void main() {
     badged.dispose();
     final badge = trayBadgeRect(const ui.Size(32, 32), '9+');
     final x = (badge.left + 2).toInt(), y = badge.center.dy.toInt();
-    expect(pixel(b, size, x, y)[0], greaterThan(200)); // red
-    expect(pixel(a, size, x, y)[0], lessThan(120)); // the mark's dusk tile
+    expect(pixel(b, size, x, y)[0], greaterThan(200)); // the badge
+    expect(pixel(a, size, x, y), isNot(pixel(b, size, x, y))); // the mark's tile, without it
     // The top left is the mark either way.
     expect(pixel(a, size, 8, 8), pixel(b, size, 8, 8));
   });

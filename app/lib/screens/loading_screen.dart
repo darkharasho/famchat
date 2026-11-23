@@ -24,7 +24,7 @@ class LoadingScreen extends ConsumerWidget {
             SizedBox(height: Space.xxl),
             SizedBox.square(
               dimension: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: Palette.amber),
+              child: CircularProgressIndicator(strokeWidth: 2.5, color: Palette.ember),
             ),
           ]),
         ),

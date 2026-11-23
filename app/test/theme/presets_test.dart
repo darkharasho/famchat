@@ -1,6 +1,6 @@
-// Porch light, FamChat's own look, is the default preset and must look exactly as it did before
-// themes were presets. The schemes below are frozen copies of the ones app_theme.dart defined
-// then; FamTokens.light and .dark are the tokens it used.
+// Porch light, FamChat's own look, is the default preset. The schemes below freeze it (since the
+// 2026-11-23 sunset accents) so an accidental change shows up; FamTokens.light and .dark are its
+// tokens.
 import 'package:famchat/theme/app_theme.dart';
 import 'package:famchat/theme/contrast.dart';
 import 'package:famchat/theme/palette.dart';
@@ -15,10 +15,10 @@ const _oldLight = ColorScheme(
   onPrimary: Color(0xFFFFFFFF),
   primaryContainer: Color(0xFFE6E0F5),
   onPrimaryContainer: Palette.dusk,
-  secondary: Palette.amberDeep,
+  secondary: Palette.brick,
   onSecondary: Color(0xFFFFFFFF),
-  secondaryContainer: Palette.amber,
-  onSecondaryContainer: Palette.amberInk,
+  secondaryContainer: Palette.blush,
+  onSecondaryContainer: Palette.blushInk,
   tertiary: Palette.hydrangea,
   onTertiary: Color(0xFFFFFFFF),
   tertiaryContainer: Palette.hydrangeaPale,
@@ -43,20 +43,20 @@ const _oldLight = ColorScheme(
   scrim: Color(0xFF000000),
   inverseSurface: Palette.dusk,
   onInverseSurface: Color(0xFFF3EFFA),
-  inversePrimary: Palette.amber,
+  inversePrimary: Palette.ember,
   surfaceTint: Color(0x00000000),
 );
 
 const _oldDark = ColorScheme(
   brightness: Brightness.dark,
-  primary: Palette.amberEvening,
-  onPrimary: Palette.amberInk,
+  primary: Palette.ember,
+  onPrimary: Palette.emberInk,
   primaryContainer: Color(0xFF3E3460),
   onPrimaryContainer: Color(0xFFEDE6FF),
-  secondary: Palette.amberEvening,
-  onSecondary: Palette.amberInk,
-  secondaryContainer: Color(0xFF4A3A12),
-  onSecondaryContainer: Color(0xFFFFE0A3),
+  secondary: Palette.ember,
+  onSecondary: Palette.emberInk,
+  secondaryContainer: Palette.plumNight,
+  onSecondaryContainer: Palette.plumNightInk,
   tertiary: Palette.hydrangeaNight,
   onTertiary: Color(0xFF1E1878),
   tertiaryContainer: Color(0xFF3A3490),

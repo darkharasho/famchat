@@ -3,7 +3,7 @@
 flutter_launcher_icons:
   image_path: "assets/brand/famchat-icon.png"
   android: true
-  adaptive_icon_background: "#2E2550"
+  adaptive_icon_background: "assets/brand/famchat-background.png"
   adaptive_icon_foreground: "assets/brand/famchat-foreground.png"
   adaptive_icon_foreground_inset: 0
   min_sdk_android: 21

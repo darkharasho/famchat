@@ -13,9 +13,11 @@ import tempfile
 
 OUT = pathlib.Path("assets/brand")
 
-DUSK = "#2E2550"
 HOUSE = "#F6F1FF"
-WINDOW = "#FFC75A"
+WINDOW = ("#FF9A6B", "#E77FC0")  # the lit window: a sunset glow, top left to bottom right
+# The tile: a dusk sky, violet at the top, sunset along the bottom (offset, color).
+SKY = ((0, "#2A2150"), (0.55, "#5A2F6E"), (0.85, "#B0456A"), (1, "#E0704F"))
+SKY_FILL = "url(#sky)"
 
 # 1024-unit artboard. The house outline is stroked in its own color with round joins, which
 # softens every corner by the stroke's half width (28 units).
@@ -30,29 +32,46 @@ def glyph(scale: float, cx: float = 512, cy: float = 512) -> str:
     return f"""
   <g transform="translate({cx} {cy}) scale({scale}) translate(-512 -{GLYPH_CENTER_Y})">
     <path d="{HOUSE_PATH}" fill="{HOUSE}" stroke="{HOUSE}" stroke-width="56" stroke-linejoin="round"/>
-    <rect x="398" y="462" width="228" height="200" rx="24" fill="{WINDOW}"/>
-    <path d="M512 462 V662 M398 562 H626" stroke="{DUSK}" stroke-width="20"/>
+    <g fill="url(#window)">
+      <rect x="398" y="462" width="104" height="90" rx="20"/>
+      <rect x="522" y="462" width="104" height="90" rx="20"/>
+      <rect x="398" y="572" width="104" height="90" rx="20"/>
+      <rect x="522" y="572" width="104" height="90" rx="20"/>
+    </g>
   </g>"""
 
 
+DEFS = f"""
+  <defs>
+    <linearGradient id="window" gradientUnits="userSpaceOnUse" x1="398" y1="462" x2="626" y2="662">
+      <stop offset="0" stop-color="{WINDOW[0]}"/><stop offset="1" stop-color="{WINDOW[1]}"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      {"".join(f'<stop offset="{o}" stop-color="{c}"/>' for o, c in SKY)}
+    </linearGradient>
+  </defs>"""
+
+
 def svg(body: str) -> str:
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">{body}\n</svg>\n'
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">{DEFS}{body}\n</svg>\n'
 
 
 def desktop_tile(margin: int) -> str:
     size = 1024 - 2 * margin
-    return f'\n  <rect x="{margin}" y="{margin}" width="{size}" height="{size}" rx="{round(size * 0.22)}" fill="{DUSK}"/>'
+    return f'\n  <rect x="{margin}" y="{margin}" width="{size}" height="{size}" rx="{round(size * 0.22)}" fill="{SKY_FILL}"/>'
 
 
 VARIANTS = {
     # Full-bleed square: iOS, Android legacy, web (also safe as a maskable icon).
-    "famchat-icon": svg(f'\n  <rect width="1024" height="1024" fill="{DUSK}"/>' + glyph(0.84)),
+    "famchat-icon": svg(f'\n  <rect width="1024" height="1024" fill="{SKY_FILL}"/>' + glyph(0.84)),
     # macOS: the rounded tile with the system's margin.
     "famchat-icon-macos": svg(
-        f'\n  <rect x="100" y="100" width="824" height="824" rx="186" fill="{DUSK}"/>' + glyph(0.64)
+        f'\n  <rect x="100" y="100" width="824" height="824" rx="186" fill="{SKY_FILL}"/>' + glyph(0.64)
     ),
     # Windows/Linux: rounded tile with a slim margin (7 %, corner radius 22 % of the tile).
     "famchat-icon-desktop": svg(desktop_tile(72) + glyph(0.70)),
+    # Android adaptive background: the sky alone, full bleed.
+    "famchat-background": svg(f'\n  <rect width="1024" height="1024" fill="{SKY_FILL}"/>'),
     # Android adaptive foreground: glyph inside the 66 % safe zone, transparent around it.
     "famchat-foreground": svg(glyph(0.56)),
     # Splash: the glyph alone; Android 12 masks it to a circle, so it stays well inside.
