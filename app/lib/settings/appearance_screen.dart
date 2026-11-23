@@ -184,6 +184,7 @@ class _Preview extends StatelessWidget {
     final c = colors;
     Widget bubble({
       required Color fill,
+      Color? fillEnd,
       required Color ink,
       Color? border,
       required double width,
@@ -196,7 +197,8 @@ class _Preview extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 9),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: fill,
+          color: fillEnd == null ? fill : null,
+          gradient: fillEnd == null ? null : mineBubbleGradient(fill, fillEnd),
           border: border == null ? null : Border.all(color: border),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(11),
@@ -225,7 +227,7 @@ class _Preview extends StatelessWidget {
             children: [
               bubble(fill: c.theirsBubble, ink: c.onSurfaceVariant, border: c.theirsBorder, width: 72, mine: false),
               const SizedBox(height: 6),
-              bubble(fill: c.mineBubble, ink: c.onMineBubble, width: 84, mine: true),
+              bubble(fill: c.mineBubble, fillEnd: c.mineBubbleEnd, ink: c.onMineBubble, width: 84, mine: true),
             ],
           ),
           Positioned(

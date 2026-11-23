@@ -648,7 +648,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         decoration: bare
             ? null
             : BoxDecoration(
-                color: bg,
+                color: mine ? null : bg,
+                gradient: mine ? t.mineGradient : null,
                 borderRadius: _radius,
                 border: mine ? null : Border.all(color: t.theirsBorder),
               ),

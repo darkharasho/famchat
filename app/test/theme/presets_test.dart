@@ -87,6 +87,7 @@ const _oldDark = ColorScheme(
 
 Map<String, Color> _tokenColors(FamTokens t) => {
   'mineBubble': t.mineBubble,
+  'mineBubbleEnd': t.mineBubbleEnd,
   'onMineBubble': t.onMineBubble,
   'mineMeta': t.mineMeta,
   'theirsBubble': t.theirsBubble,

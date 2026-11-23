@@ -84,6 +84,7 @@ FamTokens tokensFor(Brightness b, [ThemePreset preset = ThemePreset.fallback]) {
   final c = preset.colors(dark: dark);
   return FamTokens(
     mineBubble: c.mineBubble,
+    mineBubbleEnd: c.mineBubbleEnd,
     onMineBubble: c.onMineBubble,
     mineMeta: c.mineMeta,
     theirsBubble: c.theirsBubble,
