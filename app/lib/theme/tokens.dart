@@ -22,11 +22,16 @@ abstract final class Widths {
   static const conversation = 760.0;
 }
 
+/// Your own messages' fill: [start] at the top left fading to [end] at the bottom right.
+LinearGradient mineBubbleGradient(Color start, Color end) =>
+    LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [start, end]);
+
 /// Chat colors that ColorScheme has no slot for.
 @immutable
 class FamTokens extends ThemeExtension<FamTokens> {
   const FamTokens({
     required this.mineBubble,
+    required this.mineBubbleEnd,
     required this.onMineBubble,
     required this.mineMeta,
     required this.theirsBubble,
@@ -39,37 +44,43 @@ class FamTokens extends ThemeExtension<FamTokens> {
     required this.onBadge,
   });
 
-  final Color mineBubble, onMineBubble, mineMeta;
+  /// Your own messages are a gradient from [mineBubble] to [mineBubbleEnd]; see [mineGradient].
+  final Color mineBubble, mineBubbleEnd, onMineBubble, mineMeta;
   final Color theirsBubble, onTheirsBubble, theirsMeta, theirsBorder;
   final Color chatBackdrop, presence, badge, onBadge;
 
   static const light = FamTokens(
-    mineBubble: Palette.amber,
-    onMineBubble: Palette.amberInk,
-    mineMeta: Palette.amberMeta,
+    mineBubble: Palette.glow,
+    mineBubbleEnd: Palette.glowRose,
+    onMineBubble: Palette.glowInk,
+    mineMeta: Palette.glowMeta,
     theirsBubble: Color(0xFFFFFFFF),
     onTheirsBubble: Palette.ink,
     theirsMeta: Palette.inkMuted,
     theirsBorder: Palette.lilacLine,
     chatBackdrop: Palette.lilac200,
     presence: Palette.fern,
-    badge: Palette.amber,
-    onBadge: Palette.amberInk,
+    badge: Palette.glow,
+    onBadge: Palette.glowInk,
   );
 
   static const dark = FamTokens(
-    mineBubble: Palette.amberEvening,
-    onMineBubble: Palette.amberInk,
-    mineMeta: Palette.amberMeta,
+    mineBubble: Palette.glowEvening,
+    mineBubbleEnd: Palette.glowViolet,
+    onMineBubble: Palette.glowInkEvening,
+    mineMeta: Palette.glowMetaEvening,
     theirsBubble: Palette.night400,
     onTheirsBubble: Palette.moon,
     theirsMeta: Palette.moonMuted,
     theirsBorder: Palette.night500,
     chatBackdrop: Palette.night100,
     presence: Palette.fernNight,
-    badge: Palette.amberEvening,
-    onBadge: Palette.amberInk,
+    badge: Palette.glowEvening,
+    onBadge: Palette.glowInkEvening,
   );
+
+  /// The fill of your own messages.
+  LinearGradient get mineGradient => mineBubbleGradient(mineBubble, mineBubbleEnd);
 
   static FamTokens of(BuildContext context) =>
       Theme.of(context).extension<FamTokens>() ??
@@ -78,6 +89,7 @@ class FamTokens extends ThemeExtension<FamTokens> {
   @override
   FamTokens copyWith({
     Color? mineBubble,
+    Color? mineBubbleEnd,
     Color? onMineBubble,
     Color? mineMeta,
     Color? theirsBubble,
@@ -91,6 +103,7 @@ class FamTokens extends ThemeExtension<FamTokens> {
   }) =>
       FamTokens(
         mineBubble: mineBubble ?? this.mineBubble,
+        mineBubbleEnd: mineBubbleEnd ?? this.mineBubbleEnd,
         onMineBubble: onMineBubble ?? this.onMineBubble,
         mineMeta: mineMeta ?? this.mineMeta,
         theirsBubble: theirsBubble ?? this.theirsBubble,
@@ -109,6 +122,7 @@ class FamTokens extends ThemeExtension<FamTokens> {
     Color l(Color a, Color b) => Color.lerp(a, b, t)!;
     return FamTokens(
       mineBubble: l(mineBubble, other.mineBubble),
+      mineBubbleEnd: l(mineBubbleEnd, other.mineBubbleEnd),
       onMineBubble: l(onMineBubble, other.onMineBubble),
       mineMeta: l(mineMeta, other.mineMeta),
       theirsBubble: l(theirsBubble, other.theirsBubble),

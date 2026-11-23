@@ -9,12 +9,23 @@ abstract final class Palette {
   static const ink = Color(0xFF1F1A2E);
   static const inkMuted = Color(0xFF5B536C);
 
-  // Porch amber: your own messages, unread counts, the window in the mark.
+  // Porch amber: the window in the mark, and the evening theme's buttons.
   static const amber = Color(0xFFFFC75A);
   static const amberEvening = Color(0xFFF2B347);
   static const amberInk = Color(0xFF2B1D00);
   static const amberMeta = Color(0xFF5E4205);
   static const amberDeep = Color(0xFF7A4F00); // amber you can set text in, on light surfaces
+
+  // Porch glow: your own messages, a gradient from lamplight orange to dusk rose (day) or violet
+  // (evening), and the unread badge (its start). Clear of the yellow of emoji faces.
+  static const glow = Color(0xFFFFB36B);
+  static const glowRose = Color(0xFFE79AC8);
+  static const glowInk = Color(0xFF2B1000);
+  static const glowMeta = Color(0xFF5A2A10);
+  static const glowEvening = Color(0xFFF29A55);
+  static const glowViolet = Color(0xFFB77FD6);
+  static const glowInkEvening = Color(0xFF1F0A00);
+  static const glowMetaEvening = Color(0xFF3D1A08);
 
   // Lilac paper (day).
   static const lilac50 = Color(0xFFFBFAFD);

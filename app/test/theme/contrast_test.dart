@@ -47,6 +47,8 @@ void main() {
           'inversePrimary (snack bar action)': (s.inversePrimary, s.inverseSurface),
           'mine text': (k.onMineBubble, k.mineBubble),
           'mine meta': (k.mineMeta, k.mineBubble),
+          'mine text (gradient end)': (k.onMineBubble, k.mineBubbleEnd),
+          'mine meta (gradient end)': (k.mineMeta, k.mineBubbleEnd),
           'theirs text': (k.onTheirsBubble, k.theirsBubble),
           'theirs meta': (k.theirsMeta, k.theirsBubble),
           'badge': (k.onBadge, k.badge),
