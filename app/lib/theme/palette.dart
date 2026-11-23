@@ -9,12 +9,16 @@ abstract final class Palette {
   static const ink = Color(0xFF1F1A2E);
   static const inkMuted = Color(0xFF5B536C);
 
-  // Porch amber: the window in the mark, and the evening theme's buttons.
-  static const amber = Color(0xFFFFC75A);
-  static const amberEvening = Color(0xFFF2B347);
-  static const amberInk = Color(0xFF2B1D00);
-  static const amberMeta = Color(0xFF5E4205);
-  static const amberDeep = Color(0xFF7A4F00); // amber you can set text in, on light surfaces
+  // Sunset accents: the evening theme's buttons, highlights, and the lit window in the mark.
+  static const ember = Color(0xFFFFA48A); // evening primary; the snack bar's action
+  static const emberInk = Color(0xFF3A0D06);
+  static const brick = Color(0xFFA8401C); // an accent you can set text in, on light surfaces
+  static const blush = Color(0xFFFADDE6); // day highlights
+  static const blushInk = Color(0xFF4A1230);
+  static const plumNight = Color(0xFF4A2244); // evening highlights
+  static const plumNightInk = Color(0xFFFFD9E6);
+  static const windowGlow = Color(0xFFFF9A6B); // the window in the mark: top left…
+  static const windowGlowEnd = Color(0xFFE77FC0); // …to bottom right
 
   // Porch glow: your own messages, a gradient from brick to plum (day) or violet (evening) in
   // white text, and the unread badge (its start). Clear of the yellow of emoji faces.

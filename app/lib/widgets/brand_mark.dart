@@ -82,6 +82,14 @@ final _house = Path()
 
 const _houseColor = Color(0xFFF6F1FF);
 
+/// The tile: a dusk sky, violet at the top, sunset along the bottom (tool/brand/make_brand.py SKY).
+const _sky = LinearGradient(
+  begin: Alignment.topCenter,
+  end: Alignment.bottomCenter,
+  colors: [Color(0xFF2A2150), Color(0xFF5A2F6E), Color(0xFFB0456A), Color(0xFFE0704F)],
+  stops: [0, 0.55, 0.85, 1],
+);
+
 /// Paints the mark, tile and all, filling [size]. Also draws the desktop tray icon
 /// (lib/window/unread_badge_art.dart).
 void paintBrandMark(Canvas canvas, Size size, {bool rim = false}) {
@@ -89,7 +97,7 @@ void paintBrandMark(Canvas canvas, Size size, {bool rim = false}) {
   canvas.scale(size.width / 1024, size.height / 1024);
   canvas.drawRRect(
     RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 1024, 1024), const Radius.circular(232)),
-    Paint()..color = Palette.dusk,
+    Paint()..shader = _sky.createShader(const Rect.fromLTWH(0, 0, 1024, 1024)),
   );
   if (rim) {
     canvas.drawRRect(
@@ -105,16 +113,21 @@ void paintBrandMark(Canvas canvas, Size size, {bool rim = false}) {
     ..scale(0.78)
     ..translate(-512, -548);
   _paintHouse(canvas, _houseColor);
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(const Rect.fromLTWH(398, 462, 228, 200), const Radius.circular(24)),
-    Paint()..color = Palette.amber,
-  );
-  final mullion = Paint()
-    ..color = Palette.dusk
-    ..strokeWidth = 20;
-  canvas
-    ..drawLine(const Offset(512, 462), const Offset(512, 662), mullion)
-    ..drawLine(const Offset(398, 562), const Offset(626, 562), mullion);
+  // The lit window: four rounded panes sharing one sunset glow.
+  final glow = Paint()
+    ..shader = const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Palette.windowGlow, Palette.windowGlowEnd],
+    ).createShader(const Rect.fromLTWH(398, 462, 228, 200));
+  for (final pane in const [
+    Rect.fromLTWH(398, 462, 104, 90),
+    Rect.fromLTWH(522, 462, 104, 90),
+    Rect.fromLTWH(398, 572, 104, 90),
+    Rect.fromLTWH(522, 572, 104, 90),
+  ]) {
+    canvas.drawRRect(RRect.fromRectAndRadius(pane, const Radius.circular(20)), glow);
+  }
   canvas.restore();
 }
 

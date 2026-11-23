@@ -34,7 +34,7 @@ class VoiceBubble extends ConsumerWidget {
   final VoiceBody body;
   final String messageId;
 
-  /// In the sender's own (amber) bubble.
+  /// In the sender's own (gradient) bubble.
   final bool mine;
 
   /// The words of the clip, shown under it (the sender's, or one made on this device).

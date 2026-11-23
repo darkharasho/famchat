@@ -416,7 +416,7 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
       ];
 }
 
-/// A round amber badge with an icon, heading a step.
+/// A round highlight badge with an icon, heading a step.
 class _Badge extends StatelessWidget {
   const _Badge({required this.icon});
 

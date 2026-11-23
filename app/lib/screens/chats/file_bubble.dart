@@ -65,7 +65,7 @@ class FileBubble extends ConsumerStatefulWidget {
   final FileBody body;
   final String messageId;
 
-  /// In the sender's own (amber) bubble.
+  /// In the sender's own (gradient) bubble.
   final bool mine;
 
   @override
