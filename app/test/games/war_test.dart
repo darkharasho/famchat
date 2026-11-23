@@ -32,6 +32,30 @@ void main() {
       expect(two.battles.last.flipper, Side.second);
     });
 
+    test('with twos beat aces, a 2 beats an ace and nothing else changes', () {
+      WarBoard flip(int x, int y) =>
+          WarBoard.custom([x], [y], twosBeatAces: true).play({'flip': true})! as WarBoard;
+      expect(flip(c(2), c(1)).won, (2, 0));
+      expect(flip(c(1), c(2)).won, (0, 2));
+      expect(flip(c(1), c(13)).won, (2, 0));
+      expect(flip(c(2), c(3)).won, (0, 2));
+      // Off (the default), the ace wins.
+      expect((WarBoard.custom([c(2)], [c(1)]).play({'flip': true})! as WarBoard).won, (0, 2));
+      final b = initialBoard(GameType.war, 7, false, false, true) as WarBoard;
+      expect(b.twosBeatAces, isTrue);
+      expect((b.play({'flip': true})! as WarBoard).twosBeatAces, isTrue);
+    });
+
+    test('a battle records every card each player laid, in order', () {
+      final b = WarBoard.custom(
+        [c(7), c(2), c(3), c(4), c(10), c(2, 1)],
+        [c(7, 1), c(2, 1), c(3, 1), c(4, 1), c(9), c(3, 2)],
+      );
+      final battle = (b.play({'flip': true})! as WarBoard).battles.single;
+      expect(battle.laid.$1, [c(7), c(2), c(3), c(4), c(10)]);
+      expect(battle.laid.$2, [c(7, 1), c(2, 1), c(3, 1), c(4, 1), c(9)]);
+    });
+
     test('a tie is a war: three down, then the next flip decides', () {
       final b = WarBoard.custom(
         [c(7), c(2), c(3), c(4), c(10), c(2, 1)],
@@ -100,7 +124,7 @@ void main() {
       expect(a.wholeDeck, isFalse);
       expect(b.wholeDeck, isTrue);
       expect(b.deck(Side.first), a.deck(Side.first));
-      expect(GameType.war.rules, 2);
+      expect(GameType.war.rules, 3);
     });
     test('log lines', () {
       final b =
@@ -192,6 +216,32 @@ void main() {
         find.textContaining("War! Your 10♠ beat Mom's 9♠ · +10"),
         findsOneWidget,
       );
+      expect(find.text('Won 10'), findsOneWidget);
+    });
+
+    testWidgets('a won war shows every card in the pot face up for a moment', (
+      tester,
+    ) async {
+      final b = WarBoard.custom(
+        [c(7), c(2), c(3), c(4), c(10), c(2, 1)],
+        [c(7, 1), c(2, 1), c(3, 1), c(4, 1), c(9), c(3, 2)],
+      );
+      final w = b.play({'flip': true})!;
+      await tester.pumpWidget(view(b));
+      await tester.pumpWidget(view(w));
+      await tester.pump(const Duration(milliseconds: 1900));
+      // The face-down cards are still backs.
+      expect(find.byKey(Key('war-card-${c(3, 1)}')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1100));
+      final pot = [c(7), c(2), c(3), c(4), c(10), c(7, 1), c(2, 1), c(3, 1), c(4, 1), c(9)];
+      for (final card in pot) {
+        expect(find.byKey(Key('war-card-$card')), findsOneWidget, reason: warCardName(card));
+      }
+      // Still there a second later, then swept away.
+      await tester.pump(const Duration(milliseconds: 1000));
+      expect(find.byKey(Key('war-card-${c(3, 1)}')), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('war-card-${c(3, 1)}')), findsNothing);
       expect(find.text('Won 10'), findsOneWidget);
     });
 

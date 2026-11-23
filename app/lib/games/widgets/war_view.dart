@@ -50,8 +50,10 @@ String warLog(WarBattle b, (String, String) names) {
 /// War: each player's deck on their side of a felt table (mine at the
 /// bottom), cards won in a pile beside it. On my turn I tap my deck to flip:
 /// both top cards fly to the middle and turn over; a tie stamps "WAR!", three
-/// cards each slide in face down and the next pair flips; then the pot
-/// sweeps to the winner's pile. The last battle stays written in the middle.
+/// cards each slide in face down and the next pair flips; after a war every
+/// card in the pot turns face up in two rows for a moment, so the winner sees
+/// what they took; then the pot sweeps to the winner's pile. The last battle
+/// stays written in the middle.
 class WarView extends StatefulWidget {
   const WarView({
     super.key,
@@ -81,8 +83,14 @@ class _WarViewState extends MoveMotionState<WarView> {
   List<(int, int)> _rounds = const [];
   int _sweep = 0, _total = 1;
 
+  /// When a won war's pot is laid out face up (null when there's no reveal).
+  int? _reveal;
+
   static const _flyMs = 320, _turnMs = 220, _gapMs = 320, _warMs = 880;
   static const _holdMs = 480, _sweepMs = 460;
+
+  /// A won war: the pot gathers face up ([_gatherMs]), then stays ([_showMs]).
+  static const _gatherMs = 520, _showMs = 1500;
 
   @override
   void didUpdateWidget(WarView old) {
@@ -99,7 +107,9 @@ class _WarViewState extends MoveMotionState<WarView> {
     _battle = battle;
     _before = a;
     _rounds = rounds;
-    _sweep = rounds.last.$2 + _holdMs;
+    final reveal = battle.war && battle.winner != null;
+    _reveal = reveal ? rounds.last.$2 + _holdMs : null;
+    _sweep = reveal ? _reveal! + _gatherMs + _showMs : rounds.last.$2 + _holdMs;
     _total = _sweep + _sweepMs;
     playMove(_total);
   }
@@ -197,7 +207,9 @@ class _WarViewState extends MoveMotionState<WarView> {
       );
     }
 
-    if (battle != null) {
+    if (battle != null && _reveal != null && clock.value * _total >= _reveal!) {
+      _revealPot(battle, me, card, slot, deckAt, wonAt, wd, cw);
+    } else if (battle != null) {
       final t = clock.value * _total;
       final sweep = _ms(_sweep, _sweep + _sweepMs, Curves.easeInCubic);
       for (var r = 0; r < battle.rounds.length; r++) {
@@ -295,6 +307,78 @@ class _WarViewState extends MoveMotionState<WarView> {
         child: Stack(children: children),
       ),
     );
+  }
+
+  /// A won war's pot: every card gathers face up into its player's row (mine
+  /// at the bottom, in the order laid, each overlapping the last so its
+  /// corner shows), stays a moment, then sweeps to the winner's pile.
+  void _revealPot(
+    WarBattle battle,
+    Side me,
+    void Function(Offset, Widget, {double scale, double turn}) card,
+    Offset Function(Side, int) slot,
+    Offset Function(Side) deckAt,
+    Offset Function(Side) wonAt,
+    double wd,
+    double cw,
+  ) {
+    final r0 = _reveal!;
+    final gather = _ms(r0, r0 + _gatherMs, Curves.easeInOutCubic);
+    final turnT = _ms(r0, r0 + (_gatherMs * 0.6).round());
+    final sweep = _ms(_sweep, _sweep + _sweepMs, Curves.easeInCubic);
+    const scale = 0.82;
+    final winner = battle.winner!;
+    for (final s in [me.other, me]) {
+      final laid = s == Side.first ? battle.laid.$1 : battle.laid.$2;
+      if (laid.isEmpty) continue;
+      // Where each card lay: a flip in its round's slot, face-down cards
+      // fanned behind the next round's (as the battle drew them).
+      final from = <Offset>[];
+      final faceUp = <bool>[];
+      var r = 0, downsLeft = 0, k = 0;
+      for (var i = 0; i < laid.length; i++) {
+        if (downsLeft > 0) {
+          from.add(slot(s, r + 1) + Offset(-cw * 0.09 * (++k), 0));
+          faceUp.add(false);
+          if (--downsLeft == 0) r++;
+        } else if (r < battle.rounds.length) {
+          from.add(slot(s, r));
+          faceUp.add(true);
+          if (r < battle.downs.length) {
+            downsLeft = battle.downs[r];
+            k = 0;
+            if (downsLeft == 0) r++;
+          } else {
+            r++;
+          }
+        } else {
+          from.add(deckAt(s)); // a last card turned when the other had none
+          faceUp.add(true);
+        }
+      }
+      final n = laid.length;
+      final span = wd * 0.6 - cw * scale;
+      final step = n == 1 ? 0.0 : math.min(cw * scale * 1.05, span / (n - 1));
+      final row = slot(s, 0).dy;
+      final last = battle.rounds.last;
+      for (var i = 0; i < n; i++) {
+        final rest = Offset(wd * 0.5 + (i - (n - 1) / 2) * step, row);
+        final at = sweep > 0
+            ? Offset.lerp(rest, wonAt(winner), sweep)!
+            : Offset.lerp(from[i], rest, gather)!;
+        final flips = !faceUp[i];
+        final c = laid[i];
+        final deciding = c == (s == Side.first ? last.$1 : last.$2);
+        card(
+          at,
+          flips && turnT < 0.5
+              ? _CardBack(width: cw)
+              : _CardFace(card: c, width: cw, glow: deciding && s == winner && sweep == 0),
+          scale: (1 - (1 - scale) * gather) - 0.2 * sweep,
+          turn: flips ? math.max(0.04, math.cos(math.pi * turnT).abs()) : 1,
+        );
+      }
+    }
   }
 
   /// [s]'s deck so far in the battle playing out from [before].

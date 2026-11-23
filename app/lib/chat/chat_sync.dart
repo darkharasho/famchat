@@ -1671,6 +1671,7 @@ class ChatSync {
     int? seed,
     bool optionalJumps = false,
     bool wholeDeck = false,
+    bool twosBeatAces = false,
   }) => _enqueueMessage(
     chatId,
     GameBody(
@@ -1679,6 +1680,7 @@ class ChatSync {
       seed: game.seeded ? seed ?? newSeed() : null,
       optionalJumps: optionalJumps,
       wholeDeck: wholeDeck,
+      twosBeatAces: twosBeatAces,
     ),
   );
 

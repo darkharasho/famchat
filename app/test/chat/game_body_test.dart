@@ -99,6 +99,14 @@ void main() {
     expect(timelineHiddenKinds, {'reaction', 'edit', 'delete', 'pin', 'vote', 'poll_end', 'transcript', 'move'});
   });
 
+  test('war may let twos beat aces', () {
+    const g = GameBody(GameType.war, 'U1', seed: 4, twosBeatAces: true);
+    expect(g.toJson()['twos'], 'beat_aces');
+    expect((Plaintext.decode(g.encode()) as GameBody).twosBeatAces, isTrue);
+    expect(const GameBody(GameType.gofish, 'U1', seed: 4, twosBeatAces: true).toJson().containsKey('twos'), isFalse);
+    expect((decode({'kind': 'game', 'game': 'war', 'first': 'U1', 'seed': 4, 'twos': 'win'}) as GameBody).twosBeatAces, isFalse);
+  });
+
   test('war may play to the whole deck', () {
     const g = GameBody(GameType.war, 'U1', seed: 4, wholeDeck: true);
     expect(g.toJson()['until'], 'all_cards');

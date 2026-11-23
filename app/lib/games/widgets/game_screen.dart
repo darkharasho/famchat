@@ -206,6 +206,7 @@ Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
     first: g.secondUserId,
     optionalJumps: b is CheckersBoard && b.optionalJumps,
     wholeDeck: b is WarBoard && b.wholeDeck,
+    twosBeatAces: b is WarBoard && b.twosBeatAces,
   );
 }
 
@@ -213,8 +214,8 @@ Future<String?> startRematch(WidgetRef ref, String chatId, GameState g) async {
 String? _subtitle(String? who, Board b) {
   final rule = b is CheckersBoard && b.optionalJumps
       ? 'jumps optional'
-      : b is WarBoard && b.wholeDeck
-      ? 'whole deck'
+      : b is WarBoard && (b.wholeDeck || b.twosBeatAces)
+      ? [if (b.wholeDeck) 'whole deck', if (b.twosBeatAces) '2 beats ace'].join(' · ')
       : null;
   if (rule == null) return who;
   return who == null

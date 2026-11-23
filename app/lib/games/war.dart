@@ -7,10 +7,14 @@ import 'rules.dart';
 /// pairs as (first's card, second's card): one, plus one per war. [downs] is
 /// how many cards each player laid face down before each war's flip (one
 /// entry per war). [winner] took the [pot]; null when both decks ran out in
-/// a war and each took back their own cards.
+/// a war and each took back their own cards. [laid] is every card each
+/// player put down, (first's, second's), in the order laid: the table shows
+/// them all when a war is won.
 @immutable
 class WarBattle {
-  const WarBattle(this.flipper, this.rounds, this.downs, this.winner, this.pot);
+  const WarBattle(this.flipper, this.rounds, this.downs, this.winner, this.pot, [this.laid = const ([], [])]);
+
+  final (List<int>, List<int>) laid;
 
   final Side flipper;
   final List<(int, int)> rounds;
@@ -38,6 +42,9 @@ class WarBattle {
 /// and the game ends when one player has every card (reason `cards`). A war
 /// lays `min(3, fewer cards held - 1)` each; a player with no card to flip
 /// loses the battle.
+///
+/// With [twosBeatAces] (a house rule) a 2 beats an ace; every other card still
+/// loses to the ace, and the 2 still loses to everything else.
 class WarBoard implements Board {
   WarBoard._(
     List<int> firstDeck,
@@ -48,12 +55,13 @@ class WarBoard implements Board {
     this._turn,
     this._rng, {
     required this.wholeDeck,
+    required this.twosBeatAces,
     required this.flips,
   }) : _decks = (List.unmodifiable(firstDeck), List.unmodifiable(secondDeck)),
        _piles = (List.unmodifiable(firstPile), List.unmodifiable(secondPile)),
        battles = List.unmodifiable(battles);
 
-  factory WarBoard.deal(int seed, {bool wholeDeck = false}) {
+  factory WarBoard.deal(int seed, {bool wholeDeck = false, bool twosBeatAces = false}) {
     final rng = Rng(seed);
     final deck = shuffled(List.generate(52, (i) => i), rng);
     return WarBoard._(
@@ -65,6 +73,7 @@ class WarBoard implements Board {
       Side.first,
       rng.state,
       wholeDeck: wholeDeck,
+      twosBeatAces: twosBeatAces,
       flips: 0,
     );
   }
@@ -76,6 +85,7 @@ class WarBoard implements Board {
     List<int> secondDeck, {
     Side turn = Side.first,
     bool wholeDeck = false,
+    bool twosBeatAces = false,
     List<int> firstPile = const [],
     List<int> secondPile = const [],
     int seed = 1,
@@ -88,6 +98,7 @@ class WarBoard implements Board {
     turn,
     Rng(seed).state,
     wholeDeck: wholeDeck,
+    twosBeatAces: twosBeatAces,
     flips: 0,
   );
 
@@ -107,6 +118,17 @@ class WarBoard implements Board {
 
   /// Play until one player has every card, reshuffling won cards.
   final bool wholeDeck;
+
+  /// House rule: a 2 beats an ace.
+  final bool twosBeatAces;
+
+  /// Whether card [x] beats card [y] (cards of equal value are a war).
+  bool beats(int x, int y) {
+    final a = valueOf(x), b = valueOf(y);
+    if (twosBeatAces && a == 2 && b == 14) return true;
+    if (twosBeatAces && a == 14 && b == 2) return false;
+    return a > b;
+  }
 
   /// Battles played.
   final int flips;
@@ -183,7 +205,7 @@ class WarBoard implements Board {
       }
       rounds.add((x, y));
       if (valueOf(x) != valueOf(y)) {
-        winner = valueOf(x) > valueOf(y) ? Side.first : Side.second;
+        winner = beats(x, y) ? Side.first : Side.second;
         break;
       }
       final fewer = wholeDeck
@@ -210,7 +232,10 @@ class WarBoard implements Board {
         piles[0].addAll(laid[0]);
         piles[1].addAll(laid[1]);
     }
-    final log = [...battles, WarBattle(_turn, rounds, downs, winner, pot)];
+    final log = [
+      ...battles,
+      WarBattle(_turn, rounds, downs, winner, pot, (List.unmodifiable(laid[0]), List.unmodifiable(laid[1]))),
+    ];
     return WarBoard._(
       decks[0],
       decks[1],
@@ -220,6 +245,7 @@ class WarBoard implements Board {
       _turn.other,
       rng.state,
       wholeDeck: wholeDeck,
+      twosBeatAces: twosBeatAces,
       flips: flips + 1,
     );
   }
