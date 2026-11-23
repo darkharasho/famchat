@@ -52,7 +52,7 @@ class FamTokens extends ThemeExtension<FamTokens> {
   static const light = FamTokens(
     mineBubble: Palette.glow,
     mineBubbleEnd: Palette.glowRose,
-    onMineBubble: Palette.glowInk,
+    onMineBubble: Color(0xFFFFFFFF),
     mineMeta: Palette.glowMeta,
     theirsBubble: Color(0xFFFFFFFF),
     onTheirsBubble: Palette.ink,
@@ -61,14 +61,14 @@ class FamTokens extends ThemeExtension<FamTokens> {
     chatBackdrop: Palette.lilac200,
     presence: Palette.fern,
     badge: Palette.glow,
-    onBadge: Palette.glowInk,
+    onBadge: Color(0xFFFFFFFF),
   );
 
   static const dark = FamTokens(
     mineBubble: Palette.glowEvening,
     mineBubbleEnd: Palette.glowViolet,
-    onMineBubble: Palette.glowInkEvening,
-    mineMeta: Palette.glowMetaEvening,
+    onMineBubble: Color(0xFFFFFFFF),
+    mineMeta: Palette.glowMeta,
     theirsBubble: Palette.night400,
     onTheirsBubble: Palette.moon,
     theirsMeta: Palette.moonMuted,
@@ -76,7 +76,7 @@ class FamTokens extends ThemeExtension<FamTokens> {
     chatBackdrop: Palette.night100,
     presence: Palette.fernNight,
     badge: Palette.glowEvening,
-    onBadge: Palette.glowInkEvening,
+    onBadge: Color(0xFFFFFFFF),
   );
 
   /// The fill of your own messages.

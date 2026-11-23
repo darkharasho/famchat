@@ -54,7 +54,7 @@ class VoiceBubble extends ConsumerWidget {
     final t = FamTokens.of(context);
     final ink = mine ? t.onMineBubble : t.onTheirsBubble;
     final meta = mine ? t.mineMeta : t.theirsMeta;
-    // The play button: dusk on amber for your own clips, the theme's primary on everyone else's.
+    // The play button: the bubble colour on white for your own clips, the theme's primary on everyone else's.
     final buttonBg = mine ? t.onMineBubble : scheme.primary;
     final buttonFg = mine ? t.mineBubble : scheme.onPrimary;
     final expired = (ref.watch(expiredMediaProvider).value ?? const <String>{}).contains(body.mediaKey);
