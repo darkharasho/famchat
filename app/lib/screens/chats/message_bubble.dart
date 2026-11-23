@@ -556,6 +556,8 @@ class _MessageBubbleState extends State<MessageBubble> {
           );
 
     Widget content;
+    // One to three emoji alone, with nothing quoted, forwarded or previewed: shown big, with no bubble.
+    var bare = false;
     if (custom != null) {
       content = custom;
     } else if (album != null) {
@@ -601,7 +603,8 @@ class _MessageBubbleState extends State<MessageBubble> {
       final text = _text;
       final emojiOnly = special ? null : emojiOnlyCount(text);
       // One to three emoji alone are the message: show them big.
-      final big = emojiOnly != null && emojiOnly <= 3 ? (emojiOnly == 1 ? 40.0 : 32.0) : null;
+      final big = emojiOnly != null && emojiOnly <= 3 ? const [56.0, 48.0, 40.0][emojiOnly - 1] : null;
+      bare = big != null && widget.quote == null && !widget.forwarded && widget.linkPreview == null;
       final style = theme.textTheme.bodyLarge?.copyWith(
         color: special ? meta : fg,
         fontStyle: special ? FontStyle.italic : null,
@@ -613,8 +616,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: Space.sm,
         children: [
-          if (special || big != null) Text(text, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames, markdown: true),
-          if (showEdited) Padding(padding: const EdgeInsets.only(top: 2), child: edited),
+          if (special || big != null) Text(text, key: bare ? Key('bare-emoji-${m.id}') : null, style: style) else LinkText(text, style: style, linkColor: fg, mentions: widget.mentionNames, markdown: true),
+          if (showEdited)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: bare ? Text('edited', style: edited.style?.copyWith(color: dim)) : edited,
+            ),
         ],
       );
       final preview = special ? null : widget.linkPreview;
@@ -635,19 +642,23 @@ class _MessageBubbleState extends State<MessageBubble> {
         constraints: const BoxConstraints(maxWidth: 520),
         padding: visual
             ? const EdgeInsets.fromLTRB(4, 4, 4, 6)
+            : bare
+            ? const EdgeInsets.symmetric(horizontal: 2)
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: _radius,
-          border: mine ? null : Border.all(color: t.theirsBorder),
-        ),
+        decoration: bare
+            ? null
+            : BoxDecoration(
+                color: bg,
+                borderRadius: _radius,
+                border: mine ? null : Border.all(color: t.theirsBorder),
+              ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (widget.senderName != null)
             Padding(
               padding: visual ? const EdgeInsets.fromLTRB(10, 4, 10, 6) : const EdgeInsets.only(bottom: 2),
               child: Text(
                 widget.senderName!,
-                style: theme.textTheme.labelMedium?.copyWith(color: fg, fontWeight: FontWeight.w700),
+                style: theme.textTheme.labelMedium?.copyWith(color: bare ? dim : fg, fontWeight: FontWeight.w700),
               ),
             ),
           if (widget.forwarded && !widget.deleted)
