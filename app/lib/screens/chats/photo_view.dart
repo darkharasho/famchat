@@ -140,8 +140,8 @@ PageRoute<void> mediaViewerRoute(WidgetBuilder builder) => PageRouteBuilder<void
       pageBuilder: (context, _, _) => Stack(fit: StackFit.expand, children: [
         BackdropFilter(
           key: const Key('media-backdrop'),
-          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-          child: const ColoredBox(color: Color(0x8C000000)),
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: const ColoredBox(color: Color(0x73000000)),
         ),
         builder(context),
       ]),
