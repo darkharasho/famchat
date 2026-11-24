@@ -9,13 +9,7 @@ import 'photo_view.dart';
 import 'video_view.dart';
 
 /// Opens [items] (photo and video messages) full screen at [index].
-Future<void> showMediaPager(BuildContext context, List<MessageRow> items, int index) => Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        opaque: true,
-        pageBuilder: (_, _, _) => MediaPager(items: items, initial: index),
-        transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
-      ),
-    );
+Future<void> showMediaPager(BuildContext context, List<MessageRow> items, int index) => Navigator.of(context).push(mediaViewerRoute((_) => MediaPager(items: items, initial: index)));
 
 class MediaPager extends StatefulWidget {
   const MediaPager({super.key, required this.items, required this.initial});
@@ -53,7 +47,7 @@ class _MediaPagerState extends State<MediaPager> {
     return switch (body) {
       PhotoBody() => PhotoViewer(key: ValueKey(m.id), body: body),
       VideoBody() => VideoViewer(key: ValueKey(m.id), body: body, messageId: m.id),
-      _ => const ColoredBox(color: Colors.black),
+      _ => const SizedBox.expand(),
     };
   }
 

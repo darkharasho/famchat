@@ -1,6 +1,7 @@
 // Photos in a conversation: the thumbnail inside a bubble, and the full-screen viewer.
 
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -130,19 +131,28 @@ class PhotoThumb extends ConsumerWidget {
 }
 
 /// Opens [body] full screen.
-Future<void> showPhotoViewer(BuildContext context, PhotoBody body) => Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        opaque: true,
-        pageBuilder: (_, _, _) => PhotoViewer(body: body),
-        transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
-      ),
+Future<void> showPhotoViewer(BuildContext context, PhotoBody body) =>
+    Navigator.of(context).push(mediaViewerRoute((_) => PhotoViewer(body: body)));
+
+/// A full-screen media route over the blurred, dimmed chat: it fades in, blur and all.
+PageRoute<void> mediaViewerRoute(WidgetBuilder builder) => PageRouteBuilder<void>(
+      opaque: false,
+      pageBuilder: (context, _, _) => Stack(fit: StackFit.expand, children: [
+        BackdropFilter(
+          key: const Key('media-backdrop'),
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: const ColoredBox(color: Color(0xB3000000)),
+        ),
+        builder(context),
+      ]),
+      transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
     );
 
 /// Whether this device mostly uses a mouse: the viewer shows its zoom bar.
 bool get _mouseFirst =>
     kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
 
-/// The full image on black; the thumbnail shows while it downloads. Pinch, scroll or double-tap to
+/// The full image over the blurred chat; the thumbnail shows while it downloads. Pinch, scroll or double-tap to
 /// zoom and drag to pan; on desktop a zoom bar (−, slider, +, fit) and the +, − and 0 keys too.
 class PhotoViewer extends ConsumerStatefulWidget {
   const PhotoViewer({super.key, required this.body, this.zoomBar});
@@ -160,6 +170,7 @@ class PhotoViewer extends ConsumerStatefulWidget {
 
 class _PhotoViewerState extends ConsumerState<PhotoViewer> {
   final _zoom = TransformationController();
+  final _photo = GlobalKey();
   Size _viewport = Size.zero;
   Offset? _doubleTapAt;
 
@@ -185,6 +196,15 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
       ..scaleByDouble(s, s, 1, 1);
   }
 
+  void _close() => Navigator.of(context).maybePop();
+
+  /// A tap off the photo (on the blurred backdrop around it) closes the viewer.
+  void _tapUp(TapUpDetails d) {
+    final box = _photo.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    if (!(Offset.zero & box.size).contains(box.globalToLocal(d.globalPosition))) _close();
+  }
+
   /// A step of the zoom buttons and keys: ×1.5.
   void _step(int dir) => _zoomTo(dir > 0 ? _scale * 1.5 : _scale / 1.5);
 
@@ -203,6 +223,7 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
           content = LayoutBuilder(builder: (context, box) {
             _viewport = box.biggest;
             return GestureDetector(
+              onTapUp: _tapUp,
               onDoubleTapDown: (d) => _doubleTapAt = d.localPosition,
               // Double-tap: in to 2.5× where tapped, or back to fit.
               onDoubleTap: () => _zoomTo(_scale > 1.01 ? 1 : 2.5, _doubleTapAt),
@@ -218,12 +239,15 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
                   minScale: PhotoViewer.minScale,
                   maxScale: PhotoViewer.maxScale,
                   child: Center(
-                    child: Image.memory(
-                      bytes,
-                      key: const Key('photo-full'),
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) =>
-                          const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
+                    child: KeyedSubtree(
+                      key: _photo,
+                      child: Image.memory(
+                        bytes,
+                        key: const Key('photo-full'),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) =>
+                            const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
+                      ),
                     ),
                   ),
                 ),
@@ -259,7 +283,7 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
     final bar = zoomable && (widget.zoomBar ?? _mouseFirst);
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.of(context).maybePop(),
+        const SingleActivator(LogicalKeyboardKey.escape): _close,
         if (zoomable) ...{
           const SingleActivator(LogicalKeyboardKey.equal): () => _step(1),
           const SingleActivator(LogicalKeyboardKey.equal, shift: true): () => _step(1),
@@ -272,11 +296,15 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
-          backgroundColor: Colors.black,
+          // The route behind blurs and dims the chat.
+          backgroundColor: Colors.transparent,
           // Every child is positioned, so the stack fills the screen (the body's constraints are
           // loose: an unpositioned button would size it to the button).
           body: Stack(children: [
-            Positioned.fill(child: content),
+            // Loading, expired or failed: a tap anywhere but the retry button closes.
+            Positioned.fill(
+              child: zoomable ? content : GestureDetector(behavior: HitTestBehavior.opaque, onTap: _close, child: content),
+            ),
             Positioned(
               top: 0,
               left: 0,
@@ -288,7 +316,7 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
                     // Readable over a bright photo too.
                     style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
                     icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.of(context).maybePop(),
+                    onPressed: _close,
                   ),
                 ),
               ),
