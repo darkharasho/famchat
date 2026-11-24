@@ -166,6 +166,25 @@ void main() {
     }
   });
 
+  chatTestWidgets('the viewer blurs the chat behind it; a tap off the photo closes it', (tester) async {
+    final (_, chatId) = await open(tester);
+    await bobsPhoto(tester, chatId);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('photo-thumb')));
+    await settle(tester);
+    expect(find.byKey(const Key('media-backdrop')), findsOneWidget);
+    // The chat is still drawn underneath, blurred.
+    expect(find.byKey(const Key('photo-thumb'), skipOffstage: false), findsOneWidget);
+    // The 8×6 photo fills the width: 400×300 in the middle of the 400×800 window.
+    await tester.tapAt(const Offset(200, 400));
+    await settle(tester);
+    expect(find.byKey(const Key('photo-full')), findsOneWidget);
+    await tester.tapAt(const Offset(200, 700));
+    await settle(tester);
+    expect(find.byKey(const Key('photo-full')), findsNothing);
+    expect(find.byKey(const Key('media-backdrop')), findsNothing);
+  });
+
   chatTestWidgets('phones have no zoom bar (they pinch)', (tester) async {
     final (_, chatId) = await open(tester);
     await bobsPhoto(tester, chatId);
