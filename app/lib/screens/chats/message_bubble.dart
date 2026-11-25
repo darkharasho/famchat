@@ -120,6 +120,7 @@ class MessageBubble extends StatefulWidget {
     this.reminderAt,
     this.album,
     this.onOpenAlbumItem,
+    this.onOpenMedia,
     this.custom,
     this.onSave,
   });
@@ -134,6 +135,9 @@ class MessageBubble extends StatefulWidget {
   /// them (it carries the caption, and the bubble's actions apply to it).
   final List<MessageRow>? album;
   final void Function(int index)? onOpenAlbumItem;
+
+  /// Opens a photo or video full screen; null opens just this one.
+  final VoidCallback? onOpenMedia;
 
   /// Pins it for everyone (or unpins it, when [pinned]).
   final VoidCallback? onPin;
@@ -568,13 +572,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       ]);
     } else if (photo != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-        PhotoThumb(body: photo, messageId: m.id, onOpen: () => showPhotoViewer(context, photo)),
+        PhotoThumb(body: photo, messageId: m.id, onOpen: widget.onOpenMedia ?? () => showPhotoViewer(context, photo)),
         ?captionLine(),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
     } else if (video != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-        VideoThumb(body: video, messageId: m.id, onOpen: () => showVideoViewer(context, video, m.id)),
+        VideoThumb(body: video, messageId: m.id, onOpen: widget.onOpenMedia ?? () => showVideoViewer(context, video, m.id)),
         ?captionLine(),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);

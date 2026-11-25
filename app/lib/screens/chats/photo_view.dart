@@ -148,8 +148,8 @@ PageRoute<void> mediaViewerRoute(WidgetBuilder builder) => PageRouteBuilder<void
       transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
     );
 
-/// Whether this device mostly uses a mouse: the viewer shows its zoom bar.
-bool get _mouseFirst =>
+/// Whether this device mostly uses a mouse: the viewer shows its zoom bar and the pager its arrows.
+bool get mouseFirst =>
     kIsWeb || {TargetPlatform.linux, TargetPlatform.macOS, TargetPlatform.windows}.contains(defaultTargetPlatform);
 
 /// The full image over the blurred chat; the thumbnail shows while it downloads. Pinch, scroll or double-tap to
@@ -280,7 +280,7 @@ class _PhotoViewerState extends ConsumerState<PhotoViewer> {
           ]);
       }
     }
-    final bar = zoomable && (widget.zoomBar ?? _mouseFirst);
+    final bar = zoomable && (widget.zoomBar ?? mouseFirst);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): _close,
