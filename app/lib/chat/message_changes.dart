@@ -132,6 +132,14 @@ String? replyTargetOf(MessageRow m) =>
 /// Whether a preview of [url] belongs with [text]: the text still has that link.
 bool previewFits(String text, String url) => text.contains(url.replaceFirst(RegExp(r'/$'), ''));
 
+/// Whether [text] is nothing but a GIF link: just [preview]'s link, whose image is animated. Such
+/// a message shows as the GIF alone, like a `gif` message (docs/protocol.md "Link previews").
+bool isGifLink(String text, LinkPreview? preview) {
+  if (preview == null || preview.image?.animated != true) return false;
+  String bare(String s) => s.trim().replaceFirst(RegExp(r'/$'), '');
+  return bare(text) == bare(preview.url);
+}
+
 Plaintext? _decode(MessageRow m) {
   if (m.body == null) return null;
   try {

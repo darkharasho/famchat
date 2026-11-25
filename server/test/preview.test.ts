@@ -75,6 +75,59 @@ describe("linkPreview", () => {
     expect(p!.image).toBeUndefined();
   });
 
+  // GIF89a, 2x1, then a NETSCAPE2.0 loop block and two frames (graphic control extensions).
+  const gif = (bytes = 0) => {
+    const head = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 1, 0, 0, 0, 0];
+    const loop = [0x21, 0xff, 0x0b, ...[..."NETSCAPE2.0"].map((ch) => ch.charCodeAt(0)), 3, 1, 0, 0, 0];
+    const frame = [0x21, 0xf9, 0x04, 0, 10, 0, 0, 0, 0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x4c, 0x01, 0];
+    return new Uint8Array([...head, ...loop, ...frame, ...frame, ...new Array(bytes).fill(0), 0x3b]);
+  };
+  const stillGif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 1, 0, 0, 0, 0,
+    0x21, 0xf9, 0x04, 0, 0, 0, 0, 0, 0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x4c, 0x01, 0, 0x3b]);
+
+  it("a link straight to a GIF: the animated image itself, over the still-image cap", async () => {
+    const big = gif(3 * 1024 * 1024);
+    const web = fakeWeb({ "https://media.example/cats/dance%20party.gif": { type: "image/gif", body: big } });
+    const p = await linkPreview("https://media.example/cats/dance%20party.gif", web.fetcher);
+    expect(p).toMatchObject({
+      url: "https://media.example/cats/dance%20party.gif",
+      title: "dance party.gif",
+      siteName: "media.example",
+      imageType: "image/gif",
+      animated: true,
+    });
+    expect(Uint8Array.from(atob(p!.image!), (ch) => ch.charCodeAt(0))).toEqual(big);
+  });
+
+  it("a GIF page (Tenor, Giphy): its animated og:image, marked animated; still images aren't", async () => {
+    const web = fakeWeb({
+      "https://tenor.com/view/cat-dance-gif-1": {
+        body: `<meta property="og:title" content="Cat Dance GIF"><meta property="og:site_name" content="Tenor">
+          <meta property="og:image" content="https://media1.tenor.com/m/x/cat-dance.gif">`,
+      },
+      "https://media1.tenor.com/m/x/cat-dance.gif": { type: "image/gif", body: gif(2 * 1024 * 1024) },
+      "https://still.example/s.gif": { type: "image/gif", body: stillGif },
+      "https://still.example/": { body: `<title>Still</title><meta property="og:image" content="https://still.example/s.gif">` },
+    });
+    const p = await linkPreview("https://tenor.com/view/cat-dance-gif-1", web.fetcher);
+    expect(p).toMatchObject({ title: "Cat Dance GIF", siteName: "Tenor", imageType: "image/gif", animated: true });
+    const still = await linkPreview("https://still.example/", web.fetcher);
+    expect(still!.image).toBeDefined();
+    expect(still!.animated).toBeUndefined();
+  });
+
+  it("GIFs over 8 MiB, still images over 2 MiB and direct still images get no image", async () => {
+    const web = fakeWeb({
+      "https://media.example/huge.gif": { type: "image/gif", body: gif(8 * 1024 * 1024) },
+      "https://media.example/still.gif": { type: "image/gif", body: stillGif },
+      "https://shop.example/big.jpg": { type: "image/jpeg", body: new Uint8Array(2 * 1024 * 1024 + 1) },
+      "https://shop.example/": { body: `<title>Shop</title><meta property="og:image" content="https://shop.example/big.jpg">` },
+    });
+    expect(await linkPreview("https://media.example/huge.gif", web.fetcher)).toBeNull();
+    expect(await linkPreview("https://media.example/still.gif", web.fetcher)).toBeNull();
+    expect((await linkPreview("https://shop.example/", web.fetcher))!.image).toBeUndefined();
+  });
+
   it("refuses non-web schemes, local addresses and pages with nothing to show", async () => {
     const web = fakeWeb({ "https://empty.example/": { body: "<html></html>" } });
     for (const u of ["ftp://x.io/", "javascript:alert(1)", "http://localhost/", "http://127.0.0.1/", "http://10.0.0.2/", "http://[::1]/", "https://empty.example/"]) {
