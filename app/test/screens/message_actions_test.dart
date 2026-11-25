@@ -6,6 +6,8 @@ import 'package:famchat/main.dart';
 import 'package:famchat/router.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:famchat/widgets/link_text.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,8 +56,8 @@ void main() {
     bob = await backend.addUser('Bob');
   });
 
-  Future<ScriptedHubLink> open(WidgetTester tester, {List<MessageRow> messages = const []}) async {
-    setWindow(tester, const Size(400, 800));
+  Future<ScriptedHubLink> open(WidgetTester tester, {List<MessageRow> messages = const [], Size window = const Size(400, 800)}) async {
+    setWindow(tester, window);
     final hub = await pumpChatApp(tester, alice);
     await inApp(tester, () async {
       await alice.db.upsertChat(direct(alice.userId, bob.userId));
@@ -119,6 +121,48 @@ void main() {
     expect((jsonDecode(p.body!) as Map)['replyTo'], 'm1');
     expect(find.byKey(const Key('reply-quote-m1')), findsOneWidget);
     expect(find.text('cake?'), findsNWidgets(2)); // the message and the quote in the reply
+  });
+
+  chatTestWidgets('on desktop, Reply (hover button or menu) puts the cursor in the composer', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      await open(tester, messages: [row('m1', 1, bob.userId, 'cake?')], window: const Size(1200, 800));
+      bool composerFocused() =>
+          tester.widget<EditableText>(find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(EditableText))).focusNode.hasFocus;
+      // Somewhere else has focus first: a click on the chat.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      expect(composerFocused(), isFalse);
+      // The same field throughout: one rebuilt from scratch keeps the focus but loses the keyboard.
+      final field = find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(EditableText));
+      final before = tester.state(field);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(find.text('cake?').last));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Reply'), kind: PointerDeviceKind.mouse);
+      await settle(tester);
+      expect(find.text('Replying to Bob'), findsOneWidget);
+      expect(composerFocused(), isTrue);
+      expect(tester.state(field), same(before));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.text('cake?').last, buttons: kSecondaryButton, kind: PointerDeviceKind.mouse);
+      await settle(tester);
+      await tester.tap(find.text('Reply'), kind: PointerDeviceKind.mouse);
+      await settle(tester);
+      expect(find.text('Replying to Bob'), findsOneWidget);
+      expect(composerFocused(), isTrue);
+      expect(tester.state(field), same(before));
+      // The field holds the keyboard connection: typing goes into it.
+      tester.testTextInput.enterText('y');
+      await tester.pump();
+      expect(tester.widget<EditableText>(field).controller.text, 'y');
+      await mouse.removePointer();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   chatTestWidgets('cancelling a reply sends a plain message', (tester) async {

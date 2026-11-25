@@ -1482,6 +1482,15 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     ];
 
     final changes = _changes = messageChanges(messages);
+    // The chat's photos and videos, oldest first: the viewer steps through them.
+    final media = [
+      for (final m in messages)
+        if (captionKinds.contains(m.kind) && !changes.isDeleted(m.id) && m.body != null) m,
+    ];
+    void openMedia(MessageRow m) {
+      final i = media.indexWhere((x) => x.id == m.id);
+      if (i >= 0) showMediaPager(context, media, i);
+    }
     final reactions = aggregateReactions(messages);
     String nameOf(String userId) => userId == me ? 'You' : users[userId]?.name ?? 'Someone';
     // Plays, pokes, resigns and draw offers show as lines in the timeline.
@@ -1586,7 +1595,8 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                 key: _keyFor(m.id),
                 message: m,
                 album: album,
-                onOpenAlbumItem: album == null ? null : (i) => showMediaPager(context, album, i),
+                onOpenAlbumItem: album == null ? null : (i) => openMedia(album[i]),
+                onOpenMedia: captionKinds.contains(m.kind) ? () => openMedia(m) : null,
                 shownText: changes.textOf(m),
                 edited: changes.edited.contains(m.id),
                 deleted: changes.isDeleted(m.id),
@@ -1984,6 +1994,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       ),
                     ),
                   Padding(
+                    // Keyed: banners coming and going above must not rebuild the field, which would
+                    // keep its focus but lose the keyboard (on desktop, typing went nowhere).
+                    key: const ValueKey('composer-row'),
                     padding: EdgeInsets.fromLTRB(math.max(Space.xs, side - Space.md), Space.sm, math.max(Space.sm, side - Space.xs), Space.sm),
                     child: _recording.active
                         ? RecordBar(recording: _recording, onDiscard: _recording.cancel, onSend: _finishRecording)

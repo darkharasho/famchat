@@ -185,6 +185,44 @@ void main() {
     expect(find.byKey(const Key('media-backdrop')), findsNothing);
   });
 
+  chatTestWidgets("the viewer steps through the chat's photos with arrows and arrow keys", (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      final (_, chatId) = await open(tester);
+      await bobsPhoto(tester, chatId);
+      await bobsPhoto(tester, chatId);
+      await settle(tester);
+      // The older photo is the higher one.
+      final thumbs = find.byKey(const Key('photo-thumb'));
+      final older = tester.getCenter(thumbs.first).dy < tester.getCenter(thumbs.last).dy ? thumbs.first : thumbs.last;
+      await tester.tap(older);
+      await settle(tester);
+      double page() => tester.widget<PageView>(find.byKey(const Key('media-pager'))).controller!.page!;
+      expect(page(), 0);
+      // The oldest photo: nothing before it.
+      expect(find.byKey(const Key('media-previous')), findsNothing);
+      await tester.tap(find.byKey(const Key('media-next')));
+      await settle(tester);
+      expect(page(), 1);
+      expect(find.byKey(const Key('media-next')), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await settle(tester);
+      expect(page(), 0);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settle(tester);
+      expect(page(), 1);
+      // Past the end stays put; Escape still closes.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settle(tester);
+      expect(page(), 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      expect(find.byKey(const Key('media-pager')), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   chatTestWidgets('phones have no zoom bar (they pinch)', (tester) async {
     final (_, chatId) = await open(tester);
     await bobsPhoto(tester, chatId);
