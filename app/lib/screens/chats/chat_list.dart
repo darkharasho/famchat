@@ -401,7 +401,10 @@ String preview(MessageRow? m, Map<String, UserRow> users, String? me, {List<Mess
 String messageSnippet(MessageRow m, MessageChanges changes) {
   if (changes.isDeleted(m.id)) return 'Deleted message';
   return switch (m.kind) {
-    'text' => stripMarkdown(changes.textOf(m) ?? '').replaceAll('\n', ' '),
+    'text' => switch (changes.textOf(m) ?? '') {
+        final t when isGifLink(t, changes.previewOf(m)) => mediaLabel('gif')!,
+        final t => stripMarkdown(t).replaceAll('\n', ' '),
+      },
     'poll' => switch (pollOf(m)) { final p? => '📊 ${p.question.replaceAll('\n', ' ')}', null => 'Message' },
     'file' => switch (fileOf(m)) { final f? => fileLabel(f), null => 'Message' },
     _ => switch (changes.textOf(m)) {

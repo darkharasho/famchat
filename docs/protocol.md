@@ -325,6 +325,18 @@ A text may carry a card for its first link, made by the sender:
 blob (its own media key, purpose `thumb`), uploaded before the message is sent, so receivers never
 contact the site. A preview that doesn't check out is dropped and the text shows as usual.
 
+GIF links (a link straight to an animated `.gif`/WebP, or a page such as Tenor or Giphy whose image
+is one) carry the animation itself: `"image": {…, "animated": true}`. The sender uploads the GIF as
+the server sent it (no re-encoding; at most 8 MiB), still encrypted with purpose `thumb`, but under
+upload kind `photo` (a `thumb` upload is capped at 1 MiB); `width`/`height` are the GIF's own. The
+sender only sets `animated` when the bytes really are an animated GIF or WebP; otherwise the image
+is made into a thumbnail as usual. Receivers show a text that is just that link (trimmed, ignoring
+a trailing `/`) as the GIF alone, sized like a `gif` message, with no link text and no card, and
+"GIF" in the chat list and notifications; a text with more than the link shows the text and the GIF
+under it, without the card. Clients from before this ignore `animated` (unknown fields are dropped)
+and show the usual card with the link text; the card's image is the GIF, which plays there. The
+iPhone notification extension (native) still shows the link as text.
+
 A text sent before its preview was ready (say, a link pasted and sent at once) gets it afterwards:
 the sender's app keeps the fetch going after the send for up to 15 seconds (it doesn't survive a
 restart) and, when a preview comes, checks again that the message isn't deleted and still shows
@@ -341,9 +353,12 @@ another device while the preview is on its way, a preview edit carrying the old 
 arrive after that edit, and an old client (latest edit wins) then shows the old text again. The
 15-second limit and the re-check keep that window small; current clients ignore such a stale edit.
 
-- `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?}`,
-  or 404 when there's nothing to show. The app asks while a link is being typed. YouTube links use
-  YouTube's oEmbed endpoint; other pages their Open Graph tags (Amazon: its product image).
+- `GET /preview?url=` → `{url, title, description?, siteName?, image? (base64, ≤ 2 MiB), imageType?,
+  animated?}`, or 404 when there's nothing to show. The app asks while a link is being typed. YouTube
+  links use YouTube's oEmbed endpoint; other pages their Open Graph tags (Amazon: its product image).
+  An animated GIF or WebP image (2+ frames, or a loop block; WebP's animation flag) may be up to
+  8 MiB and comes with `animated: true`. A link straight to an animated GIF/WebP previews as that
+  image, titled with its file name, `siteName` its host; a direct still image still gets a 404.
   Only public http(s) hosts (no loopback, private or bare names); answers are cached for a day.
   The server sees the URL, never the message.
 

@@ -3,9 +3,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:famchat/chat/chat_sync.dart';
+import 'package:famchat/chat/message_changes.dart';
 import 'package:famchat/chat/plaintext.dart';
 import 'package:famchat/chat/wire.dart';
 import 'package:famchat/main.dart';
+import 'package:famchat/media/animated_image.dart';
+import 'package:famchat/push/preview.dart' show rowPreviewText;
+import 'package:famchat/screens/chats/chat_list.dart' show messageSnippet;
 import 'package:famchat/router.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart' show RendererBinding;
@@ -119,6 +123,36 @@ void main() {
     await mouse.moveTo(tester.getCenter(find.byKey(Key('link-preview-${sent.id}'))));
     await tester.pump();
     expect(RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1), SystemMouseCursors.click);
+  });
+
+  chatTestWidgets('a GIF link alone shows only the GIF; with more text, the text and the GIF (no card)', (tester) async {
+    const url = 'https://tenor.com/view/cat-dance-gif-1';
+    final frames = img.Image(width: 40, height: 30)..addFrame(img.Image(width: 40, height: 30));
+    final gif = Uint8List.fromList(img.encodeGif(frames));
+    expect(animatedImageSize(gif), (40, 30));
+    backend.previews[url] = FetchedPreview(url: url, title: 'Cat Dance GIF', siteName: 'Tenor', image: gif, animated: true);
+    await open(tester);
+
+    await type(tester, url);
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    final alone = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).single;
+    final body = Plaintext.decode(utf8.encode(alone.body!)) as TextBody;
+    expect((body.preview!.image!.animated, body.preview!.image!.width), (true, 40));
+    expect(find.byKey(Key('gif-link-${alone.id}')), findsOneWidget);
+    expect(find.byKey(Key('link-preview-${alone.id}')), findsNothing);
+    expect(find.textContaining('tenor.com', findRichText: true), findsNothing, reason: 'no link text');
+    expect(messageSnippet(alone, messageChanges([alone])), 'GIF');
+    expect(await inApp(tester, () => rowPreviewText(alice.db, alone)), 'GIF');
+
+    await type(tester, 'lol $url');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    final withText = (await inApp(tester, () => alice.db.pendingOutbox(alice.deviceId))).last;
+    expect(find.byKey(Key('gif-link-${withText.id}')), findsOneWidget);
+    expect(find.byKey(Key('link-preview-${withText.id}')), findsNothing);
+    expect(find.textContaining('lol', findRichText: true), findsOneWidget);
+    expect(messageSnippet(withText, messageChanges([withText])), 'lol $url');
   });
 
   chatTestWidgets('sending right after pasting a link waits for its preview', (tester) async {

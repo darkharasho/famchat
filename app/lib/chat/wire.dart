@@ -327,12 +327,16 @@ class MissingWrap {
 
 /// The REST side of the chat protocol. Errors are `ApiException` / `NetworkException` /
 /// `SignedOutException` from `lib/api/models.dart`; malformed bodies throw [FormatException].
-/// What the server found for a link: the image as raw bytes, to send as an encrypted thumbnail.
+/// What the server found for a link: the image as raw bytes, to send as an encrypted thumbnail
+/// (or, when [animated], as it is: a GIF link).
 class FetchedPreview {
-  const FetchedPreview({required this.url, required this.title, this.description, this.siteName, this.image});
+  const FetchedPreview({required this.url, required this.title, this.description, this.siteName, this.image, this.animated = false});
   final String url, title;
   final String? description, siteName;
   final Uint8List? image;
+
+  /// [image] is an animated GIF or WebP, per the server.
+  final bool animated;
 
   factory FetchedPreview.fromJson(Map<String, Object?> j) {
     final url = j['url'], title = j['title'], image = j['image'];
@@ -351,6 +355,7 @@ class FetchedPreview {
       description: j['description'] is String ? j['description'] as String : null,
       siteName: j['siteName'] is String ? j['siteName'] as String : null,
       image: bytes,
+      animated: bytes != null && j['animated'] == true,
     );
   }
 }

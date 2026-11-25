@@ -6,13 +6,19 @@ export interface Preview {
   title: string;
   description?: string;
   siteName?: string;
-  /** The image, base64, at most MAX_IMAGE_BYTES; the app re-encodes it as an encrypted thumbnail. */
+  /**
+   * The image, base64: at most MAX_IMAGE_BYTES, which the app re-encodes as an encrypted thumbnail,
+   * or an animated GIF/WebP of at most MAX_ANIMATED_BYTES, which the app sends as it is.
+   */
   image?: string;
   imageType?: string;
+  /** The image is an animated GIF or WebP (a GIF link: Tenor, Giphy, a direct .gif). */
+  animated?: boolean;
 }
 
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_ANIMATED_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 6000;
 // Many sites (Amazon among them) answer chat-app preview bots with the page's tags and turn
 // generic bots away. Signal sends a WhatsApp-style agent for the same reason.
@@ -114,7 +120,41 @@ function clip(s: string | undefined, max: number): string | undefined {
   return [...s].length > max ? [...s].slice(0, max - 1).join("") + "…" : s;
 }
 
-async function image(fetcher: typeof fetch, src: string | undefined, base: URL): Promise<Pick<Preview, "image" | "imageType">> {
+/** Whether [bytes] (of content type [type]) is an animated GIF (2+ frames) or animated WebP. */
+export function isAnimated(bytes: Uint8Array, type: string): boolean {
+  const b = bytes;
+  if (type === "image/gif") {
+    if (b.length < 13 || b[0] !== 0x47 || b[1] !== 0x49 || b[2] !== 0x46) return false; // "GIF"
+    // A looping animation's NETSCAPE2.0 block, or a second frame's graphic control extension.
+    let controls = 0;
+    for (let i = 13; i + 3 < b.length; i++) {
+      if (b[i] !== 0x21) continue;
+      if (b[i + 1] === 0xff && b[i + 2] === 0x0b && b[i + 3] === 0x4e) return true; // "N"ETSCAPE2.0
+      if (b[i + 1] === 0xf9 && b[i + 2] === 0x04 && ++controls >= 2) return true;
+    }
+    return false;
+  }
+  if (type === "image/webp") {
+    const ascii = (at: number, s: string) => [...s].every((ch, k) => b[at + k] === ch.charCodeAt(0));
+    // RIFF....WEBPVP8X with the animation flag.
+    return b.length >= 30 && ascii(0, "RIFF") && ascii(8, "WEBPVP8X") && (b[20] & 0x02) !== 0;
+  }
+  return false;
+}
+
+function base64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+const ANIMATED_TYPES = new Set(["image/gif", "image/webp"]);
+
+async function image(
+  fetcher: typeof fetch,
+  src: string | undefined,
+  base: URL,
+): Promise<Pick<Preview, "image" | "imageType" | "animated">> {
   if (!src) return {};
   let u: URL | null;
   try {
@@ -126,11 +166,32 @@ async function image(fetcher: typeof fetch, src: string | undefined, base: URL):
   const res = await get(fetcher, u.href, "image/*");
   const type = res?.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (!res || !type?.startsWith("image/") || type === "image/svg+xml") return {};
-  const bytes = await readCapped(res, MAX_IMAGE_BYTES);
+  // GIFs (and animated WebP) may be larger: they're sent as they are, not as a thumbnail.
+  const bytes = await readCapped(res, ANIMATED_TYPES.has(type) ? MAX_ANIMATED_BYTES : MAX_IMAGE_BYTES);
   if (!bytes || bytes.length === 0) return {};
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return { image: btoa(bin), imageType: type };
+  const animated = isAnimated(bytes, type);
+  if (!animated && bytes.length > MAX_IMAGE_BYTES) return {};
+  return { image: base64(bytes), imageType: type, ...(animated ? { animated } : {}) };
+}
+
+/** A link straight to an animated GIF or WebP: the image itself, named after its file. */
+async function directGif(res: Response, url: URL, type: string): Promise<Preview | null> {
+  const bytes = await readCapped(res, MAX_ANIMATED_BYTES);
+  if (!bytes || !isAnimated(bytes, type)) return null;
+  let file = url.pathname.split("/").filter(Boolean).pop() ?? "";
+  try {
+    file = decodeURIComponent(file);
+  } catch {
+    // keep it encoded
+  }
+  return {
+    url: url.href,
+    title: clip(file || url.hostname, 200)!,
+    siteName: clip(url.hostname.replace(/^www\./, ""), 80),
+    image: base64(bytes),
+    imageType: type,
+    animated: true,
+  };
 }
 
 /** A preview of [raw], or null when it isn't a public web page with at least a title. */
@@ -151,8 +212,11 @@ export async function linkPreview(raw: string, fetcher: typeof fetch = fetch): P
     };
   }
 
-  const res = await get(fetcher, url.href, "text/html,application/xhtml+xml");
-  if (!res || !(res.headers.get("content-type") ?? "").includes("html")) return null;
+  const res = await get(fetcher, url.href, "text/html,application/xhtml+xml,image/gif;q=0.9,image/webp;q=0.9");
+  if (!res) return null;
+  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (ANIMATED_TYPES.has(type)) return directGif(res, url, type);
+  if (!type.includes("html")) return null;
   const bytes = await readCapped(res, MAX_HTML_BYTES);
   if (!bytes) return null;
   const html = new TextDecoder().decode(bytes);

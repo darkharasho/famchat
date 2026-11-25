@@ -197,6 +197,33 @@ void main() {
     expect(await bob.media.load(t.preview!.image!.ref), photoBytes(900, 4).sublist(0, 16));
   });
 
+  test('a GIF link: the animation travels unmodified (over the thumbnail cap), marked animated', () async {
+    final (alice, bob, chatId) = await pair();
+    // GIF89a 498x476, a NETSCAPE2.0 loop block, then 1.5 MiB of frames.
+    final gif = Uint8List.fromList([
+      ...ascii.encode('GIF89a'), 0xf2, 0x01, 0xdc, 0x01, 0, 0, 0,
+      0x21, 0xff, 0x0b, ...ascii.encode('NETSCAPE2.0'), 3, 1, 0, 0, 0,
+      ...List.filled(1536 * 1024, 7), 0x3b,
+    ]);
+    const url = 'https://tenor.com/view/cat-1';
+    final id = await alice.media.sendTextWithPreview(
+        chatId, url, FetchedPreview(url: url, title: 'Cat GIF', siteName: 'Tenor', image: gif, animated: true));
+    await until(() async => (await alice.row(id))?.state == 'sent', reason: 'sent after the GIF uploads');
+    await until(() async => (await bob.rows(chatId)).isNotEmpty);
+    final t = Plaintext.decode(utf8.encode((await bob.row(id))!.body!)) as TextBody;
+    final image = t.preview!.image!;
+    expect((image.animated, image.width, image.height), (true, 498, 476));
+    expect(await bob.media.load(image.ref), gif);
+
+    // Marked animated by the server but not a GIF: an ordinary thumbnail.
+    final id2 = await alice.media.sendTextWithPreview(
+        chatId, url, FetchedPreview(url: url, title: 'Cat GIF', image: photoBytes(900, 4), animated: true));
+    await until(() async => (await bob.rows(chatId)).length == 2);
+    final t2 = Plaintext.decode(utf8.encode((await bob.row(id2))!.body!)) as TextBody;
+    expect(t2.preview!.image!.animated, isFalse);
+    expect(await bob.media.load(t2.preview!.image!.ref), photoBytes(900, 4).sublist(0, 16));
+  });
+
   test('a preview whose image does not decode still sends, without the image', () async {
     final (alice, bob, chatId) = await pair();
     final id = await alice.media.sendTextWithPreview(

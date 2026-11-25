@@ -6,6 +6,7 @@ import 'package:characters/characters.dart';
 
 import '../chat/db/chat_db.dart';
 import '../chat/markdown.dart';
+import '../chat/message_changes.dart' show isGifLink;
 import '../chat/plaintext.dart';
 import '../crypto/encoding.dart';
 import '../crypto/envelope.dart';
@@ -98,6 +99,7 @@ Future<String?> rowPreviewText(ChatDb db, MessageRow row) async {
 
 Future<String?> _previewOf(ChatDb db, Plaintext p, MessageRow row) async {
   if (p is TextBody) {
+    if (isGifLink(p.text, p.preview)) return mediaLabel('gif');
     final text = stripMarkdown(p.text);
     final chars = text.characters;
     return chars.length <= maxPreviewChars ? text : '${chars.take(maxPreviewChars)}…';

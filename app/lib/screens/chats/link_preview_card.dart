@@ -73,6 +73,49 @@ class LinkPreviewCard extends ConsumerWidget {
   }
 }
 
+/// A GIF link's animation on its own, sized like a `gif` message (GifView); tapping opens the link.
+/// Shown in place of the text when the message is just the link, else under the text, as Discord does.
+class PreviewGif extends ConsumerWidget {
+  const PreviewGif({super.key, required this.preview, this.maxWidth = 260});
+
+  final LinkPreview preview;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = Theme.of(context).colorScheme;
+    final image = preview.image!;
+    final bytes = ref.watch(mediaBytesProvider(image.ref)).value;
+    final uri = Uri.tryParse(preview.url);
+    final w = image.width.toDouble(), h = image.height.toDouble();
+    final width = w.clamp(80.0, maxWidth);
+    final height = (width * h / w).clamp(60.0, 360.0);
+    return Semantics(
+      image: true,
+      link: true,
+      label: 'GIF: ${preview.title}',
+      excludeSemantics: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: uri == null ? null : () => openLink(uri),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(Radii.md),
+            child: Container(
+              width: width,
+              height: height,
+              color: s.surfaceContainerHighest,
+              child: bytes == null
+                  ? null
+                  : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true, errorBuilder: (_, _, _) => const SizedBox()),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Above the composer: the preview the next send will carry, with a button to leave it off.
 class ComposerPreview extends StatelessWidget {
   const ComposerPreview({super.key, required this.preview, required this.onRemove});

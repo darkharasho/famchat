@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../chat/db/chat_db.dart';
 import '../../chat/emoji/shortcodes.dart';
 import '../../chat/files.dart' show fileOf;
+import '../../chat/message_changes.dart' show isGifLink;
 import '../../chat/plaintext.dart';
 import '../../chat/polls.dart' show pollOf;
 import '../../gifs/gif_picker.dart';
@@ -461,7 +462,10 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.deleted || (m.kind != 'text' && photo == null && voice == null && gif == null && video == null && file == null && custom == null);
     // Edge-to-edge media: little padding around it.
     final album = widget.deleted ? null : widget.album;
-    final visual = photo != null || gif != null || video != null || album != null;
+    // A GIF link (Tenor, Giphy, a .gif): its animation. Alone, like a GIF, when the text is just the link.
+    final gifLink = !special && m.kind == 'text' && widget.linkPreview?.image?.animated == true ? widget.linkPreview : null;
+    final gifOnly = gifLink != null && custom == null && isGifLink(_text, gifLink);
+    final visual = photo != null || gif != null || video != null || album != null || gifOnly;
     final mine = widget.mine;
     final bg = mine ? t.mineBubble : t.theirsBubble;
     final fg = mine ? t.onMineBubble : t.onTheirsBubble;
@@ -587,6 +591,11 @@ class _MessageBubbleState extends State<MessageBubble> {
         GifView(body: gif),
         if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
       ]);
+    } else if (gifOnly) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        PreviewGif(key: Key('gif-link-${m.id}'), preview: gifLink),
+        if (showEdited) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 6, 0), child: edited),
+      ]);
     } else if (file != null) {
       content = Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
         FileBubble(body: file, messageId: m.id, mine: mine),
@@ -633,7 +642,11 @@ class _MessageBubbleState extends State<MessageBubble> {
         content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           content,
           const SizedBox(height: 6),
-          LinkPreviewCard(key: Key('link-preview-${m.id}'), preview: preview, fg: fg, meta: meta),
+          // A GIF link with more text: the animation under the text, without the card.
+          if (gifLink != null)
+            PreviewGif(key: Key('gif-link-${m.id}'), preview: gifLink)
+          else
+            LinkPreviewCard(key: Key('link-preview-${m.id}'), preview: preview, fg: fg, meta: meta),
         ]);
       }
     }

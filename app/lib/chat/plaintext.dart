@@ -206,6 +206,7 @@ class LinkPreview {
           sha256: _bytes32(i, 'sha256'),
           width: _positive(i, 'width', 100000),
           height: _positive(i, 'height', 100000),
+          animated: i['animated'] == true,
         );
       } on FormatException {
         image = null;
@@ -215,15 +216,24 @@ class LinkPreview {
   }
 }
 
-/// A preview's image: one encrypted thumbnail blob (purpose thumb) under its own media key.
+/// A preview's image: one encrypted blob (purpose thumb) under its own media key. Usually a JPEG
+/// thumbnail; when [animated], the link's GIF (or animated WebP) as the site served it.
 class PreviewImage {
-  const PreviewImage({required this.mediaKey, required this.key, required this.sha256, required this.width, required this.height});
+  const PreviewImage(
+      {required this.mediaKey, required this.key, required this.sha256, required this.width, required this.height, this.animated = false});
   final String mediaKey;
   final Uint8List key, sha256;
   final int width, height;
+  final bool animated;
 
-  Map<String, Object?> toJson() =>
-      {'mediaKey': mediaKey, 'key': b64url(key), 'sha256': b64url(sha256), 'width': width, 'height': height};
+  Map<String, Object?> toJson() => {
+        'mediaKey': mediaKey,
+        'key': b64url(key),
+        'sha256': b64url(sha256),
+        'width': width,
+        'height': height,
+        if (animated) 'animated': true,
+      };
 }
 
 /// New text for the sender's own text message [target]; the latest edit wins.

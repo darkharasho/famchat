@@ -13,6 +13,7 @@ import '../chat/ulid.dart';
 import '../chat/wire.dart';
 import '../crypto/encoding.dart';
 import '../crypto/media.dart';
+import 'animated_image.dart';
 import 'media_api.dart';
 import 'media_db.dart';
 import 'photo.dart';
@@ -70,6 +71,9 @@ extension FileRef on FileBody {
 
 /// Largest file that can be sent (its ciphertext fits the server's `file` limit).
 final int maxFileBytes = mediaKindLimits['file']! - mediaOverhead;
+
+/// Largest animated link preview image (docs/protocol.md "Link previews"; the server sends ≤ 8 MiB).
+const int maxAnimatedPreviewBytes = 8 * 1024 * 1024;
 
 /// The file is over [maxFileBytes].
 class FileTooLargeException implements Exception {
@@ -360,7 +364,15 @@ class MediaService {
   /// staged for upload with [messageId].
   Future<LinkPreview> _linkPreview(String chatId, String messageId, FetchedPreview fetched) async {
     PreviewImage? image;
-    if (fetched.image case final bytes?) {
+    // A GIF link: the animation goes as it is (still purpose thumb, so older clients open it and
+    // show it in the card), uploaded as a `photo` blob for the room. Anything else is re-encoded.
+    final gifSize = fetched.animated && fetched.image != null ? animatedImageSize(fetched.image!) : null;
+    if (gifSize != null && fetched.image!.length <= maxAnimatedPreviewBytes) {
+      final key = newMediaKey();
+      final blob = await stage(
+          chatId: chatId, messageId: messageId, kind: 'photo', purpose: MediaPurpose.thumb, key: key, plaintext: fetched.image!, position: 0);
+      image = PreviewImage(mediaKey: blob.id, key: key, sha256: blob.sha256, width: gifSize.$1, height: gifSize.$2, animated: true);
+    } else if (fetched.image case final bytes?) {
       try {
         final p = await processor.process(bytes);
         final (w, h) = fitWithin(p.width, p.height, maxThumbSide);
