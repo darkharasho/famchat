@@ -14,7 +14,7 @@
 
 - One Worker serves the web app at `/` and the API at `/api/*` on `famchat.dev`.
 - App id `dev.famchat.app` on every platform.
-- iOS: TestFlight, App Store Connect API key (as in duel-binder). Android: Play internal testing, new FamChat upload keystore saved in 1Password. macOS: notarized DMG, Developer ID. Windows: installer, Azure Artifact Signing (`darkharasho-signing` / `public-trust`, publisher `Michael Stephens`), signature must verify `Valid`. Linux: AppImage.
+- iOS: TestFlight, App Store Connect API key (as in duel-binder). Android: Play internal testing, new FamChat upload keystore saved in 1Password. macOS: notarized DMG, Developer ID. Windows: installer, Azure Artifact Signing (`darkharasho-signing` / `public-trust`), signature must verify `Valid`. Linux: AppImage.
 - Never print secrets; never put the owner's email in files, commits or requests.
 - vitest `maxWorkers` ≤ 2; no local Flutter desktop/mobile builds.
 
