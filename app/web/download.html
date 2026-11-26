@@ -42,8 +42,8 @@
     <div class="card"><h2>Windows</h2><p id="windows"><a href="https://github.com/darkharasho/famchat/releases/latest">Download</a></p></div>
     <div class="card"><h2>Mac</h2><p id="macos"><a href="https://github.com/darkharasho/famchat/releases/latest">Download</a></p></div>
     <div class="card"><h2>Linux</h2><p id="linux"><a href="https://github.com/darkharasho/famchat/releases/latest">Download AppImage</a></p></div>
-    <div class="card"><h2>iPhone &amp; iPad</h2><p>Ask a family admin to add you to the TestFlight beta.</p></div>
-    <div class="card"><h2>Android</h2><p>Ask a family admin to add you to the Google Play test.</p></div>
+    <div class="card"><h2>iPhone &amp; iPad</h2><p><a href="https://apps.apple.com/app/id6835534412">Get it on the App Store</a></p></div>
+    <div class="card"><h2>Android</h2><p><a href="https://play.google.com/apps/internaltest/4701677170171154827">Get it on Google Play</a><br>Ask a family admin to add you to the tester list first.</p></div>
     <div class="card"><h2>Web</h2><p><a href="/">Open famchat.dev</a></p></div>
   </div>
 
@@ -61,6 +61,16 @@
   };
   const ua = navigator.userAgent;
   const mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));
+  const stores = {
+    ios: { href: 'https://apps.apple.com/app/id6835534412', label: 'Get it on the App Store' },
+    android: { href: 'https://play.google.com/apps/internaltest/4701677170171154827', label: 'Get it on Google Play' },
+  };
+  const store = /Android/i.test(ua) ? stores.android : mobile ? stores.ios : null;
+  if (store) {
+    const primary = document.getElementById('primary');
+    primary.href = store.href;
+    primary.textContent = store.label;
+  }
   const mine = mobile ? null : /Windows/i.test(ua) ? 'windows' : /Mac/i.test(ua) ? 'macos' : /Linux|X11/i.test(ua) ? 'linux' : null;
   let release;
   try {
