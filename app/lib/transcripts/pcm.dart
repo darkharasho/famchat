@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:voice_pcm/voice_pcm.dart';
 
-import 'pcm_desktop.dart';
+import 'pcm_desktop_stub.dart' if (dart.library.io) 'pcm_desktop.dart';
 
 /// Mono samples in [-1, 1] at [sampleRate] Hz.
 class Pcm {
